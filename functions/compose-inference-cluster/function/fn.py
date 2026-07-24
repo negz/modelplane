@@ -455,6 +455,11 @@ class Composer:
         spec = ssv1alpha1.Spec(secrets=backend_secrets)
         if nvidia_driver_root is not None:
             spec.nvidiaDriverRoot = nvidia_driver_root
+        # Thread the cluster's chosen serving stacks straight through; both
+        # XRDs share the same [Standard, Dynamo] vocabulary and [Standard]
+        # default, so no translation is needed.
+        if self.xr.spec.stacks:
+            spec.stacks = self.xr.spec.stacks
         resource.update(
             self.rsp.desired.resources[BACKEND_RESOURCE_KEY],
             ssv1alpha1.ServingStack(

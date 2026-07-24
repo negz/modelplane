@@ -14,14 +14,29 @@
 
 """Install the serving substrate on a remote cluster.
 
-This function composes the serving substrate (the cluster-side CRDs,
-controllers, and gateway) that the native and llm-d model-serving backends
-depend on: cert-manager, Envoy Gateway, the Envoy AI Gateway and Gateway API
-Inference Extension (which together route HTTPRoute -> InferencePool backendRefs
-for disaggregated serving), Prometheus, LeaderWorkerSet, and an inference
-Gateway. Resources are composed as Helm releases and
-provider-kubernetes Objects, all targeting the remote cluster via
-ProviderConfigs.
+This function composes the serving substrate a cluster's spec.stacks select.
+Shared substrate - cert-manager, Envoy Gateway, Prometheus, Node Feature
+Discovery, the NVIDIA DRA driver, and the inference Gateway - installs once
+regardless of which stacks are listed: every stack's HTTPRoute attaches to the
+same Gateway, and GPUs bind via the same DRA driver whichever stack serves an
+engine. It is NOT duplicated per stack even on a cluster running both, since
+these are cluster-scoped singletons (their CRDs can't be installed twice).
+
+Two per-stack layers install on top of that shared substrate, gated on
+spec.stacks:
+
+  Standard - LeaderWorkerSet, the Envoy AI Gateway, and the Gateway API
+    Inference Extension CRDs, which together route HTTPRoute -> InferencePool
+    backendRefs. Depended on by the native and llm-d model-serving backends.
+  Dynamo   - the Dynamo platform (operator, NATS, Grove, kai-scheduler).
+    Depended on by the dynamo model-serving backend, which composes a
+    DynamoGraphDeployment the operator then owns.
+
+A cluster running only Dynamo installs no LeaderWorkerSet, AI Gateway, or GAIE
+CRDs - only the shared substrate its HTTPRoute needs plus the Dynamo platform.
+
+Resources are composed as Helm releases and provider-kubernetes Objects, all
+targeting the remote cluster via ProviderConfigs.
 
 Usage resources protect ProviderConfigs from premature deletion during
 teardown, ensuring Helm releases can uninstall before losing connectivity.
@@ -106,6 +121,18 @@ _GAIE_CRDS = [
     for doc in yaml.safe_load_all((_HERE / "gaie_crds.yaml").read_text())
     if doc and doc.get("kind") == "CustomResourceDefinition"
 ]
+
+# Serving stacks, mirroring the InferenceCluster/ServingStack XRDs' shared
+# vocabulary and [Standard] default.
+_STACK_STANDARD = "Standard"
+_STACK_DYNAMO = "Dynamo"
+
+# Dynamo platform constants. The umbrella chart bundles the operator, NATS,
+# Grove, kai-scheduler, and etcd as subcharts; compose_dynamo_platform disables
+# etcd explicitly (see there for why).
+_DYNAMO_NAMESPACE = "dynamo-system"
+_DYNAMO_REPO = "https://helm.ngc.nvidia.com/nvidia/ai-dynamo"
+_DYNAMO_CHART = "dynamo-platform"
 
 
 def _name(meta: metav1.ObjectMeta | None) -> str:
@@ -284,6 +311,16 @@ def _pc_name(xr: v1alpha1.ServingStack) -> str:
     return resource.child_name(_name(xr.metadata), "cluster")
 
 
+def _stacks(xr: v1alpha1.ServingStack) -> list[str]:
+    """The stacks to install, defaulting to [Standard].
+
+    The XRD defaults spec.stacks server-side, so this fallback only matters for
+    an XR built directly (e.g. in a test) without going through API server
+    defaulting.
+    """
+    return list(xr.spec.stacks) if xr.spec.stacks else [_STACK_STANDARD]
+
+
 class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
     """A FunctionRunner handles gRPC RunFunctionRequests."""
 
@@ -322,6 +359,7 @@ class Composer:
         self.compose_node_feature_discovery()
         self.compose_dra_driver()
         self.compose_gateway()
+        self.compose_dynamo_platform()
         self.write_status()
         self.mark_readiness()
 
@@ -495,17 +533,60 @@ class Composer:
     def compose_envoy_gateway(self) -> None:
         """Compose Envoy Gateway. Gated on ProviderConfigs being observed.
 
-        The extensionManager block points Envoy Gateway at the Envoy AI Gateway
-        controller's ext-proc server and declares InferencePool a backend
-        resource, so HTTPRoute -> InferencePool backendRefs (disaggregated
-        serving) resolve. enableBackend turns on the Backend API the AI Gateway
-        relies on.
+        Shared substrate: every stack's HTTPRoute attaches to this Gateway, so
+        it installs regardless of which stacks are selected. Only the Standard
+        stack needs its extensionManager wired to the Envoy AI Gateway
+        controller - the InferencePool backend resolution that
+        HTTPRoute -> InferencePool routing (native/llm-d, disaggregated
+        serving) depends on. A Dynamo-only cluster's HTTPRoute targets a plain
+        Service (the stack's own frontend), so it gets a plain Envoy Gateway
+        with no AI Gateway wiring.
         """
         pc_observed = self.provider_configs_observed()
         if not (pc_observed or "envoy-gateway" in self.req.observed.resources):
             return
 
         v = self.xr.spec.versions or v1alpha1.Versions()
+        values = None
+        if _STACK_STANDARD in _stacks(self.xr):
+            # enableBackend turns on the Backend API the AI Gateway relies on.
+            # The extensionManager block points Envoy Gateway at the AI
+            # Gateway controller's ext-proc server and declares InferencePool
+            # a backend resource, so HTTPRoute -> InferencePool backendRefs
+            # resolve.
+            values = {
+                "config": {
+                    "envoyGateway": {
+                        "extensionApis": {"enableBackend": True},
+                        "extensionManager": {
+                            "hooks": {
+                                "xdsTranslator": {
+                                    "translation": {
+                                        "listener": {"includeAll": True},
+                                        "route": {"includeAll": True},
+                                        "cluster": {"includeAll": True},
+                                        "secret": {"includeAll": True},
+                                    },
+                                    "post": ["Translation", "Cluster", "Route"],
+                                },
+                            },
+                            "service": {
+                                "fqdn": {
+                                    "hostname": _AI_GATEWAY_CONTROLLER_FQDN,
+                                    "port": _AI_GATEWAY_CONTROLLER_PORT,
+                                },
+                            },
+                            "backendResources": [
+                                {
+                                    "group": "inference.networking.k8s.io",
+                                    "kind": "InferencePool",
+                                    "version": "v1",
+                                },
+                            ],
+                        },
+                    },
+                },
+            }
         resource.update(
             self.rsp.desired.resources["envoy-gateway"],
             _helm_release(
@@ -515,49 +596,19 @@ class Composer:
                 namespace="envoy-gateway-system",
                 provider_config=_pc_name(self.xr),
                 labels={_LABEL_RESOURCE: "envoy-gateway"},
-                values={
-                    "config": {
-                        "envoyGateway": {
-                            "extensionApis": {"enableBackend": True},
-                            "extensionManager": {
-                                "hooks": {
-                                    "xdsTranslator": {
-                                        "translation": {
-                                            "listener": {"includeAll": True},
-                                            "route": {"includeAll": True},
-                                            "cluster": {"includeAll": True},
-                                            "secret": {"includeAll": True},
-                                        },
-                                        "post": ["Translation", "Cluster", "Route"],
-                                    },
-                                },
-                                "service": {
-                                    "fqdn": {
-                                        "hostname": _AI_GATEWAY_CONTROLLER_FQDN,
-                                        "port": _AI_GATEWAY_CONTROLLER_PORT,
-                                    },
-                                },
-                                "backendResources": [
-                                    {
-                                        "group": "inference.networking.k8s.io",
-                                        "kind": "InferencePool",
-                                        "version": "v1",
-                                    },
-                                ],
-                            },
-                        },
-                    },
-                },
+                values=values,
             ),
         )
 
     def compose_ai_gateway(self) -> None:
-        """Compose the Envoy AI Gateway CRDs and controller. Gated on the same
-        ProviderConfigs as Envoy Gateway.
+        """Compose the Envoy AI Gateway CRDs and controller.
 
-        The controller runs the ext-proc extension server that Envoy Gateway's
-        extensionManager delegates InferencePool backend resolution to.
+        Standard-stack only: the controller runs the ext-proc extension server
+        that Envoy Gateway's extensionManager delegates InferencePool backend
+        resolution to, which a Dynamo-only cluster's HTTPRoute doesn't use.
         """
+        if _STACK_STANDARD not in _stacks(self.xr):
+            return
         pc_observed = self.provider_configs_observed()
         if not (pc_observed or "ai-gateway-crds" in self.req.observed.resources):
             return
@@ -585,9 +636,13 @@ class Composer:
 
     def compose_gaie_crds(self) -> None:
         """Compose the Gateway API Inference Extension (GAIE) CRDs as
-        provider-kubernetes Objects on the remote cluster. Gated on the same
-        ProviderConfigs as Envoy Gateway.
+        provider-kubernetes Objects on the remote cluster.
+
+        Standard-stack only, same reason as compose_ai_gateway: the InferencePool
+        CRD these provide is Standard's routing target, not Dynamo's.
         """
+        if _STACK_STANDARD not in _stacks(self.xr):
+            return
         pc_observed = self.provider_configs_observed()
         for doc in _GAIE_CRDS:
             key = _gaie_crd_key(doc)
@@ -614,7 +669,14 @@ class Composer:
         )
 
     def compose_leader_worker_set(self) -> None:
-        """Compose LeaderWorkerSet. Gated on ProviderConfigs being observed."""
+        """Compose LeaderWorkerSet.
+
+        Standard-stack only: it's the multi-node gang primitive the llm-d
+        backend composes a Leader/Worker engine into. A Delegated engine's
+        gang is the Dynamo operator's to orchestrate instead.
+        """
+        if _STACK_STANDARD not in _stacks(self.xr):
+            return
         pc_observed = self.provider_configs_observed()
         if not (pc_observed or "leader-worker-set" in self.req.observed.resources):
             return
@@ -866,6 +928,42 @@ class Composer:
                 ),
             )
 
+    def compose_dynamo_platform(self) -> None:
+        """Compose the Dynamo platform: operator, NATS, Grove, kai-scheduler.
+
+        Dynamo-stack only. Grove (PodCliqueSet/PodCliqueScalingGroup gang
+        orchestration) and kai-scheduler (gang scheduling) are needed for
+        Dynamo's multinode and disaggregated components, so both are enabled.
+        etcd is explicitly disabled rather than left to the chart's own
+        default: the operator's discovery backend defaults to "kubernetes"
+        (DynamoWorkerMetadata CRs + EndpointSlices), which needs no external
+        store, so etcd would only add an unused moving part.
+        """
+        if _STACK_DYNAMO not in _stacks(self.xr):
+            return
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "dynamo-platform" in self.req.observed.resources):
+            return
+
+        v = self.xr.spec.versions or v1alpha1.Versions()
+        resource.update(
+            self.rsp.desired.resources["dynamo-platform"],
+            _helm_release(
+                chart=_DYNAMO_CHART,
+                repo=_DYNAMO_REPO,
+                version=v.dynamoPlatform,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
+                namespace=_DYNAMO_NAMESPACE,
+                provider_config=_pc_name(self.xr),
+                values={
+                    "global": {
+                        "grove": {"install": True},
+                        "kai-scheduler": {"install": True},
+                        "etcd": {"install": False},
+                    },
+                },
+            ),
+        )
+
     def write_status(self) -> None:
         """Extract the gateway address from the observed Gateway Object and
         write it to the XR's status."""
@@ -916,6 +1014,7 @@ class Composer:
             "gateway-proxy",
             "gateway-class",
             "gateway",
+            "dynamo-platform",
         ]
         for r in condition_ready:
             if (

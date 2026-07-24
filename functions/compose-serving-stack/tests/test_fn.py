@@ -15,6 +15,7 @@
 """Tests for the compose-serving-stack function."""
 
 import unittest
+from typing import Literal
 
 from crossplane.function import logging, resource
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -581,15 +582,64 @@ _PROMETHEUS = {
 }
 
 
+# envoy-gateway with no values at all: the Dynamo stack doesn't wire the
+# extensionManager hooks to the Envoy AI Gateway controller, since a delegated
+# replica's HTTPRoute targets a plain Service, not an InferencePool.
+_ENVOY_GATEWAY_NO_AI_GATEWAY = {k: v for k, v in _ENVOY_GATEWAY.items() if k != "spec"} | {
+    "spec": {k: v for k, v in _ENVOY_GATEWAY["spec"].items() if k != "forProvider"}
+    | {
+        "forProvider": {k: v for k, v in _ENVOY_GATEWAY["spec"]["forProvider"].items() if k != "values"},
+    },
+}
+
+_DYNAMO_PLATFORM = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-dynamo-platform"}},
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "dynamo-platform",
+                "repository": "https://helm.ngc.nvidia.com/nvidia/ai-dynamo",
+                "version": "1.2.1",
+            },
+            "namespace": "dynamo-system",
+            "values": {
+                "global": {
+                    "grove": {"install": True},
+                    "kai-scheduler": {"install": True},
+                    "etcd": {"install": False},
+                },
+            },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+
 def _base_request(
     nvidia_driver_root: str = "/home/kubernetes/bin/nvidia",
     name: str = "test-backend",
+    stacks: list[Literal["Standard", "Dynamo"]] | None = None,
 ) -> fnv1.RunFunctionRequest:
     """Build the base RunFunctionRequest used by all test cases.
 
     Defaults to the GKE driver root, which drives the DRA driver's
-    nvidiaDriverRoot override and the critical-pods quota.
+    nvidiaDriverRoot override and the critical-pods quota. stacks defaults to
+    the XRD's own default ([Standard]) when omitted.
     """
+    spec = v1alpha1.Spec(
+        secrets=[
+            v1alpha1.Secret(type="Kubeconfig", name="kube-secret", key="kubeconfig"),
+            v1alpha1.Secret(type="GoogleApplicationCredentials", name="sa-secret", key="private_key"),
+        ],
+        nvidiaDriverRoot=nvidia_driver_root,
+    )
+    if stacks is not None:
+        spec.stacks = stacks
     return fnv1.RunFunctionRequest(
         observed=fnv1.State(
             composite=fnv1.Resource(
@@ -599,15 +649,7 @@ def _base_request(
                             name=name,
                             namespace="test-ns",
                         ),
-                        spec=v1alpha1.Spec(
-                            secrets=[
-                                v1alpha1.Secret(type="Kubeconfig", name="kube-secret", key="kubeconfig"),
-                                v1alpha1.Secret(
-                                    type="GoogleApplicationCredentials", name="sa-secret", key="private_key"
-                                ),
-                            ],
-                            nvidiaDriverRoot=nvidia_driver_root,
-                        ),
+                        spec=spec,
                     ).model_dump(exclude_none=True, mode="json")
                 ),
             ),
@@ -1058,6 +1100,96 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "prometheus": fnv1.Resource(
                         resource=resource.dict_to_struct(_PROMETHEUS),
+                    ),
+                    "provider-config-helm": fnv1.Resource(
+                        resource=resource.dict_to_struct(_PROVIDER_CONFIG_HELM),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "provider-config-kubernetes": fnv1.Resource(
+                        resource=resource.dict_to_struct(_PROVIDER_CONFIG_KUBERNETES),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "usage-envoy-gw-by-gateway-class": fnv1.Resource(
+                        resource=resource.dict_to_struct(_USAGE_ENVOY_GW_BY_GATEWAY_CLASS),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "usage-gateway-class-by-gateway": fnv1.Resource(
+                        resource=resource.dict_to_struct(_USAGE_GATEWAY_CLASS_BY_GATEWAY),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                },
+            ),
+            context=structpb.Struct(),
+        )
+
+        got = await self.runner.RunFunction(req, None)
+        self.assertEqual(
+            json_format.MessageToDict(want),
+            json_format.MessageToDict(got),
+            "-want, +got",
+        )
+
+    async def test_dynamo_only_stack(self) -> None:
+        """spec.stacks: [Dynamo] installs the Dynamo platform and the shared
+        substrate, but none of the Standard-only serving software
+        (LeaderWorkerSet, the Envoy AI Gateway, GAIE CRDs) - and Envoy Gateway
+        itself gets no InferencePool backend-resolution wiring, since a
+        Dynamo-only cluster's HTTPRoute never targets one."""
+        req = _base_request(stacks=["Dynamo"])
+        req.observed.resources["provider-config-helm"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "helm.m.crossplane.io/v1beta1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+        req.observed.resources["provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "kubernetes.m.crossplane.io/v1alpha1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+
+        want = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct({"status": {}}),
+                ),
+                resources={
+                    "cert-manager": fnv1.Resource(
+                        resource=resource.dict_to_struct(_CERT_MANAGER),
+                    ),
+                    "envoy-gateway": fnv1.Resource(
+                        resource=resource.dict_to_struct(_ENVOY_GATEWAY_NO_AI_GATEWAY),
+                    ),
+                    "gateway": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY),
+                    ),
+                    "gateway-namespace": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY_NAMESPACE),
+                    ),
+                    "gateway-proxy": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY_PROXY),
+                    ),
+                    "gateway-class": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY_CLASS),
+                    ),
+                    "node-feature-discovery": fnv1.Resource(
+                        resource=resource.dict_to_struct(_NODE_FEATURE_DISCOVERY),
+                    ),
+                    "dra-driver": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DRA_DRIVER),
+                    ),
+                    "dra-driver-critical-pods-quota": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DRA_DRIVER_QUOTA),
+                    ),
+                    "prometheus": fnv1.Resource(
+                        resource=resource.dict_to_struct(_PROMETHEUS),
+                    ),
+                    "dynamo-platform": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DYNAMO_PLATFORM),
                     ),
                     "provider-config-helm": fnv1.Resource(
                         resource=resource.dict_to_struct(_PROVIDER_CONFIG_HELM),

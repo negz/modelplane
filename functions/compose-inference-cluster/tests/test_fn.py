@@ -338,6 +338,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "key": "kubeconfig",
                                         },
                                     ],
+                                    "stacks": ["Standard"],
                                 },
                             }
                         ),
@@ -669,6 +670,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "key": "kubeconfig",
                                         },
                                     ],
+                                    "stacks": ["Standard"],
                                 },
                             }
                         ),
@@ -1301,6 +1303,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         },
                                     ],
                                     "nvidiaDriverRoot": "/home/kubernetes/bin/nvidia",
+                                    "stacks": ["Standard"],
                                 },
                             }
                         ),
@@ -1445,6 +1448,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "key": "kubeconfig",
                                 },
                             ],
+                            "stacks": ["Standard"],
                         },
                     }
                 ),
@@ -1768,6 +1772,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "namespace": "crossplane-system",
                                 },
                             ],
+                            "stacks": ["Standard"],
                         },
                     }
                 ),
@@ -2068,6 +2073,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "key": "kubeconfig",
                                 },
                             ],
+                            "stacks": ["Standard"],
                         },
                     }
                 ),
