@@ -14,7 +14,7 @@
 
 """Routing: front a replica's engine workloads with a serving surface.
 
-The workload backends (native, llm-d, dynamo) compose engines only; this layer
+The workload backends (native, llm-d) compose engines only; this layer
 decorates them with the routing the replica's serving.mode selects. apply picks
 the strategy:
 
@@ -26,6 +26,11 @@ the strategy:
 - PrefillDecode (disaggregated) role-labels the two phase engines, injects the
   pd-sidecar on decode, and fronts both with a GAIE InferencePool + endpoint
   picker, routed to in place of a Service.
+
+A delegated replica (dynamo.py's DynamoBackend) skips apply entirely:
+apply_delegated fronts its DynamoGraphDeployment with a plain HTTPRoute
+pointed at the stack's own frontend Service, since a delegated stack runs its
+own router - no InferencePool or endpoint picker.
 
 The backends build no routing of their own, so a strategy only adds resources
 (and, for disaggregated, decorates the decode pod) - nothing is removed.
@@ -254,6 +259,26 @@ def apply(
     return _unified(composed, replica, provider_config)
 
 
+def apply_delegated(
+    composed: dict[str, k8sobjv1alpha1.Object],
+    replica: v1alpha1.ModelReplica,
+    provider_config: str,
+) -> dict[str, k8sobjv1alpha1.Object]:
+    """Front a delegated replica's DynamoGraphDeployment with an HTTPRoute.
+
+    No InferencePool or endpoint picker: Dynamo's own frontend is the
+    KV-aware router, so the route targets its frontend Service directly. The
+    Dynamo operator names that Service "{dgd-name}-frontend" and serves it on
+    ENGINE_PORT (8000); the DGD is named after the replica (dynamo.py), so the
+    two line up.
+    """
+    name = _name(replica.metadata)
+    out = dict(composed)
+    backend_refs = [{"kind": "Service", "name": f"{name}-frontend", "port": base.ENGINE_PORT}]
+    out[base.ROUTE_KEY] = base.wrap_object(provider_config, _route_manifest(replica, name, backend_refs))
+    return out
+
+
 def _unified(
     composed: dict[str, k8sobjv1alpha1.Object],
     replica: v1alpha1.ModelReplica,
@@ -447,7 +472,14 @@ def _inference_pool(name: str, selector: dict[str, str]) -> dict:
     }
 
 
-def _http_route(replica: v1alpha1.ModelReplica, name: str) -> dict:
+def _route_manifest(replica: v1alpha1.ModelReplica, name: str, backend_refs: list[dict]) -> dict:
+    """The HTTPRoute shape shared by every routing strategy.
+
+    Only backendRefs differs: the Standard stack's InferencePool (_http_route)
+    or a delegated stack's own frontend Service (apply_delegated). Everything
+    else - the parentRef, the per-replica path match, and the URLRewrite that
+    strips it before the request reaches the backend - is identical.
+    """
     return {
         "apiVersion": "gateway.networking.k8s.io/v1",
         "kind": "HTTPRoute",
@@ -464,13 +496,17 @@ def _http_route(replica: v1alpha1.ModelReplica, name: str) -> dict:
                             "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/"}},
                         }
                     ],
-                    "backendRefs": [
-                        {"group": "inference.networking.k8s.io", "kind": "InferencePool", "name": f"{name}-pool"}
-                    ],
+                    "backendRefs": backend_refs,
                 }
             ],
         },
     }
+
+
+def _http_route(replica: v1alpha1.ModelReplica, name: str) -> dict:
+    return _route_manifest(
+        replica, name, [{"group": "inference.networking.k8s.io", "kind": "InferencePool", "name": f"{name}-pool"}]
+    )
 
 
 def _epp_objects(name: str, provider_config: str, config_yaml: str) -> dict[str, k8sobjv1alpha1.Object]:

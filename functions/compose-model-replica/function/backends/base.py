@@ -53,15 +53,19 @@ class Backend(Protocol):
     ) -> dict[str, k8sobjv1alpha1.Object]: ...
 
 
-# Backend identifiers.
+# Backend identifiers. A Delegated engine has no entry here: it doesn't fit
+# the per-engine Backend protocol below (one DynamoGraphDeployment spans every
+# engine of a delegated replica, not one workload per engine), so fn.py
+# special-cases it before the per-engine backend loop rather than dispatching
+# through this registry. See function/backends/dynamo.py.
 NATIVE = "native"
 LLMD = "llmd"
-DYNAMO = "dynamo"
 
 # Member roles.
 ROLE_STANDALONE = "Standalone"
 ROLE_LEADER = "Leader"
 ROLE_WORKER = "Worker"
+ROLE_DELEGATED = "Delegated"
 
 # Mount path the cache PVC is exposed at inside every engine pod. Intrinsic
 # to the cache contract; the deployment points the engine here.
@@ -174,6 +178,11 @@ ROUTE_KEY = "model-route"
 _WORKLOAD_KEY = "model-serving"
 _CLAIM_KEY = "resource-claim"
 
+# Response key for a delegated replica's single DynamoGraphDeployment, which
+# spans every engine of the replica - unlike the per-engine _WORKLOAD_KEY, one
+# key covers the whole replica.
+DGD_KEY = "dynamo-graph-deployment"
+
 # HTTPRoute request timeout for model traffic. "0s" disables it (Gateway API
 # semantics). Without an explicit timeout the gateway applies its own default
 # (Envoy's is 15s), which severs token streaming mid-generation — any response
@@ -212,11 +221,15 @@ def claim_key(engine: v1alpha1.Engine, member: v1alpha1.Member) -> str:
 
 
 def workload_keys(replica: v1alpha1.ModelReplica) -> list[str]:
-    """Response keys of every engine's workload, in engine order.
+    """Response keys of the replica's workload(s), for readiness tracking.
 
-    fn.py tracks replica readiness across all of these: a replica is serving
-    only when every engine's workload is ready.
+    A delegated replica composes one DynamoGraphDeployment spanning every
+    engine, so there's a single key (DGD_KEY) rather than one per engine.
+    Otherwise, one key per engine. fn.py tracks replica readiness across all of
+    these: a replica is serving only when every one is ready.
     """
+    if is_delegated(replica):
+        return [DGD_KEY]
     return [workload_key(g) for g in replica.spec.engines]
 
 
@@ -238,6 +251,11 @@ _POD_CLAIM_NAME = "devices"
 AVAILABLE_CEL = (
     'has(object.status.conditions) && object.status.conditions.exists(c, c.type == "Available" && c.status == "True")'
 )
+
+# CEL readiness query for a DynamoGraphDeployment. The Dynamo operator doesn't
+# publish an Available condition; it reports overall status in
+# status.state (initializing|pending|successful|failed).
+DYNAMO_READY_CEL = 'has(object.status.state) && object.status.state == "successful"'
 
 
 def wrap_object(
@@ -299,10 +317,28 @@ def engine_container(member: v1alpha1.Member) -> v1alpha1.Container:
 def engine_member(engine: v1alpha1.Engine, role: str) -> v1alpha1.Member | None:
     """The engine's member with this role, or None.
 
-    An engine has at most one member of each role (a single Standalone, or one
-    Leader and one Worker), so the first match is the only match.
+    An engine has at most one member of each role (a single Standalone, a
+    single Delegated, or one Leader and one Worker), so the first match is the
+    only match.
     """
     return next((m for m in engine.members if (m.role or ROLE_STANDALONE) == role), None)
+
+
+def is_delegated(replica: v1alpha1.ModelReplica) -> bool:
+    """Whether a replica hands its engines to a serving stack's own operator.
+
+    The XRD's all-or-nothing validation guarantees that if any engine has a
+    Delegated member, every engine does - so checking the first engine would
+    suffice, but checking all is cheap and doesn't depend on that guarantee
+    holding for a hand-written (not compose-model-deployment-generated)
+    ModelReplica. An engine list must be non-empty for a replica to be
+    delegated: `all()` is vacuously true on an empty list, which would then
+    send build_replica to an empty engine set, so guard it here rather than
+    relying on the XRD's minItems.
+    """
+    return bool(replica.spec.engines) and all(
+        engine_member(e, ROLE_DELEGATED) is not None for e in replica.spec.engines
+    )
 
 
 def select_backend(engine: v1alpha1.Engine) -> str:
@@ -310,7 +346,9 @@ def select_backend(engine: v1alpha1.Engine) -> str:
 
     A single Standalone member is a self-contained pod, served natively as a
     Deployment. A Leader plus Worker gang coordinates across nodes, served by
-    llm-d as a LeaderWorkerSet. Dynamo is dormant in v0.1.
+    llm-d as a LeaderWorkerSet. Never called for a Delegated engine - fn.py
+    special-cases a delegated replica before reaching the per-engine dispatch
+    this selects for.
     """
     if engine_member(engine, ROLE_STANDALONE) is not None:
         return NATIVE

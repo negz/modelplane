@@ -19,7 +19,8 @@ ResourceClaimTemplates for one worker engine; the InferencePool, endpoint picker
 and HTTPRoute that front a replica's engines are built by routing.apply. Manifests are
 asserted with a `Case` table: each case builds an engine's backend and compares
 the composed manifests to a full `want`. Backend selection, serving, and the
-Dynamo stub are dispatch/behaviour tests below the table.
+Dynamo backend (which composes a whole replica rather than one engine, so it
+doesn't fit the Case table) are dispatch/behaviour tests below the table.
 """
 
 import dataclasses
@@ -135,6 +136,43 @@ def _gang_engine(
             member("Worker", nodes, worker_args, worker_command, [_gpu_request(8)], "frontier"),
         ],
     )
+
+
+_DYNAMO_IMAGE = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1"
+
+
+def _delegated_engine(
+    name: str = "main",
+    *,
+    copies: int = 1,
+    phase: str | None = None,
+    args: list[str] | None = None,
+    command: list[str] | None = None,
+    device_requests: list[v1alpha1.DeviceRequest] | None = None,
+    dynamo_nodes: int | None = None,
+    pool: str = "frontier",
+) -> v1alpha1.Engine:
+    """A single Delegated-member engine, handed to stack: Dynamo."""
+    container = v1alpha1.Container(
+        name="engine",
+        image=_DYNAMO_IMAGE,
+        args=args if args is not None else ["--model=Qwen/Qwen3-0.6B"],
+    )
+    if command is not None:
+        container.command = command
+    member_kwargs: dict[str, Any] = {
+        "role": "Delegated",
+        "stack": "Dynamo",
+        "nodePoolName": pool,
+        "deviceRequests": device_requests if device_requests is not None else [_gpu_request(1)],
+        "template": v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
+    }
+    if dynamo_nodes is not None:
+        member_kwargs["dynamo"] = v1alpha1.Dynamo(nodes=dynamo_nodes)
+    engine_kwargs: dict[str, Any] = {"name": name, "copies": copies, "members": [v1alpha1.Member(**member_kwargs)]}
+    if phase is not None:
+        engine_kwargs["phase"] = phase
+    return v1alpha1.Engine(**engine_kwargs)
 
 
 def _replica(
@@ -526,15 +564,178 @@ class TestBackendSelection(unittest.TestCase):
         self.assertEqual(base.select_backend(_gang_engine()), base.LLMD)
 
 
-class TestDynamoStub(unittest.TestCase):
-    def test_not_selected_in_v01(self) -> None:
-        self.assertNotEqual(base.select_backend(_gang_engine()), base.DYNAMO)
+class TestIsDelegated(unittest.TestCase):
+    def test_standalone_replica_is_not_delegated(self) -> None:
+        self.assertFalse(base.is_delegated(_replica(engines=[_standalone_engine()])))
 
-    def test_build_raises(self) -> None:
-        engine = _gang_engine()
+    def test_gang_replica_is_not_delegated(self) -> None:
+        self.assertFalse(base.is_delegated(_replica(engines=[_gang_engine()])))
+
+    def test_delegated_replica_is_delegated(self) -> None:
+        self.assertTrue(base.is_delegated(_replica(engines=[_delegated_engine()])))
+
+    def test_empty_engines_is_not_delegated(self) -> None:
+        # all() is vacuously true on an empty list; is_delegated must not treat
+        # an engineless replica as delegated (it would send build_replica to an
+        # empty engine set). Unreachable for an XRD-validated replica
+        # (minItems: 1), but is_delegated guards a hand-written one.
+        replica = _replica(engines=[_standalone_engine()])
+        replica.spec.engines = []
+        self.assertFalse(base.is_delegated(replica))
+
+
+class TestDynamoBackend(unittest.TestCase):
+    """dynamo.DynamoBackend.build_replica composes one DynamoGraphDeployment
+    spanning every engine of a delegated replica - unlike native/llm-d, it
+    doesn't implement the per-engine Backend protocol, so it's exercised
+    directly here rather than through TestBackendManifests's Case table.
+    """
+
+    def test_aggregated_single_node(self) -> None:
+        """Unified serving, one engine, no dynamo block: a plain worker
+        component, no multinode, no backendFramework (command unset)."""
+        engine = _delegated_engine()
         replica = _replica(engines=[engine])
-        with self.assertRaises(NotImplementedError):
-            dynamo.DynamoBackend().build(replica, engine, _PC, base.serving_label(replica))
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        got = {key: obj.spec.forProvider.manifest for key, obj in out.items()}
+        want = {
+            base.DGD_KEY: {
+                "apiVersion": "nvidia.com/v1beta1",
+                "kind": "DynamoGraphDeployment",
+                "metadata": {"name": "r", "namespace": "default"},
+                "spec": {
+                    "components": [
+                        {
+                            "name": "frontend",
+                            "type": "frontend",
+                            "replicas": 1,
+                            "podTemplate": {
+                                "spec": {
+                                    "containers": [
+                                        {
+                                            "name": "main",
+                                            "image": _DYNAMO_IMAGE,
+                                            "command": ["python3", "-m", "dynamo.frontend"],
+                                            "args": ["--http-port", "8000"],
+                                        }
+                                    ],
+                                },
+                            },
+                        },
+                        {
+                            "name": "main",
+                            "type": "worker",
+                            "replicas": 1,
+                            "podTemplate": {
+                                "spec": {
+                                    "containers": [
+                                        {
+                                            "name": "main",
+                                            "image": _DYNAMO_IMAGE,
+                                            "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
+                                            "args": ["--model=Qwen/Qwen3-0.6B"],
+                                            "resources": {"claims": [{"name": "devices"}]},
+                                        }
+                                    ],
+                                    "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                                    "nodeSelector": {"modelplane.ai/pool": "frontier"},
+                                    "resourceClaims": [
+                                        {
+                                            "name": "devices",
+                                            "resourceClaimTemplateName": resource.child_name(
+                                                "r", "main", "delegated", "devices"
+                                            ),
+                                        }
+                                    ],
+                                    "tolerations": [
+                                        {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+                                    ],
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+            base.claim_key(engine, engine.members[0]): _claim_template(1, engine="main", role="delegated"),
+        }
+        self.assertEqual(want, got, "-want, +got")
+
+    def test_multinode_infers_backend_framework_from_command(self) -> None:
+        """dynamo.nodes > 1 adds multinode.nodeCount; a dynamo.<framework>
+        command sets spec.backendFramework."""
+        engine = _delegated_engine(command=["python3", "-m", "dynamo.vllm"], dynamo_nodes=2)
+        replica = _replica(engines=[engine])
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        dgd = out[base.DGD_KEY].spec.forProvider.manifest
+        self.assertEqual(dgd["spec"]["backendFramework"], "vllm")
+        main = next(c for c in dgd["spec"]["components"] if c["name"] == "main")
+        self.assertEqual(main["multinode"], {"nodeCount": 2})
+        self.assertEqual(main["podTemplate"]["spec"]["containers"][0]["command"], ["python3", "-m", "dynamo.vllm"])
+
+    def test_single_node_omits_multinode(self) -> None:
+        """dynamo.nodes: 1 (or the block omitted) never sends nodeCount: 1 -
+        the CRD's multinode.nodeCount has a minimum of 2."""
+        engine = _delegated_engine(dynamo_nodes=1)
+        replica = _replica(engines=[engine])
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        dgd = out[base.DGD_KEY].spec.forProvider.manifest
+        main = next(c for c in dgd["spec"]["components"] if c["name"] == "main")
+        self.assertNotIn("multinode", main)
+
+    def test_copies_and_multinode_are_independent(self) -> None:
+        """copies (gang replicas) and dynamo.nodes (gang size) are orthogonal:
+        component.replicas tracks copies, multinode.nodeCount tracks the gang
+        size, and neither leaks into the other."""
+        engine = _delegated_engine(copies=3, dynamo_nodes=2)
+        replica = _replica(engines=[engine])
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        dgd = out[base.DGD_KEY].spec.forProvider.manifest
+        main = next(c for c in dgd["spec"]["components"] if c["name"] == "main")
+        self.assertEqual(main["replicas"], 3)
+        self.assertEqual(main["multinode"], {"nodeCount": 2})
+
+    def test_disaggregated_prefill_and_decode_components(self) -> None:
+        """PrefillDecode serving: one component per engine, typed from phase -
+        not the generic "worker" type a Unified engine gets."""
+        prefill = _delegated_engine(name="prefill", phase="Prefill", args=["--model=Qwen/Qwen3-0.6B"])
+        decode = _delegated_engine(name="decode", phase="Decode", args=["--model=Qwen/Qwen3-0.6B"])
+        replica = _replica(engines=[prefill, decode])
+        replica.spec.serving = v1alpha1.Serving(mode="PrefillDecode")
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        dgd = out[base.DGD_KEY].spec.forProvider.manifest
+        types_by_name = {c["name"]: c["type"] for c in dgd["spec"]["components"]}
+        self.assertEqual(types_by_name, {"frontend": "frontend", "prefill": "prefill", "decode": "decode"})
+        # Each engine's own member claims a device, so each gets its own
+        # ResourceClaimTemplate - the frontend claims nothing.
+        self.assertIn(base.claim_key(prefill, prefill.members[0]), out)
+        self.assertIn(base.claim_key(decode, decode.members[0]), out)
+        self.assertEqual(len(out), 3)  # DGD + 2 claim templates
+
+    def test_frontend_reuses_first_engines_image(self) -> None:
+        """The synthesized frontend has no image of its own; it reuses
+        whichever image the user's engine runs, since every Dynamo runtime
+        image ships the dynamo.frontend entrypoint."""
+        engine = _delegated_engine(name="main")
+        replica = _replica(engines=[engine])
+        out = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        dgd = out[base.DGD_KEY].spec.forProvider.manifest
+        frontend = next(c for c in dgd["spec"]["components"] if c["name"] == "frontend")
+        self.assertEqual(frontend["podTemplate"]["spec"]["containers"][0]["image"], _DYNAMO_IMAGE)
+
+    def test_route_targets_dynamo_frontend_service(self) -> None:
+        """apply_delegated skips the InferencePool/EPP entirely and points the
+        HTTPRoute straight at the operator's frontend Service."""
+        engine = _delegated_engine()
+        replica = _replica(engines=[engine])
+        composed = dynamo.DynamoBackend().build_replica(replica, _PC, base.serving_label(replica))
+        out = routing.apply_delegated(composed, replica, _PC)
+        self.assertNotIn("inference-pool", out)
+        self.assertNotIn("epp", out)
+        route = out[base.ROUTE_KEY].spec.forProvider.manifest
+        self.assertEqual(
+            route["spec"]["rules"][0]["backendRefs"],
+            [{"kind": "Service", "name": "r-frontend", "port": 8000}],
+        )
 
 
 class TestCacheMounts(unittest.TestCase):

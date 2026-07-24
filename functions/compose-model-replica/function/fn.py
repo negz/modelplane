@@ -17,8 +17,12 @@
 This function reads the referenced InferenceCluster via required resources, then
 composes the cluster-level serving resources for each of the replica's worker
 engines. An engine's member roles select its backend: a Standalone member composes
-to a Deployment (native), a Leader plus Worker to a LeaderWorkerSet (llm-d). One
-shared Service and HTTPRoute front all of a replica's engines.
+to a Deployment (native), a Leader plus Worker to a LeaderWorkerSet (llm-d). A
+replica whose engines are Delegated instead composes one DynamoGraphDeployment
+spanning all of them - the stack owns the per-engine workload shape, so it
+doesn't go through the per-engine backend dispatch. routing.apply then fronts
+the (non-delegated) engines with an InferencePool + endpoint picker; a
+delegated replica's route targets the stack's own frontend instead.
 
 Each member's template is a curated subset of PodTemplateSpec. The container
 named "engine" is the inference engine; its image, command, and args are passed
@@ -48,11 +52,11 @@ CONDITION_REASON_SERVING = "Serving"
 CONDITION_REASON_MODEL_STARTING = "ModelStarting"
 
 # Backend registry: an engine's member roles select which one composes its
-# workload.
+# workload. A Delegated engine has no entry - see fn.py's module docstring and
+# backends/base.py's NATIVE/LLMD comment.
 _BACKENDS = {
     base.NATIVE: native.NativeBackend,
     base.LLMD: llmd.LLMDBackend,
-    base.DYNAMO: dynamo.DynamoBackend,
 }
 
 
@@ -137,24 +141,35 @@ class Composer:
         return True
 
     def compose_model_serving(self) -> None:
-        """Compose each engine's workload, then the replica's routing surface.
+        """Compose the replica's workload(s), then its routing surface.
 
-        Every engine composes to a Deployment or LeaderWorkerSet (with its
-        members' ResourceClaimTemplates) via the backend its roles select; the
-        backends build no routing. routing.apply then fronts the engines with the
-        surface serving.mode selects: a Service (Unified) or an InferencePool +
-        endpoint picker (PrefillDecode).
+        A delegated replica hands its whole engine set to a serving stack's
+        operator: dynamo.DynamoBackend composes a single DynamoGraphDeployment
+        spanning every engine, and routing.apply_delegated fronts it with an
+        HTTPRoute pointed at the stack's own frontend - no InferencePool or
+        endpoint picker, since the stack (Dynamo) runs its own KV-aware router.
+
+        Otherwise, every engine composes to a Deployment or LeaderWorkerSet
+        (with its members' ResourceClaimTemplates) via the backend its roles
+        select; the backends build no routing. routing.apply then fronts the
+        engines with the surface serving.mode selects: an InferencePool +
+        endpoint picker, for either Unified or PrefillDecode serving.
         """
         # resolve_inputs runs first and returns False unless the cluster's
         # status.providerConfigRef.name is set, so it's present here.
         assert self.ic and self.ic.status and self.ic.status.providerConfigRef and self.ic.status.providerConfigRef.name
         pc = self.ic.status.providerConfigRef.name
         label = base.serving_label(self.xr)
-        composed: dict[str, k8sobjv1alpha1.Object] = {}
-        for engine in self.xr.spec.engines:
-            backend = _BACKENDS[base.select_backend(engine)]()
-            composed.update(backend.build(self.xr, engine, pc, label))
-        composed = routing.apply(composed, self.xr, pc)
+        composed: dict[str, k8sobjv1alpha1.Object]
+        if base.is_delegated(self.xr):
+            composed = dynamo.DynamoBackend().build_replica(self.xr, pc, label)
+            composed = routing.apply_delegated(composed, self.xr, pc)
+        else:
+            composed = {}
+            for engine in self.xr.spec.engines:
+                backend = _BACKENDS[base.select_backend(engine)]()
+                composed.update(backend.build(self.xr, engine, pc, label))
+            composed = routing.apply(composed, self.xr, pc)
         for key, obj in composed.items():
             resource.update(self.rsp.desired.resources[key], obj)
 

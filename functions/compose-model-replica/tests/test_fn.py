@@ -493,11 +493,340 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         # not yet observed), so it's gone now.
         del want4.results[:]
 
+        # Case 5: a Delegated engine composes one DynamoGraphDeployment
+        # spanning the whole replica, plus an HTTPRoute targeting the stack's
+        # own frontend Service - no per-engine workload, no InferencePool or
+        # endpoint picker. First reconcile: nothing observed yet, so nothing
+        # is marked ready and the "Composing ..." event fires, same as case 1.
+        xr5 = v1alpha1.ModelReplica(
+            metadata=metav1.ObjectMeta(
+                name="test-replica",
+                namespace="ml-team",
+                labels={
+                    "modelplane.ai/deployment": "my-deployment",
+                    "modelplane.ai/cluster": "cluster-a",
+                },
+            ),
+            spec=v1alpha1.SpecModel(
+                clusterName="cluster-a",
+                engines=[
+                    v1alpha1.Engine(
+                        name="main",
+                        copies=1,
+                        members=[
+                            v1alpha1.Member(
+                                role="Delegated",
+                                stack="Dynamo",
+                                nodePoolName="frontier",
+                                deviceRequests=[
+                                    v1alpha1.DeviceRequest(
+                                        name="gpu",
+                                        deviceClassName="gpu.nvidia.com",
+                                        count=1,
+                                        selectors=[v1alpha1.Selector(cel=_GPU_CEL)],
+                                    ),
+                                ],
+                                template=v1alpha1.Template(
+                                    spec=v1alpha1.Spec(
+                                        containers=[
+                                            v1alpha1.Container(
+                                                name="engine",
+                                                image="nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1",
+                                                command=["python3", "-m", "dynamo.vllm"],
+                                                args=["--model=Qwen/Qwen3-0.6B"],
+                                            ),
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ).model_dump(exclude_none=True, mode="json")
+
+        req5 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(resource=resource.dict_to_struct(xr5)),
+            ),
+        )
+        req5.required_resources["cluster"].items.append(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "InferenceCluster",
+                        "metadata": {"name": "cluster-a"},
+                        "spec": {
+                            "stacks": ["Dynamo"],
+                            "cluster": {"source": "Existing", "existing": {"secretRef": {"name": "k"}}},
+                        },
+                        "status": {
+                            "providerConfigRef": {"name": "cluster-a-pc"},
+                            "gateway": {"address": "10.0.0.1"},
+                        },
+                    }
+                )
+            )
+        )
+
+        _claim_name = resource.child_name("test-replica", "main", "delegated", "devices")
+        want5 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "dynamo-graph-deployment": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                "kind": "Object",
+                                "spec": {
+                                    "providerConfigRef": {
+                                        "kind": "ClusterProviderConfig",
+                                        "name": "cluster-a-pc",
+                                    },
+                                    "readiness": {
+                                        "policy": "DeriveFromCelQuery",
+                                        "celQuery": ('has(object.status.state) && object.status.state == "successful"'),
+                                    },
+                                    "forProvider": {
+                                        "manifest": {
+                                            "apiVersion": "nvidia.com/v1beta1",
+                                            "kind": "DynamoGraphDeployment",
+                                            "metadata": {"name": "test-replica", "namespace": "default"},
+                                            "spec": {
+                                                "components": [
+                                                    {
+                                                        "name": "frontend",
+                                                        "type": "frontend",
+                                                        "replicas": 1,
+                                                        "podTemplate": {
+                                                            "spec": {
+                                                                "containers": [
+                                                                    {
+                                                                        "name": "main",
+                                                                        "image": (
+                                                                            "nvcr.io/nvidia/ai-dynamo/"
+                                                                            "vllm-runtime:1.2.1"
+                                                                        ),
+                                                                        "command": [
+                                                                            "python3",
+                                                                            "-m",
+                                                                            "dynamo.frontend",
+                                                                        ],
+                                                                        "args": ["--http-port", "8000"],
+                                                                    },
+                                                                ],
+                                                            },
+                                                        },
+                                                    },
+                                                    {
+                                                        "name": "main",
+                                                        "type": "worker",
+                                                        "replicas": 1,
+                                                        "podTemplate": {
+                                                            "spec": {
+                                                                "containers": [
+                                                                    {
+                                                                        "name": "main",
+                                                                        "image": (
+                                                                            "nvcr.io/nvidia/ai-dynamo/"
+                                                                            "vllm-runtime:1.2.1"
+                                                                        ),
+                                                                        "volumeMounts": [
+                                                                            {
+                                                                                "name": "dshm",
+                                                                                "mountPath": "/dev/shm",
+                                                                            },
+                                                                        ],
+                                                                        "command": [
+                                                                            "python3",
+                                                                            "-m",
+                                                                            "dynamo.vllm",
+                                                                        ],
+                                                                        "args": ["--model=Qwen/Qwen3-0.6B"],
+                                                                        "resources": {
+                                                                            "claims": [{"name": "devices"}],
+                                                                        },
+                                                                    },
+                                                                ],
+                                                                "volumes": [
+                                                                    {
+                                                                        "name": "dshm",
+                                                                        "emptyDir": {"medium": "Memory"},
+                                                                    },
+                                                                ],
+                                                                "nodeSelector": {
+                                                                    "modelplane.ai/pool": "frontier",
+                                                                },
+                                                                "resourceClaims": [
+                                                                    {
+                                                                        "name": "devices",
+                                                                        "resourceClaimTemplateName": _claim_name,
+                                                                    },
+                                                                ],
+                                                                "tolerations": [
+                                                                    {
+                                                                        "key": "nvidia.com/gpu",
+                                                                        "operator": "Exists",
+                                                                        "effect": "NoSchedule",
+                                                                    },
+                                                                ],
+                                                            },
+                                                        },
+                                                    },
+                                                ],
+                                                "backendFramework": "vllm",
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        ),
+                    ),
+                    "model-route": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                "kind": "Object",
+                                "spec": {
+                                    "providerConfigRef": {
+                                        "kind": "ClusterProviderConfig",
+                                        "name": "cluster-a-pc",
+                                    },
+                                    "readiness": {"policy": "SuccessfulCreate"},
+                                    "forProvider": {
+                                        "manifest": {
+                                            "apiVersion": "gateway.networking.k8s.io/v1",
+                                            "kind": "HTTPRoute",
+                                            "metadata": {
+                                                "name": "test-replica",
+                                                "namespace": "default",
+                                            },
+                                            "spec": {
+                                                "parentRefs": [
+                                                    {
+                                                        "name": "inference-gateway",
+                                                        "namespace": "modelplane-system",
+                                                    },
+                                                ],
+                                                "rules": [
+                                                    {
+                                                        "matches": [
+                                                            {
+                                                                "path": {
+                                                                    "type": "PathPrefix",
+                                                                    "value": "/ml-team/test-replica/",
+                                                                },
+                                                            },
+                                                        ],
+                                                        "timeouts": {"request": "0s"},
+                                                        "filters": [
+                                                            {
+                                                                "type": "URLRewrite",
+                                                                "urlRewrite": {
+                                                                    "path": {
+                                                                        "type": "ReplacePrefixMatch",
+                                                                        "replacePrefixMatch": "/",
+                                                                    },
+                                                                },
+                                                            }
+                                                        ],
+                                                        "backendRefs": [
+                                                            {
+                                                                "kind": "Service",
+                                                                "name": "test-replica-frontend",
+                                                                "port": 8000,
+                                                            },
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        ),
+                    ),
+                    "resource-claim-main-delegated": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                "kind": "Object",
+                                "spec": {
+                                    "providerConfigRef": {
+                                        "kind": "ClusterProviderConfig",
+                                        "name": "cluster-a-pc",
+                                    },
+                                    "readiness": {"policy": "SuccessfulCreate"},
+                                    "forProvider": {
+                                        "manifest": {
+                                            "apiVersion": "resource.k8s.io/v1",
+                                            "kind": "ResourceClaimTemplate",
+                                            "metadata": {
+                                                "name": _claim_name,
+                                                "namespace": "default",
+                                            },
+                                            "spec": {
+                                                "spec": {
+                                                    "devices": {
+                                                        "requests": [
+                                                            {
+                                                                "name": "gpu",
+                                                                "exactly": {
+                                                                    "deviceClassName": "gpu.nvidia.com",
+                                                                    "count": 1,
+                                                                    "selectors": [
+                                                                        {"cel": {"expression": _GPU_CEL}},
+                                                                    ],
+                                                                },
+                                                            },
+                                                        ],
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ModelAccepted",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Deploying",
+                ),
+                fnv1.Condition(
+                    type="ModelReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="WaitingForModel",
+                ),
+            ],
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_NORMAL,
+                    message="Composing nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1 on cluster-a",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want5.requirements.resources["cluster"].CopyFrom(
+            fnv1.ResourceSelector(
+                api_version="modelplane.ai/v1alpha1",
+                kind="InferenceCluster",
+                match_name="cluster-a",
+            )
+        )
+
         cases = [
             Case(name="cluster ready composes native Deployment", req=req1, want=want1),
             Case(name="cluster not resolved returns waiting conditions", req=req2, want=want2),
             Case(name="cluster without providerConfigRef returns waiting conditions", req=req3, want=want3),
             Case(name="observed resources are marked ready", req=req4, want=want4),
+            Case(name="delegated engine composes one DynamoGraphDeployment", req=req5, want=want5),
         ]
 
         # Unified routing fronts the serving pods with an InferencePool + endpoint
