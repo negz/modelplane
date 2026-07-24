@@ -96,6 +96,10 @@ class Versions(BaseModel):
     """
     cert-manager chart version.
     """
+    dynamoPlatform: constr(min_length=1, max_length=32) | None = '1.2.1'
+    """
+    Dynamo platform Helm chart version - the operator, NATS, Grove, and kai-scheduler. Installed only when spec.stacks includes Dynamo.
+    """
     envoyGateway: constr(min_length=1, max_length=32) | None = 'v1.8.1'
     """
     Envoy Gateway chart version. Must support InferencePool backend resources (the disaggregated-serving routing path), which requires v1.8.x or newer; older releases lack the Gateway API CRDs (ListenerSet) the AI Gateway needs.
@@ -138,6 +142,12 @@ class Spec(BaseModel):
     secrets: list[Secret] = Field(..., max_length=8, min_length=1)
     """
     Secrets used to authenticate to the target cluster. Typically sourced from a GKECluster's status.secrets. Secrets are in the same namespace as this ServingStack unless an entry says otherwise. A Kubeconfig secret is required. If a cloud identity secret is present, the serving stack authenticates as that identity instead of relying on the kubeconfig's embedded credentials.
+    """
+    stacks: list[Literal['Standard', 'Dynamo']] | None = Field(
+        ['Standard'], max_length=2, min_length=1
+    )
+    """
+    Serving stacks to install, mirroring the parent InferenceCluster's spec.stacks. Standard installs LeaderWorkerSet, the Envoy AI Gateway, and the Gateway API Inference Extension CRDs (InferencePool/endpoint picker routing). Dynamo installs the Dynamo platform (operator, NATS, Grove, kai-scheduler). Shared substrate that both stacks need - cert-manager, Envoy Gateway, the inference-gateway Gateway, Prometheus, Node Feature Discovery, and the NVIDIA DRA driver - installs once regardless of which stacks are listed, since these are cluster-scoped singletons (their CRDs can't be installed twice). Defaults to [Standard].
     """
     versions: Versions | None = None
     """

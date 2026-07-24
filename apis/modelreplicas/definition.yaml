@@ -43,6 +43,21 @@ spec:
               message: "PrefillDecode serving requires exactly one engine with phase Decode"
             - rule: "(has(self.serving) && self.serving.mode == 'PrefillDecode') || !self.engines.exists(e, has(e.phase))"
               message: "engine phase may only be set when serving.mode is PrefillDecode"
+            # Mirrors the ModelDeployment XRD: a Delegated engine composes into
+            # one object shared across the replica's whole engine set (e.g. one
+            # DynamoGraphDeployment), so mixing it with a Standard engine has no
+            # coherent composition.
+            - rule: >-
+                self.engines.all(e, e.members.exists(m, m.role == 'Delegated'))
+                || !self.engines.exists(e, e.members.exists(m, m.role == 'Delegated'))
+              message: "if any engine delegates to a stack, every engine in the deployment must"
+            # Mirrors the ModelDeployment XRD: "frontend" is reserved for the
+            # component compose-model-replica synthesizes ahead of a delegated
+            # replica's engines.
+            - rule: >-
+                !self.engines.exists(e, e.members.exists(m, m.role == 'Delegated'))
+                || !self.engines.exists(e, e.name == 'frontend')
+              message: "an engine may not be named frontend when it delegates to a stack"
             properties:
               clusterName:
                 type: string
@@ -98,11 +113,13 @@ spec:
                 items:
                   type: object
                   required: [name, members]
-                  # An engine is exactly one Standalone member, or one Leader
-                  # and one Worker member - the two shapes the backends compose
-                  # (a Deployment or a LeaderWorkerSet). A multi-node gang's size
-                  # lives in the Worker member's worker.nodes, not in repeated
-                  # Worker members, so members caps at two. select_backend
+                  # An engine is exactly one Standalone member, one Delegated
+                  # member, or one Leader and one Worker member - the shapes
+                  # the backends compose (a Deployment, a LeaderWorkerSet, or a
+                  # stack-owned object like a DynamoGraphDeployment). A
+                  # multi-node gang's size lives in the Worker member's
+                  # worker.nodes (or the Delegated member's dynamo.nodes), not
+                  # in repeated members, so members caps at two. select_backend
                   # switches on Standalone-present, and the llm-d backend
                   # dereferences the Leader and Worker members, so any other
                   # role combination would crash or compose the wrong workload.
@@ -114,12 +131,13 @@ spec:
                   x-kubernetes-validations:
                   - rule: >-
                       (self.members.size() == 1 && self.members[0].role == 'Standalone')
+                      || (self.members.size() == 1 && self.members[0].role == 'Delegated')
                       || (self.members.exists_one(m, m.role == 'Leader')
                           && self.members.exists(m, m.role == 'Worker')
                           && !self.members.exists(m, m.role == 'Standalone'))
                     message: >-
-                      an engine must be either a single Standalone member or one
-                      Leader and one Worker member
+                      an engine must be either a single Standalone member, a single
+                      Delegated member, or one Leader and one Worker member
                   - rule: "self.members.exists(m, has(m.deviceRequests))"
                     message: >-
                       at least one member of an engine must carry
@@ -149,14 +167,38 @@ spec:
                         # Standalone and a Leader are always exactly one pod on
                         # one node. The llm-d backend reads worker.nodes to size
                         # the gang, so worker on any other role is uncomposable.
+                        # stack/dynamo are meaningful only for a Delegated
+                        # member.
                         x-kubernetes-validations:
                         - rule: "!has(self.worker) || self.role == 'Worker'"
                           message: "worker may only be set on a Worker member"
+                        - rule: "!has(self.stack) || self.role == 'Delegated'"
+                          message: "stack may only be set on a Delegated member"
+                        - rule: "!has(self.dynamo) || self.role == 'Delegated'"
+                          message: "dynamo may only be set on a Delegated member"
+                        - rule: "self.role != 'Delegated' || has(self.stack)"
+                          message: "a Delegated member must set stack"
                         properties:
                           role:
                             type: string
-                            enum: [Standalone, Leader, Worker]
+                            enum: [Standalone, Leader, Worker, Delegated]
                             default: Standalone
+                          stack:
+                            type: string
+                            description: >-
+                              Which serving stack a Delegated member hands the engine
+                              to, inherited verbatim from the parent ModelDeployment.
+                            enum: [Dynamo]
+                          dynamo:
+                            type: object
+                            description: >-
+                              Settings for a Delegated member using stack: Dynamo,
+                              inherited verbatim from the parent ModelDeployment.
+                            properties:
+                              nodes:
+                                type: integer
+                                minimum: 1
+                                maximum: 63
                           nodePoolName:
                             type: string
                             minLength: 1

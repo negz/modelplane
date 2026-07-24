@@ -101,6 +101,25 @@ spec:
                       message: "PrefillDecode serving requires exactly one engine with phase Decode"
                     - rule: "(has(self.serving) && self.serving.mode == 'PrefillDecode') || !self.engines.exists(e, has(e.phase))"
                       message: "engine phase may only be set when serving.mode is PrefillDecode"
+                    # A Delegated engine hands its whole workload to a serving
+                    # stack's own operator, which composes one object spanning
+                    # every engine of the replica (e.g. one
+                    # DynamoGraphDeployment). Mixing a Delegated engine with a
+                    # Standard one in a single deployment has no coherent
+                    # composition, so it's all-or-nothing.
+                    - rule: >-
+                        self.engines.all(e, e.members.exists(m, m.role == 'Delegated'))
+                        || !self.engines.exists(e, e.members.exists(m, m.role == 'Delegated'))
+                      message: "if any engine delegates to a stack, every engine in the deployment must"
+                    # "frontend" is the name Modelplane reserves for the
+                    # component it synthesizes ahead of a delegated replica's
+                    # engines (the stack's OpenAI entrypoint + router). An
+                    # engine named "frontend" would collide with it in the
+                    # composed object.
+                    - rule: >-
+                        !self.engines.exists(e, e.members.exists(m, m.role == 'Delegated'))
+                        || !self.engines.exists(e, e.name == 'frontend')
+                      message: "an engine may not be named frontend when it delegates to a stack"
                     properties:
                       clusterSelector:
                         type: object
@@ -184,15 +203,22 @@ spec:
                         type: array
                         description: >-
                           A ModelReplica's inference engines. An engine is one serving
-                          unit: a single Standalone pod, or a gang of a Leader and one
-                          or more Workers coordinating across nodes. Modelplane
-                          composes the whole array once per ModelReplica; an engine
-                          composes to a Deployment (Standalone) or a LeaderWorkerSet
-                          (Leader/Worker), but the workload kind is an implementation
-                          detail. Modelplane is unopinionated about the engine itself:
-                          parallelism, quantization, and KV transfer all live in the
-                          members' engine flags, written by the user, never injected by
-                          Modelplane.
+                          unit: a single Standalone pod, a gang of a Leader and one
+                          or more Workers coordinating across nodes, or a single
+                          Delegated member handed to a serving stack's own operator.
+                          Modelplane composes the whole array once per ModelReplica; an
+                          engine composes to a Deployment (Standalone) or a
+                          LeaderWorkerSet (Leader/Worker), but the workload kind is an
+                          implementation detail. A Delegated engine composes no
+                          workload of its own: every Delegated engine of a replica
+                          instead composes into one shared object owned by the stack
+                          named in its member's stack field (e.g. one
+                          DynamoGraphDeployment for stack: Dynamo), so a deployment
+                          mixing a Delegated engine with a Standard one has no coherent
+                          composition and is rejected. Modelplane is unopinionated
+                          about the engine itself: parallelism, quantization, and KV
+                          transfer all live in the members' engine flags, written by
+                          the user, never injected by Modelplane.
                         minItems: 1
                         maxItems: 8
                         x-kubernetes-list-type: map
@@ -200,18 +226,21 @@ spec:
                         items:
                           type: object
                           required: [name, members]
-                          # An engine is exactly one Standalone member, or one Leader
-                          # and one or more Workers. No other combination of roles
-                          # forms a valid serving unit.
+                          # An engine is exactly one Standalone member, one
+                          # Delegated member, or one Leader and one or more
+                          # Workers. No other combination of roles forms a
+                          # valid serving unit.
                           x-kubernetes-validations:
                           - rule: >-
                               (self.members.size() == 1 && self.members[0].role == 'Standalone')
+                              || (self.members.size() == 1 && self.members[0].role == 'Delegated')
                               || (self.members.exists_one(m, m.role == 'Leader')
                                   && self.members.exists(m, m.role == 'Worker')
                                   && !self.members.exists(m, m.role == 'Standalone'))
                             message: >-
-                              an engine must be either a single Standalone member or one
-                              Leader and one or more Workers
+                              an engine must be either a single Standalone member, a
+                              single Delegated member, or one Leader and one or more
+                              Workers
                           # nodeSelector is the only path to a GPU, so an engine where
                           # no member carries one would deploy with no devices at all -
                           # a mistake, not a deployment. A member may omit its own
@@ -252,8 +281,8 @@ spec:
                             members:
                               type: array
                               description: >-
-                                The engine's pods. Either a single Standalone member,
-                                or one Leader and one or more Workers.
+                                The engine's pods. A single Standalone member, a single
+                                Delegated member, or one Leader and one or more Workers.
                               minItems: 1
                               maxItems: 2
                               x-kubernetes-list-type: atomic
@@ -262,19 +291,60 @@ spec:
                                 required: [template]
                                 # worker is meaningful only for a Worker member: a
                                 # Standalone and a Leader are always exactly one pod on
-                                # one node.
+                                # one node. stack/dynamo are meaningful only for a
+                                # Delegated member, and a Delegated member must name a
+                                # stack and carry that stack's block.
                                 x-kubernetes-validations:
                                 - rule: "!has(self.worker) || self.role == 'Worker'"
                                   message: "worker may only be set on a Worker member"
+                                - rule: "!has(self.stack) || self.role == 'Delegated'"
+                                  message: "stack may only be set on a Delegated member"
+                                - rule: "!has(self.dynamo) || self.role == 'Delegated'"
+                                  message: "dynamo may only be set on a Delegated member"
+                                - rule: "self.role != 'Delegated' || has(self.stack)"
+                                  message: "a Delegated member must set stack"
                                 properties:
                                   role:
                                     type: string
                                     description: >-
                                       The member's role in the engine. Standalone is a
                                       lone pod; a Leader coordinates and serves while its
-                                      Workers join it. Defaults to Standalone.
-                                    enum: [Standalone, Leader, Worker]
+                                      Workers join it; a Delegated member hands the whole
+                                      engine to the serving stack named in stack, which
+                                      runs its own orchestrator. Defaults to Standalone.
+                                    enum: [Standalone, Leader, Worker, Delegated]
                                     default: Standalone
+                                  stack:
+                                    type: string
+                                    description: >-
+                                      Which serving stack a Delegated member hands the
+                                      engine to - the same vocabulary as the
+                                      InferenceCluster's spec.stacks. The replica is only
+                                      placed on a cluster whose spec.stacks includes this
+                                      value. Valid, and required, only on a Delegated
+                                      member.
+                                    enum: [Dynamo]
+                                  dynamo:
+                                    type: object
+                                    description: >-
+                                      Settings for a Delegated member using stack: Dynamo.
+                                      Valid only when stack is Dynamo. Omit for a
+                                      single-node engine - every field defaults.
+                                    properties:
+                                      nodes:
+                                        type: integer
+                                        description: >-
+                                          Total gang size for this engine, all nodes
+                                          including rank 0. Omit (or 1) for single-node.
+                                          Dynamo owns the multi-node launch: the member
+                                          carries one command, and Dynamo synthesizes each
+                                          node's role (rank assignment, peer discovery, the
+                                          distributed bootstrap) - unlike a Leader/Worker
+                                          gang, where the head and join commands are
+                                          hand-written.
+                                        default: 1
+                                        minimum: 1
+                                        maximum: 63
                                   nodeSelector:
                                     type: object
                                     description: >-

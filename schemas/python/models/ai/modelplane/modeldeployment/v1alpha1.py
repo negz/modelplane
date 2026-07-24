@@ -52,6 +52,13 @@ class ClusterSelector(BaseModel):
     matchLabels: dict[str, str] | None = None
 
 
+class Dynamo(BaseModel):
+    nodes: conint(ge=1, le=63) | None = 1
+    """
+    Total gang size for this engine, all nodes including rank 0. Omit (or 1) for single-node. Dynamo owns the multi-node launch: the member carries one command, and Dynamo synthesizes each node's role (rank assignment, peer discovery, the distributed bootstrap) - unlike a Leader/Worker gang, where the head and join commands are hand-written.
+    """
+
+
 class Selector(BaseModel):
     cel: constr(min_length=1, max_length=10240) | None = None
     """
@@ -175,13 +182,21 @@ class Worker(BaseModel):
 
 
 class Member(BaseModel):
+    dynamo: Dynamo | None = None
+    """
+    Settings for a Delegated member using stack: Dynamo. Valid only when stack is Dynamo. Omit for a single-node engine - every field defaults.
+    """
     nodeSelector: NodeSelector | None = None
     """
     The per-node device request for this member's pods: what devices each pod needs from its node. The scheduler matches it against a candidate pool's InferenceClass devices (surfaced on InferenceCluster status.gpuPools) and places the member on a pool that satisfies it, preferring one pool for the whole engine and splitting members across pools only when no pool satisfies them all. claim: DRA requests also become DeviceRequests in the ResourceClaim the member's pods bind GPUs through. A GPU request's count is the GPUs per node. Omitted, the member claims no devices and schedules onto its engine's pool - a coordinator-only leader. At least one member per engine must carry a nodeSelector, and at least one member's requests must resolve to a claimable (claim: DRA) device; an engine that matches only synthetic devices leaves its pods nothing to claim, so the scheduler treats such a pool as ineligible and the deployment reports InsufficientCapacity.
     """
-    role: Literal['Standalone', 'Leader', 'Worker'] | None = 'Standalone'
+    role: Literal['Standalone', 'Leader', 'Worker', 'Delegated'] | None = 'Standalone'
     """
-    The member's role in the engine. Standalone is a lone pod; a Leader coordinates and serves while its Workers join it. Defaults to Standalone.
+    The member's role in the engine. Standalone is a lone pod; a Leader coordinates and serves while its Workers join it; a Delegated member hands the whole engine to the serving stack named in stack, which runs its own orchestrator. Defaults to Standalone.
+    """
+    stack: Literal['Dynamo'] | None = None
+    """
+    Which serving stack a Delegated member hands the engine to - the same vocabulary as the InferenceCluster's spec.stacks. The replica is only placed on a cluster whose spec.stacks includes this value. Valid, and required, only on a Delegated member.
     """
     template: Template
     """
@@ -200,7 +215,7 @@ class Engine(BaseModel):
     """
     members: list[Member] = Field(..., max_length=2, min_length=1)
     """
-    The engine's pods. Either a single Standalone member, or one Leader and one or more Workers.
+    The engine's pods. A single Standalone member, a single Delegated member, or one Leader and one or more Workers.
     """
     name: constr(min_length=1, max_length=63)
     """
@@ -249,7 +264,7 @@ class SpecModel(BaseModel):
     """
     engines: list[Engine] = Field(..., max_length=8, min_length=1)
     """
-    A ModelReplica's inference engines. An engine is one serving unit: a single Standalone pod, or a gang of a Leader and one or more Workers coordinating across nodes. Modelplane composes the whole array once per ModelReplica; an engine composes to a Deployment (Standalone) or a LeaderWorkerSet (Leader/Worker), but the workload kind is an implementation detail. Modelplane is unopinionated about the engine itself: parallelism, quantization, and KV transfer all live in the members' engine flags, written by the user, never injected by Modelplane.
+    A ModelReplica's inference engines. An engine is one serving unit: a single Standalone pod, a gang of a Leader and one or more Workers coordinating across nodes, or a single Delegated member handed to a serving stack's own operator. Modelplane composes the whole array once per ModelReplica; an engine composes to a Deployment (Standalone) or a LeaderWorkerSet (Leader/Worker), but the workload kind is an implementation detail. A Delegated engine composes no workload of its own: every Delegated engine of a replica instead composes into one shared object owned by the stack named in its member's stack field (e.g. one DynamoGraphDeployment for stack: Dynamo), so a deployment mixing a Delegated engine with a Standard one has no coherent composition and is rejected. Modelplane is unopinionated about the engine itself: parallelism, quantization, and KV transfer all live in the members' engine flags, written by the user, never injected by Modelplane.
     """
     modelCacheRef: ModelCacheRef | None = None
     """

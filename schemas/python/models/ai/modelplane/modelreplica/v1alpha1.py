@@ -64,6 +64,10 @@ class DeviceRequest(BaseModel):
     """
 
 
+class Dynamo(BaseModel):
+    nodes: conint(ge=1, le=63) | None = None
+
+
 class Metadata(BaseModel):
     annotations: dict[str, str] | None = None
     labels: dict[str, str] | None = None
@@ -134,11 +138,19 @@ class Member(BaseModel):
     """
     Resolved DRA device requests for the member's matched pool. The parent ModelDeployment's compose function joins the member's nodeSelector requests with the matched InferenceClass devices and stamps the claim: DRA devices here. This function turns each into a DeviceRequest in the member's DRA ResourceClaimTemplate. Absent when the member claims no devices - it carried no nodeSelector, or its requests matched only synthetic devices - in which case its pods get no ResourceClaim and only the pool pin places them. Never present and empty. At least one member of each engine always carries requests: the scheduler only places an engine where some member yields a claimable device.
     """
+    dynamo: Dynamo | None = None
+    """
+    Settings for a Delegated member using stack: Dynamo, inherited verbatim from the parent ModelDeployment.
+    """
     nodePoolName: constr(min_length=1)
     """
     Name of the node pool on the pinned InferenceCluster the scheduler selected for this member. The scheduler pins every member to a specific pool, so this is always set - a member with no device requests of its own is pinned to its engine's pool.
     """
-    role: Literal['Standalone', 'Leader', 'Worker'] | None = 'Standalone'
+    role: Literal['Standalone', 'Leader', 'Worker', 'Delegated'] | None = 'Standalone'
+    stack: Literal['Dynamo'] | None = None
+    """
+    Which serving stack a Delegated member hands the engine to, inherited verbatim from the parent ModelDeployment.
+    """
     template: Template
     worker: Worker | None = None
 

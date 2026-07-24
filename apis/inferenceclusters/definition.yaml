@@ -33,6 +33,28 @@ spec:
             - rule: "self.cluster.source != 'Nebius' || !has(self.nodePools) || self.nodePools.all(p, !has(p.fabric) || p.fabric.type != 'InfiniBand' || has(p.fabric.infiniband))"
               message: fabric.infiniband is required when fabric.type is InfiniBand and cluster.source is Nebius.
             properties:
+              stacks:
+                type: array
+                description: >-
+                  Serving stacks this cluster runs - the layer that turns a
+                  stock engine container into a routable serving instance.
+                  Standard composes the workload itself (a Deployment or a
+                  LeaderWorkerSet) fronted by an inference endpoint picker;
+                  used by Standalone/Leader/Worker engines. Dynamo delegates
+                  the whole engine to the Dynamo operator's
+                  DynamoGraphDeployment; used by Delegated engines (stack:
+                  Dynamo). A ModelDeployment's replica is only placed on a
+                  cluster whose stacks include the stack its engines need. The
+                  cluster installs only the stacks listed, so a Dynamo-only
+                  cluster carries none of the Standard stack's software.
+                  Defaults to [Standard], so existing clusters need no change.
+                default: [Standard]
+                minItems: 1
+                maxItems: 2
+                x-kubernetes-list-type: set
+                items:
+                  type: string
+                  enum: [Standard, Dynamo]
               cluster:
                 type: object
                 required: [source]

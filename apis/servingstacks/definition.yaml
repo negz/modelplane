@@ -40,6 +40,28 @@ spec:
             - rule: "self.secrets.exists(s, s.type == 'Kubeconfig')"
               message: spec.secrets must include a Kubeconfig entry.
             properties:
+              stacks:
+                type: array
+                description: >-
+                  Serving stacks to install, mirroring the parent
+                  InferenceCluster's spec.stacks. Standard installs
+                  LeaderWorkerSet, the Envoy AI Gateway, and the Gateway API
+                  Inference Extension CRDs (InferencePool/endpoint picker
+                  routing). Dynamo installs the Dynamo platform (operator,
+                  NATS, Grove, kai-scheduler). Shared substrate that both
+                  stacks need - cert-manager, Envoy Gateway, the
+                  inference-gateway Gateway, Prometheus, Node Feature
+                  Discovery, and the NVIDIA DRA driver - installs once
+                  regardless of which stacks are listed, since these are
+                  cluster-scoped singletons (their CRDs can't be installed
+                  twice). Defaults to [Standard].
+                default: [Standard]
+                minItems: 1
+                maxItems: 2
+                x-kubernetes-list-type: set
+                items:
+                  type: string
+                  enum: [Standard, Dynamo]
               secrets:
                 type: array
                 description: >-
@@ -159,6 +181,15 @@ spec:
                       NVIDIA DRA driver chart version. Publishes GPUs as DRA
                       ResourceSlices and the gpu.nvidia.com DeviceClass that
                       ModelReplica ResourceClaims bind through.
+                    minLength: 1
+                    maxLength: 32
+                  dynamoPlatform:
+                    type: string
+                    default: "1.2.1"
+                    description: >-
+                      Dynamo platform Helm chart version - the operator, NATS,
+                      Grove, and kai-scheduler. Installed only when
+                      spec.stacks includes Dynamo.
                     minLength: 1
                     maxLength: 32
               gateway:

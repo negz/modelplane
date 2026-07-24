@@ -238,6 +238,12 @@ class Spec(BaseModel):
     """
     GPU node pools available on this cluster. Each pool references an InferenceClass that describes the hardware shape and (for provisioned clusters) how to create the pool. System pools for control-plane components are provisioned automatically.
     """
+    stacks: list[Literal['Standard', 'Dynamo']] | None = Field(
+        ['Standard'], max_length=2, min_length=1
+    )
+    """
+    Serving stacks this cluster runs - the layer that turns a stock engine container into a routable serving instance. Standard composes the workload itself (a Deployment or a LeaderWorkerSet) fronted by an inference endpoint picker; used by Standalone/Leader/Worker engines. Dynamo delegates the whole engine to the Dynamo operator's DynamoGraphDeployment; used by Delegated engines (stack: Dynamo). A ModelDeployment's replica is only placed on a cluster whose stacks include the stack its engines need. The cluster installs only the stacks listed, so a Dynamo-only cluster carries none of the Standard stack's software. Defaults to [Standard], so existing clusters need no change.
+    """
     taints: list[Taint] | None = None
     """
     Taints that repel ModelDeployments from this cluster unless they carry a matching toleration, following the Kubernetes taint model. NoSchedule keeps new replicas off the cluster while leaving existing ones in place; NoExecute additionally drains the replicas already here, which the scheduler reschedules onto other tolerated clusters (the declarative equivalent of draining a node before maintenance).
