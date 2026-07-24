@@ -17,7 +17,7 @@
 import dataclasses
 import datetime
 import unittest
-from typing import Any
+from typing import Any, Literal
 
 from crossplane.function import logging, resource
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -90,6 +90,34 @@ _ENGINE_NO_ARGS = v1alpha1.Engine(
     ],
 )
 
+# A single Delegated-member engine handed to the Dynamo stack, spanning a
+# two-node gang. Exercises stack/dynamo propagation into the composed replica.
+_ENGINE_DELEGATED = v1alpha1.Engine(
+    name="main",
+    members=[
+        v1alpha1.Member(
+            role="Delegated",
+            stack="Dynamo",
+            dynamo=v1alpha1.Dynamo(nodes=2),
+            nodeSelector=v1alpha1.NodeSelector(
+                devices=[v1alpha1.Device(name="gpu", count=1, selectors=[v1alpha1.Selector(cel=_GPU_CEL)])],
+            ),
+            template=v1alpha1.Template(
+                spec=v1alpha1.Spec(
+                    containers=[
+                        v1alpha1.Container(
+                            name="engine",
+                            image="nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1",
+                            command=["python3", "-m", "dynamo.vllm"],
+                            args=["--model=Qwen/Qwen3-0.6B"],
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    ],
+)
+
 
 def _replica_engines(*, args: bool = True) -> list:
     """The composed ModelReplica's spec.engines: one engine whose Standalone
@@ -133,6 +161,38 @@ _PD_REPLICA_ENGINES = [
     {**_replica_engines()[0], "name": "decode", "phase": "Decode"},
 ]
 
+# The composed spec.engines for the Delegated fixture: role, stack, and the
+# dynamo block carry through verbatim alongside the scheduler-resolved pool and
+# device requests. The whole point of the case is that _replica_engine copies
+# stack/dynamo, not just the fields a Standard engine has.
+_DELEGATED_REPLICA_ENGINES = [
+    {
+        "name": "main",
+        "copies": 1,
+        "members": [
+            {
+                "role": "Delegated",
+                "stack": "Dynamo",
+                "dynamo": {"nodes": 2},
+                "nodePoolName": "default",
+                "deviceRequests": _DEVICE_REQUESTS,
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "engine",
+                                "image": "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1",
+                                "command": ["python3", "-m", "dynamo.vllm"],
+                                "args": ["--model=Qwen/Qwen3-0.6B"],
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+]
+
 # A one-replica deployment requesting a single GPU. Reused across most cases.
 _XR = v1alpha1.ModelDeployment(
     metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
@@ -143,21 +203,32 @@ _XR = v1alpha1.ModelDeployment(
 ).model_dump(exclude_none=True, mode="json")
 
 
-def _cluster(name: str, *, ready: bool = True, address: str | None = "10.0.0.1", nodes: int = 2) -> dict:
+def _cluster(
+    name: str,
+    *,
+    ready: bool = True,
+    address: str | None = "10.0.0.1",
+    nodes: int = 2,
+    stacks: list[Literal["Standard", "Dynamo"]] | None = None,
+) -> dict:
     """An InferenceCluster input fixture, dumped to a dict.
 
     A ready cluster has a Ready=True condition and a gateway address. ready=False
     flips the condition to Unavailable; address=None drops the gateway entirely
     (mirroring an offline cluster). nodes=0 yields a pool with no capacity.
+    stacks sets spec.stacks; left unset the XRD default ([Standard]) applies.
     """
+    spec = icv1alpha1.Spec(
+        cluster=icv1alpha1.Cluster(
+            source="Existing",
+            existing=icv1alpha1.Existing(secretRef=icv1alpha1.SecretRef(name="k")),
+        ),
+    )
+    if stacks is not None:
+        spec.stacks = stacks
     return icv1alpha1.InferenceCluster(
         metadata=metav1.ObjectMeta(name=name),
-        spec=icv1alpha1.Spec(
-            cluster=icv1alpha1.Cluster(
-                source="Existing",
-                existing=icv1alpha1.Existing(secretRef=icv1alpha1.SecretRef(name="k")),
-            ),
-        ),
+        spec=spec,
         status=icv1alpha1.Status(
             conditions=[
                 icv1alpha1.Condition(
@@ -427,6 +498,15 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         ],
                     )
                 ),
+            ),
+        ).model_dump(exclude_none=True, mode="json")
+
+        # A deployment whose engine delegates to the Dynamo stack.
+        xr_delegated = v1alpha1.ModelDeployment(
+            metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
+            spec=v1alpha1.SpecModel1(
+                replicas=1,
+                template=v1alpha1.TemplateModel(spec=v1alpha1.SpecModel(engines=[_ENGINE_DELEGATED])),
             ),
         ).model_dump(exclude_none=True, mode="json")
 
@@ -1207,6 +1287,68 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                 "clusterName": "cluster-a",
                                                 "serving": {"mode": "PrefillDecode"},
                                                 "engines": _PD_REPLICA_ENGINES,
+                                            },
+                                        }
+                                    ),
+                                ),
+                            },
+                        ),
+                        conditions=[
+                            fnv1.Condition(
+                                type="ReplicasScheduled",
+                                status=fnv1.STATUS_CONDITION_FALSE,
+                                reason="Scheduling",
+                            ),
+                            fnv1.Condition(
+                                type="ReplicasReady",
+                                status=fnv1.STATUS_CONDITION_FALSE,
+                                reason="ModelStarting",
+                                message="0 of 1 ready",
+                            ),
+                        ],
+                        results=[
+                            fnv1.Result(
+                                severity=fnv1.SEVERITY_NORMAL,
+                                message="Scheduled 1 replicas across 1 clusters: cluster-a",
+                            ),
+                        ],
+                        context=structpb.Struct(),
+                    )
+                ),
+            ),
+            Case(
+                # A Delegated engine copies its role, stack, and dynamo block
+                # onto the replica alongside the scheduler-resolved pool and
+                # device requests, and only schedules onto a cluster running
+                # the Dynamo stack. The replica backend reads stack/dynamo to
+                # compose a DynamoGraphDeployment.
+                name="Delegated engine copies stack and dynamo onto the replica",
+                req=_req(xr_delegated, clusters=[_cluster("cluster-a", stacks=["Dynamo"])]),
+                want=_want(
+                    fnv1.RunFunctionResponse(
+                        meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+                        desired=fnv1.State(
+                            composite=fnv1.Resource(
+                                resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
+                            ),
+                            resources={
+                                "replica-cluster-a-0": fnv1.Resource(
+                                    resource=resource.dict_to_struct(
+                                        {
+                                            "apiVersion": "modelplane.ai/v1alpha1",
+                                            "kind": "ModelReplica",
+                                            "metadata": {
+                                                "name": "my-model-5ab63",
+                                                "namespace": "ml-team",
+                                                "labels": {
+                                                    "modelplane.ai/deployment": "my-model",
+                                                    "modelplane.ai/cluster": "cluster-a",
+                                                    "modelplane.ai/replica-index": "0",
+                                                },
+                                            },
+                                            "spec": {
+                                                "clusterName": "cluster-a",
+                                                "engines": _DELEGATED_REPLICA_ENGINES,
                                             },
                                         }
                                     ),

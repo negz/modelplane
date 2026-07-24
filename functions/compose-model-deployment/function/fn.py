@@ -438,6 +438,13 @@ class Composer:
             # null into the composed manifest rather than omitting the field.
             if member.worker is not None:
                 replica_member.worker = mrv1alpha1.Worker(nodes=member.worker.nodes)
+            # Only a Delegated member carries stack/dynamo, mirroring worker
+            # above: copy them through only when the user set them, rather
+            # than serializing a null.
+            if member.stack is not None:
+                replica_member.stack = member.stack
+            if member.dynamo is not None:
+                replica_member.dynamo = mrv1alpha1.Dynamo(nodes=member.dynamo.nodes)
             members.append(replica_member)
         replica_engine = mrv1alpha1.Engine(
             name=engine.name,

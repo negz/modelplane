@@ -116,6 +116,14 @@ _CLAIM_DRA = "DRA"
 # Member roles.
 _ROLE_STANDALONE = "Standalone"
 _ROLE_WORKER = "Worker"
+_ROLE_DELEGATED = "Delegated"
+
+# Serving stacks. Standard is every engine that isn't Delegated - the workload
+# Modelplane composes itself (a Deployment or a LeaderWorkerSet). It's also the
+# default an InferenceCluster runs when spec.stacks is unset, so a cluster with
+# no stacks published yet (or a plain Standalone/Leader/Worker deployment) still
+# schedules the way it always has.
+_STACK_STANDARD = "Standard"
 
 
 def _published_count(value: int | None) -> int:
@@ -244,21 +252,33 @@ class _CompiledEngine:
     """An engine reduced to what the scheduler needs.
 
     name identifies the engine; members are its compiled members in deployment
-    order. Every member of an engine is placed on a single shared pool.
+    order. Every member of an engine is placed on a single shared pool. stack is
+    the serving stack this engine needs - its Delegated member's stack, or
+    Standard - used to gate which clusters are eligible (see _supports_stacks).
     """
 
     name: str
     members: list[_CompiledMember]
+    stack: str = _STACK_STANDARD
 
 
 def _member_pods(member: _Member) -> int:
-    """Pods a single member contributes: a Worker's node span, else 1.
+    """Pods a single member contributes: a Worker's or Delegated's node span,
+    else 1.
 
-    A Standalone or a Leader is always exactly one pod; only a Worker fans out
-    to worker.nodes follower pods (one per node).
+    A Standalone or a Leader is always exactly one pod. A Worker fans out to
+    worker.nodes follower pods (one per node); a Delegated member fans out to
+    dynamo.nodes total gang nodes the same way, just addressed through the
+    stack's own field rather than a Leader/Worker split. Both default to a
+    single node when the block is omitted - the gang size is the stack's to
+    synthesize from one command, so Modelplane doesn't require the block just
+    to say "1".
     """
-    if (member.role or _ROLE_STANDALONE) == _ROLE_WORKER and member.worker:
+    role = member.role or _ROLE_STANDALONE
+    if role == _ROLE_WORKER and member.worker:
         return int(member.worker.nodes)
+    if role == _ROLE_DELEGATED and member.dynamo and member.dynamo.nodes:
+        return int(member.dynamo.nodes)
     return 1
 
 
@@ -301,8 +321,30 @@ def compile_engines(deployment: mdv1alpha1.ModelDeployment) -> list[_CompiledEng
             )
             for member in engine.members
         ]
-        engines.append(_CompiledEngine(name=engine.name, members=members))
+        delegated = next((m for m in engine.members if (m.role or _ROLE_STANDALONE) == _ROLE_DELEGATED), None)
+        stack = delegated.stack if delegated and delegated.stack else _STACK_STANDARD
+        engines.append(_CompiledEngine(name=engine.name, members=members, stack=stack))
     return engines
+
+
+def _cluster_stacks(cluster: icv1alpha1.InferenceCluster) -> set[str]:
+    """The serving stacks a cluster runs, defaulting to {Standard}.
+
+    Mirrors the InferenceCluster XRD's own default: spec.stacks defaults to
+    [Standard], so a cluster observed before that default was ever set (or
+    with the field simply omitted) still runs the stack every engine used to
+    assume.
+    """
+    return set(cluster.spec.stacks) if cluster.spec.stacks else {_STACK_STANDARD}
+
+
+def _supports_stacks(cluster: icv1alpha1.InferenceCluster, required: set[str]) -> bool:
+    """Whether a cluster runs every stack a deployment's engines need.
+
+    A replica's engines are co-scheduled onto one cluster, so the cluster must
+    run every stack required across ALL of them, not just one.
+    """
+    return required <= _cluster_stacks(cluster)
 
 
 def _cluster_ready(cluster: icv1alpha1.InferenceCluster) -> bool:
@@ -592,11 +634,15 @@ def _retain(
     Returns one Candidate per retained replica, carrying its (cluster, index)
     identity and the per-member placement re-resolved against the current
     nodeSelectors. A replica is dropped from the retained set (and so re-placed
-    by the fill phase) when its cluster is gone, or when any member's pinned pool
+    by the fill phase) when its cluster is gone, when any member's pinned pool
     no longer satisfies that member's nodeSelector - the Kubernetes "template
-    changed, roll the replica" behavior. A degraded-but-present cluster is
+    changed, roll the replica" behavior - or when the cluster no longer runs a
+    stack the replica's engines need (the same "capability changed under a
+    running replica" treatment as a NoExecute taint: the replica can no longer
+    be served there once its stack is gone). A degraded-but-present cluster is
     retained.
     """
+    required_stacks = {e.stack for e in engines}
     retained: list[Candidate] = []
     seen: set[tuple[str, int]] = set()
     for r in all_replicas:
@@ -609,6 +655,8 @@ def _retain(
         if identity in seen:
             continue
         cluster = clusters_by_name[cluster_name]
+        if not _supports_stacks(cluster, required_stacks):
+            continue
         # A NoExecute taint the deployment doesn't tolerate drains this replica:
         # drop it from the retained set so the fill phase reschedules it onto a
         # tolerated cluster (delete-plus-create, like a Kubernetes drain).
@@ -1021,10 +1069,13 @@ def schedule(
         # freeing up. Fill then decrements it only as it places NEW replicas.
         ledger = _build_ledger(deployment, clusters, retained, all_replicas)
         # New replicas avoid clusters carrying an untolerated taint (NoSchedule
-        # or NoExecute). The ledger still spans every cluster, so a tainted
-        # cluster's capacity is accounted for other deployments' replicas.
+        # or NoExecute), and clusters that don't run every stack this
+        # deployment's engines need. The ledger still spans every cluster, so
+        # an excluded cluster's capacity is accounted for other deployments'
+        # replicas.
         tolerations = deployment.spec.template.spec.tolerations or []
-        schedulable = [c for c in clusters if not _repels_new(c, tolerations)]
+        required_stacks = {e.stack for e in engines}
+        schedulable = [c for c in clusters if not _repels_new(c, tolerations) and _supports_stacks(c, required_stacks)]
         placed = _fill(engines, schedulable, retained, ledger, desired - len(retained))
 
     result = retained + placed

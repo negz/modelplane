@@ -26,6 +26,7 @@ expressed as a device request's count, not derived from topology.
 import dataclasses
 import datetime
 import unittest
+from typing import Literal
 
 from function import cel, scheduling
 from models.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
@@ -108,6 +109,25 @@ def _engine(
     return mdv1alpha1.Engine(name=name, copies=copies, members=members)
 
 
+def _delegated_engine(
+    name: str = _ENGINE,
+    *,
+    copies: int = 1,
+    requests: list[mdv1alpha1.Device] | None = None,
+    dynamo_nodes: int | None = None,
+) -> mdv1alpha1.Engine:
+    """A single Delegated-member engine, handed to stack: Dynamo."""
+    member_kwargs: dict = {
+        "role": "Delegated",
+        "stack": "Dynamo",
+        "nodeSelector": _node_selector(requests),
+        "template": _template(),
+    }
+    if dynamo_nodes is not None:
+        member_kwargs["dynamo"] = mdv1alpha1.Dynamo(nodes=dynamo_nodes)
+    return mdv1alpha1.Engine(name=name, copies=copies, members=[mdv1alpha1.Member(**member_kwargs)])
+
+
 def _deployment(
     name: str = "my-model",
     replicas: int = 1,
@@ -186,12 +206,14 @@ def _cluster(
     gateway_address: str = "10.0.0.1",
     pools: list[dict] | None = None,
     taints: list[icv1alpha1.Taint] | None = None,
+    stacks: list[Literal["Standard", "Dynamo"]] | None = None,
 ) -> icv1alpha1.InferenceCluster:
     """Construct an InferenceCluster with the given readiness and pools.
 
     A "ready" cluster has a Ready=True condition and a gateway address.
     Setting ready=False or gateway_address="" produces a degraded cluster
-    the scheduler will retain but not pick anew.
+    the scheduler will retain but not pick anew. stacks defaults to the XRD's
+    own default ([Standard]) when omitted.
     """
     if pools is None:
         pools = [{"name": "default", "nodes": 2, "devices": [_gpu_device()]}]
@@ -207,15 +229,19 @@ def _cluster(
         )
     ]
 
+    spec = icv1alpha1.Spec(
+        cluster=icv1alpha1.Cluster(
+            source="Existing",
+            existing=icv1alpha1.Existing(secretRef=icv1alpha1.SecretRef(name="k")),
+        ),
+        taints=taints,
+    )
+    if stacks is not None:
+        spec.stacks = stacks
+
     return icv1alpha1.InferenceCluster(
         metadata=metav1.ObjectMeta(name=name),
-        spec=icv1alpha1.Spec(
-            cluster=icv1alpha1.Cluster(
-                source="Existing",
-                existing=icv1alpha1.Existing(secretRef=icv1alpha1.SecretRef(name="k")),
-            ),
-            taints=taints,
-        ),
+        spec=spec,
         status=icv1alpha1.Status(
             conditions=conditions,
             gateway=icv1alpha1.Gateway(address=gateway_address) if gateway_address else icv1alpha1.Gateway(),
@@ -267,6 +293,21 @@ def _replica_engine(
             ),
         ]
     return mrv1alpha1.Engine(name=name, copies=copies, members=members)
+
+
+def _delegated_replica_engine(name: str = _ENGINE, *, pool: str = "default", copies: int = 1) -> mrv1alpha1.Engine:
+    """One Delegated engine of an observed ModelReplica, pinned to a pool."""
+    template = mrv1alpha1.Template(
+        spec=mrv1alpha1.Spec(containers=[mrv1alpha1.Container(name="engine", image="vllm/vllm-openai:latest")]),
+    )
+    member = mrv1alpha1.Member(
+        role="Delegated",
+        stack="Dynamo",
+        nodePoolName=pool,
+        deviceRequests=_replica_device_requests(),
+        template=template,
+    )
+    return mrv1alpha1.Engine(name=name, copies=copies, members=[member])
 
 
 def _replica(
@@ -1703,6 +1744,98 @@ class TestScheduleTaints(unittest.TestCase):
         tol = mdv1alpha1.Toleration(operator="Exists")
         clusters = [_cluster("cluster-a", taints=[self._MAINT, self._DECOMM])]
         got = scheduling.schedule(_deployment(replicas=1, tolerations=[tol]), clusters, [])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+
+class TestScheduleStacks(unittest.TestCase):
+    """A replica is only placed on a cluster whose spec.stacks includes every
+    stack its engines need: Standard for a Standalone/Leader/Worker engine,
+    or a Delegated member's own stack (Dynamo). Mirrors TestScheduleTaints'
+    style, since a missing stack gates a cluster the same way an untolerated
+    taint does."""
+
+    def _names(self, got: list[scheduling.Candidate]) -> list[tuple[str, int]]:
+        return [(c.name, c.index) for c in got]
+
+    def test_delegated_engine_only_schedules_on_dynamo_cluster(self) -> None:
+        deployment = _deployment(replicas=1, engines=[_delegated_engine()])
+        clusters = [
+            _cluster("cluster-standard"),
+            _cluster("cluster-dynamo", gateway_address="10.0.0.2", stacks=["Dynamo"]),
+        ]
+        got = scheduling.schedule(deployment, clusters, [])
+        self.assertEqual(self._names(got), [("cluster-dynamo", 0)])
+
+    def test_delegated_engine_unschedulable_with_no_dynamo_cluster(self) -> None:
+        """No cluster lists Dynamo: the replica goes unplaced (the caller
+        surfaces InsufficientCapacity), same as a taint with no tolerated
+        cluster to land on."""
+        deployment = _deployment(replicas=1, engines=[_delegated_engine()])
+        got = scheduling.schedule(deployment, [_cluster("cluster-standard")], [])
+        self.assertEqual(got, [])
+
+    def test_standard_engine_does_not_land_on_dynamo_only_cluster(self) -> None:
+        """A plain Standalone engine needs Standard; a Dynamo-only cluster
+        doesn't run it and so isn't eligible, even though it's Ready and has
+        capacity."""
+        clusters = [
+            _cluster("cluster-dynamo-only", stacks=["Dynamo"]),
+            _cluster("cluster-mixed", gateway_address="10.0.0.2", stacks=["Standard", "Dynamo"]),
+        ]
+        got = scheduling.schedule(_deployment(replicas=1), clusters, [])
+        self.assertEqual(self._names(got), [("cluster-mixed", 0)])
+
+    def test_default_stacks_is_standard(self) -> None:
+        """A cluster with no stacks set (the pre-Dynamo shape) still runs
+        Standard, so ordinary Standalone/Leader/Worker deployments keep
+        scheduling unchanged."""
+        got = scheduling.schedule(_deployment(replicas=1), [_cluster("cluster-a")], [])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_retained_replica_dropped_when_cluster_drops_dynamo(self) -> None:
+        """A cluster that stops listing Dynamo can no longer serve a replica
+        delegated to it - dropped from retained like an untolerated
+        NoExecute taint, freeing it to reschedule elsewhere."""
+        deployment = _deployment(replicas=1, engines=[_delegated_engine()])
+        existing = _replica("my-model", "cluster-a", engines=[_delegated_replica_engine()])
+        clusters = [
+            _cluster("cluster-a", stacks=["Standard"]),
+            _cluster("cluster-b", gateway_address="10.0.0.2", stacks=["Dynamo"]),
+        ]
+        got = scheduling.schedule(deployment, clusters, [existing])
+        self.assertEqual(self._names(got), [("cluster-b", 0)])
+
+    def test_retained_replica_stays_when_cluster_still_supports_stack(self) -> None:
+        deployment = _deployment(replicas=1, engines=[_delegated_engine()])
+        existing = _replica("my-model", "cluster-a", engines=[_delegated_replica_engine()])
+        got = scheduling.schedule(deployment, [_cluster("cluster-a", stacks=["Dynamo"])], [existing])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_delegated_multinode_costs_dynamo_nodes(self) -> None:
+        """A Delegated engine's node cost is dynamo.nodes, not 1 - mirroring
+        how a Worker's cost is worker.nodes. A 3-node gang must not fit a
+        2-node pool, but does fit a 3-node one."""
+        engine = _delegated_engine(dynamo_nodes=3)
+        deployment = _deployment(replicas=1, engines=[engine])
+
+        too_small = _cluster("cluster-a", stacks=["Dynamo"], pools=[_pool("default", nodes=2)])
+        self.assertEqual(scheduling.schedule(deployment, [too_small], []), [])
+
+        big_enough = _cluster("cluster-a", stacks=["Dynamo"], pools=[_pool("default", nodes=3)])
+        got = scheduling.schedule(deployment, [big_enough], [])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_delegated_engine_cost_multiplies_by_copies(self) -> None:
+        """Node cost is dynamo.nodes * copies, mirroring pipeline * copies for
+        a Standard engine: 2 copies of a 2-node gang cost 4 nodes."""
+        engine = _delegated_engine(copies=2, dynamo_nodes=2)
+        deployment = _deployment(replicas=1, engines=[engine])
+
+        too_small = _cluster("cluster-a", stacks=["Dynamo"], pools=[_pool("default", nodes=3)])
+        self.assertEqual(scheduling.schedule(deployment, [too_small], []), [])
+
+        big_enough = _cluster("cluster-a", stacks=["Dynamo"], pools=[_pool("default", nodes=4)])
+        got = scheduling.schedule(deployment, [big_enough], [])
         self.assertEqual(self._names(got), [("cluster-a", 0)])
 
 
