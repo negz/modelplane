@@ -874,7 +874,10 @@ def _storage_class_object(filesystem_id: str) -> dict:
                 "manifest": {
                     "apiVersion": "storage.k8s.io/v1",
                     "kind": "StorageClass",
-                    "metadata": {"name": "modelplane-rwx-efs"},
+                    "metadata": {
+                        "name": "modelplane-rwx-efs",
+                        "annotations": {"storageclass.kubernetes.io/is-default-class": "true"},
+                    },
                     "provisioner": "efs.csi.aws.com",
                     "parameters": {
                         "provisioningMode": "efs-ap",

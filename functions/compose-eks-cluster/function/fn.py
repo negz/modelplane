@@ -1433,14 +1433,24 @@ class Composer:
         only once the FileSystem is observed. The Object is applied through the
         cluster's own provider-kubernetes ProviderConfig. StorageClass has no
         Ready condition, so use SuccessfulCreate (DeriveFromObject would
-        hang)."""
+        hang).
+
+        Marked as the cluster's default StorageClass: unlike GKE and AKS, EKS
+        ships no working default (the EBS CSI driver addon isn't installed, and
+        the in-tree gp2 provisioner no longer works). Without a default, any
+        chart that creates a PVC without an explicit storageClassName - NATS's
+        JetStream PVC in the Dynamo platform chart, for one - hangs forever
+        Pending."""
         filesystem_id = self._observed_efs_filesystem_id()
         if not filesystem_id:
             return
         manifest = {
             "apiVersion": "storage.k8s.io/v1",
             "kind": "StorageClass",
-            "metadata": {"name": _MANAGED_STORAGE_CLASS},
+            "metadata": {
+                "name": _MANAGED_STORAGE_CLASS,
+                "annotations": {"storageclass.kubernetes.io/is-default-class": "true"},
+            },
             "provisioner": "efs.csi.aws.com",
             "parameters": {"provisioningMode": "efs-ap", "fileSystemId": filesystem_id, "directoryPerms": "700"},
             "volumeBindingMode": "Immediate",
