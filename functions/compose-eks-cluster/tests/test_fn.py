@@ -705,6 +705,7 @@ def _system_node_group(cred_kind: str = "ClusterProviderConfig", cred_name: str 
                 "region": "us-west-2",
                 "amiType": "AL2023_x86_64_STANDARD",
                 "instanceTypes": ["m6i.xlarge"],
+                "diskSize": 100,
                 "clusterNameSelector": {"matchControllerRef": True},
                 "nodeRoleArnSelector": {
                     "matchControllerRef": True,

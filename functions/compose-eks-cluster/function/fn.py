@@ -109,6 +109,14 @@ _SYSTEM_POOL_INSTANCE_TYPE = "m6i.xlarge"
 _SYSTEM_POOL_NODE_COUNT = 1
 _SYSTEM_POOL_MIN_NODE_COUNT = 1
 _SYSTEM_POOL_MAX_NODE_COUNT = 2
+# EKS's AMI default (20Gi) isn't enough: substrate Helm releases (cert-manager,
+# Envoy Gateway, Prometheus, NFD, and - for the Dynamo stack - the operator,
+# Grove, kai-scheduler, and NATS) all land here alongside any CPU-only
+# component of a delegated replica (a Dynamo replica's frontend has no GPU
+# nodeSelector, so it schedules here too, pulling the same multi-GB runtime
+# image as its GPU workers). 20Gi fills up and evicts pods with
+# "no space left on device" well before that image finishes pulling.
+_SYSTEM_POOL_DISK_SIZE_GB = 100
 
 # Labels written on EKS node groups. compose-model-deployment reads
 # these labels for GPU scheduling.
@@ -1170,6 +1178,7 @@ class Composer:
                         region=self.xr.spec.region,
                         amiType=_AMI_TYPE_SYSTEM,
                         instanceTypes=[_SYSTEM_POOL_INSTANCE_TYPE],
+                        diskSize=_SYSTEM_POOL_DISK_SIZE_GB,
                         clusterNameSelector=ngv1beta1.ClusterNameSelector(
                             matchControllerRef=True,
                         ),
