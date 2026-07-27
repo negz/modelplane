@@ -620,6 +620,62 @@ _DYNAMO_PLATFORM = {
 }
 
 
+_DYNAMO_DRA_RBAC = {
+    "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+    "kind": "Object",
+    "spec": {
+        "forProvider": {
+            "manifest": {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "ClusterRole",
+                "metadata": {"name": "modelplane-dynamo-dra-binder"},
+                "rules": [
+                    {
+                        "apiGroups": ["resource.k8s.io"],
+                        "resources": ["resourceclaims/binding"],
+                        "verbs": ["update"],
+                    },
+                ],
+            },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+_DYNAMO_DRA_RBAC_BINDING = {
+    "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+    "kind": "Object",
+    "spec": {
+        "forProvider": {
+            "manifest": {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "ClusterRoleBinding",
+                "metadata": {"name": "modelplane-dynamo-dra-binder"},
+                "roleRef": {
+                    "apiGroup": "rbac.authorization.k8s.io",
+                    "kind": "ClusterRole",
+                    "name": "modelplane-dynamo-dra-binder",
+                },
+                "subjects": [
+                    {
+                        "kind": "ServiceAccount",
+                        "name": "binder",
+                        "namespace": "dynamo-system",
+                    },
+                ],
+            },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+
 def _base_request(
     nvidia_driver_root: str = "/home/kubernetes/bin/nvidia",
     name: str = "test-backend",
@@ -1129,6 +1185,45 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             "-want, +got",
         )
 
+    async def test_dynamo_dra_rbac_marked_ready_when_observed(self) -> None:
+        """The dynamo-dra-rbac ClusterRole and ClusterRoleBinding are marked
+        ready once observed Ready - the same pattern the GAIE CRDs use, since
+        a plain RBAC object has no meaningful provider-side readiness beyond
+        SuccessfulCreate."""
+        req = _base_request(stacks=["Dynamo"])
+        req.observed.resources["provider-config-helm"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "helm.m.crossplane.io/v1beta1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+        req.observed.resources["provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "kubernetes.m.crossplane.io/v1alpha1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+        for key, want_manifest in (
+            ("dynamo-dra-rbac", _DYNAMO_DRA_RBAC),
+            ("dynamo-dra-rbac-binding", _DYNAMO_DRA_RBAC_BINDING),
+        ):
+            req.observed.resources[key].CopyFrom(
+                fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            **want_manifest,
+                            "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                        }
+                    ),
+                ),
+            )
+
+        got = await self.runner.RunFunction(req, None)
+        self.assertEqual(got.desired.resources["dynamo-dra-rbac"].ready, fnv1.READY_TRUE)
+        self.assertEqual(got.desired.resources["dynamo-dra-rbac-binding"].ready, fnv1.READY_TRUE)
+
     async def test_dynamo_only_stack(self) -> None:
         """spec.stacks: [Dynamo] installs the Dynamo platform and the shared
         substrate, but none of the Standard-only serving software
@@ -1190,6 +1285,12 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "dynamo-platform": fnv1.Resource(
                         resource=resource.dict_to_struct(_DYNAMO_PLATFORM),
+                    ),
+                    "dynamo-dra-rbac": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DYNAMO_DRA_RBAC),
+                    ),
+                    "dynamo-dra-rbac-binding": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DYNAMO_DRA_RBAC_BINDING),
                     ),
                     "provider-config-helm": fnv1.Resource(
                         resource=resource.dict_to_struct(_PROVIDER_CONFIG_HELM),

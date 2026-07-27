@@ -360,6 +360,7 @@ class Composer:
         self.compose_dra_driver()
         self.compose_gateway()
         self.compose_dynamo_platform()
+        self.compose_dynamo_dra_rbac()
         self.write_status()
         self.mark_readiness()
 
@@ -963,6 +964,71 @@ class Composer:
                 },
             ),
         )
+
+    def compose_dynamo_dra_rbac(self) -> None:
+        """Grant kai-scheduler's binder the resourceclaims/binding permission
+        DRA-gang GPU scheduling needs.
+
+        Dynamo-stack only, and gated the same way as compose_dynamo_platform.
+        kai-scheduler v0.13.4 (the version dynamo-platform 1.2.1 pins) ships a
+        kai-binder ClusterRole with only get/list on resourceclaims: it predates
+        the Kubernetes 1.31 DRA API split that moved the update permission
+        needed to actually bind a claim onto a dedicated resourceclaims/binding
+        subresource. Without this, every GPU pod's ResourceClaim binding fails
+        with "resourceclaims/binding is forbidden" and the pod never schedules.
+        This supplements the chart's own RBAC rather than replacing it."""
+        if _STACK_DYNAMO not in _stacks(self.xr):
+            return
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "dynamo-dra-rbac" in self.req.observed.resources):
+            return
+
+        resource.update(
+            self.rsp.desired.resources["dynamo-dra-rbac"],
+            _k8s_object(
+                _pc_name(self.xr),
+                {
+                    "apiVersion": "rbac.authorization.k8s.io/v1",
+                    "kind": "ClusterRole",
+                    "metadata": {"name": "modelplane-dynamo-dra-binder"},
+                    "rules": [
+                        {
+                            "apiGroups": ["resource.k8s.io"],
+                            "resources": ["resourceclaims/binding"],
+                            "verbs": ["update"],
+                        },
+                    ],
+                },
+            ),
+        )
+        if resource.get_condition(self.req.observed.resources.get("dynamo-dra-rbac"), "Ready").status == "True":
+            self.rsp.desired.resources["dynamo-dra-rbac"].ready = fnv1.READY_TRUE
+
+        resource.update(
+            self.rsp.desired.resources["dynamo-dra-rbac-binding"],
+            _k8s_object(
+                _pc_name(self.xr),
+                {
+                    "apiVersion": "rbac.authorization.k8s.io/v1",
+                    "kind": "ClusterRoleBinding",
+                    "metadata": {"name": "modelplane-dynamo-dra-binder"},
+                    "roleRef": {
+                        "apiGroup": "rbac.authorization.k8s.io",
+                        "kind": "ClusterRole",
+                        "name": "modelplane-dynamo-dra-binder",
+                    },
+                    "subjects": [
+                        {
+                            "kind": "ServiceAccount",
+                            "name": "binder",
+                            "namespace": _DYNAMO_NAMESPACE,
+                        },
+                    ],
+                },
+            ),
+        )
+        if resource.get_condition(self.req.observed.resources.get("dynamo-dra-rbac-binding"), "Ready").status == "True":
+            self.rsp.desired.resources["dynamo-dra-rbac-binding"].ready = fnv1.READY_TRUE
 
     def write_status(self) -> None:
         """Extract the gateway address from the observed Gateway Object and
