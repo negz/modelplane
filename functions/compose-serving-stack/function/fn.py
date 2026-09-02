@@ -34,6 +34,8 @@ API - plus the Usages sequencing their teardown ahead of the Envoy
 Gateway release.
 """
 
+import base64
+
 import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -73,6 +75,30 @@ _SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 # used by the derived Usages' of/by references.
 _RELEASE_REF = ("helm.m.crossplane.io/v1beta1", "Release")
 _OBJECT_REF = ("kubernetes.m.crossplane.io/v1alpha1", "Object")
+
+# The cluster gateway's own PKI, issued by cert-manager, which the stack
+# already installs. Composition functions are called repeatedly and must be a
+# pure function of their inputs, so they can't generate key material; a
+# controller has to. The private keys never leave this cluster.
+#
+# A self-signed issuer signs a CA, the CA signs the gateway's serving
+# certificate, and the CA's certificate is published in status so an
+# InferenceGateway can validate against it. One CA per cluster rather than one
+# per fleet: no shared private key has to be distributed, and compromising one
+# cluster doesn't let anyone impersonate another.
+_SELFSIGNED_ISSUER = "modelplane-selfsigned"
+_CA_ISSUER = "modelplane-cluster-ca"
+_CA_SECRET = "modelplane-cluster-ca"
+_GATEWAY_SERVING_SECRET = "cluster-gateway-serving"
+
+# Where the CAs whose client certificates the gateway accepts are assembled.
+_CLIENT_CA_BUNDLE = "modelplane-fleet-gateway-cas"
+
+# A cert-manager Certificate is Ready once it has issued.
+_CERTIFICATE_READY_CEL = (
+    "has(object.status) && has(object.status.conditions) && "
+    "object.status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')"
+)
 
 
 def _name(meta: metav1.ObjectMeta | None) -> str:
@@ -129,6 +155,7 @@ def _k8s_object(
     metadata: metav1.ObjectMeta | None = None,
     *,
     cel_query: str | None = None,
+    management_policies: list | None = None,
 ) -> k8sobjv1alpha1.Object:
     """Build a provider-kubernetes Object wrapping an arbitrary manifest.
 
@@ -154,6 +181,8 @@ def _k8s_object(
             ),
         ),
     )
+    if management_policies:
+        obj.spec.managementPolicies = management_policies
     if cel_query is not None:
         obj.spec.readiness = k8sobjv1alpha1.Readiness(
             policy="DeriveFromCelQuery",
@@ -190,6 +219,11 @@ def _usage(
             replayDeletion=True,
         ),
     )
+
+
+def _pem(cert: str) -> str:
+    """A PEM certificate ending in a newline, so several concatenate cleanly."""
+    return cert if cert.endswith("\n") else cert + "\n"
 
 
 def _pc_name(xr: v1alpha1.ServingStack) -> str:
@@ -234,6 +268,7 @@ class Composer:
 
         rendered = self.compose_components(components)
         rendered += self.compose_gateway()
+        rendered += self.compose_gateway_pki()
         self.compose_component_usages(components)
         self.compose_gateway_usages()
         self.write_status()
@@ -431,6 +466,164 @@ class Composer:
             rendered.append(key)
         return rendered
 
+    def compose_gateway_pki(self) -> list[str]:
+        """Compose the cluster gateway's certificate, and the requirement that a
+        caller present one of its own.
+
+        Only once the cluster has a name: a certificate needs a subject, and a
+        cluster with no name carries no traffic anyway, because an
+        InferenceGateway addresses a cluster by name.
+
+        cert-manager does the key generation, which a composition function can't:
+        it runs on every reconcile and has to be a pure function of its inputs.
+
+        The ClientTrafficPolicy is what makes the fleet gateway the only thing
+        that can reach the engines behind this gateway. It governs the HTTPS
+        listener alone, so in-cluster traffic over HTTP is unaffected. Until at
+        least one InferenceGateway has published a CA there is nothing to trust,
+        and requiring a certificate signed by an empty set would refuse
+        everything, so the requirement waits for the first one.
+
+        Returns the composed-resource keys it rendered, for readiness.
+        """
+        pc_observed = self.provider_configs_observed()
+        pc = _pc_name(self.xr)
+        gw = self.xr.spec.gateway or v1alpha1.Gateway()
+        if not gw.hostname:
+            return []
+
+        rendered: list[str] = []
+        certs: list[tuple[str, dict]] = [
+            (
+                "gateway-selfsigned-issuer",
+                {
+                    "apiVersion": "cert-manager.io/v1",
+                    "kind": "Issuer",
+                    "metadata": {"name": _SELFSIGNED_ISSUER, "namespace": "modelplane-system"},
+                    "spec": {"selfSigned": {}},
+                },
+            ),
+            (
+                "gateway-ca-certificate",
+                {
+                    "apiVersion": "cert-manager.io/v1",
+                    "kind": "Certificate",
+                    "metadata": {"name": _CA_ISSUER, "namespace": "modelplane-system"},
+                    "spec": {
+                        "isCA": True,
+                        "commonName": f"modelplane cluster CA {gw.hostname}",
+                        "secretName": _CA_SECRET,
+                        "duration": "87600h",
+                        "renewBefore": "8760h",
+                        "privateKey": {"algorithm": "ECDSA", "size": 256},
+                        "issuerRef": {"name": _SELFSIGNED_ISSUER, "kind": "Issuer", "group": "cert-manager.io"},
+                    },
+                },
+            ),
+            (
+                "gateway-ca-issuer",
+                {
+                    "apiVersion": "cert-manager.io/v1",
+                    "kind": "Issuer",
+                    "metadata": {"name": _CA_ISSUER, "namespace": "modelplane-system"},
+                    "spec": {"ca": {"secretName": _CA_SECRET}},
+                },
+            ),
+            (
+                "gateway-serving-certificate",
+                {
+                    "apiVersion": "cert-manager.io/v1",
+                    "kind": "Certificate",
+                    "metadata": {"name": _GATEWAY_SERVING_SECRET, "namespace": "modelplane-system"},
+                    "spec": {
+                        "secretName": _GATEWAY_SERVING_SECRET,
+                        "dnsNames": [gw.hostname],
+                        "duration": "2160h",
+                        "renewBefore": "720h",
+                        "privateKey": {"algorithm": "ECDSA", "size": 256, "rotationPolicy": "Always"},
+                        "issuerRef": {"name": _CA_ISSUER, "kind": "Issuer", "group": "cert-manager.io"},
+                    },
+                },
+            ),
+        ]
+        for key, manifest in certs:
+            if not (pc_observed or key in self.req.observed.resources):
+                continue
+            cel = _CERTIFICATE_READY_CEL if manifest["kind"] == "Certificate" else None
+            resource.update(self.rsp.desired.resources[key], _k8s_object(pc, manifest, cel_query=cel))
+            rendered.append(key)
+
+        # Observe the CA's Secret without managing it: cert-manager owns it, and
+        # this only needs to read the certificate back out so status can publish
+        # it. Observe alone means Crossplane never writes to or deletes it.
+        if pc_observed or "gateway-ca-secret" in self.req.observed.resources:
+            resource.update(
+                self.rsp.desired.resources["gateway-ca-secret"],
+                _k8s_object(
+                    pc,
+                    {
+                        "apiVersion": "v1",
+                        "kind": "Secret",
+                        "metadata": {"name": _CA_SECRET, "namespace": "modelplane-system"},
+                    },
+                    management_policies=["Observe"],
+                ),
+            )
+            rendered.append("gateway-ca-secret")
+
+        # With nothing to trust there is no HTTPS listener either (see
+        # gateway.objects), so there is nothing to attach a policy to.
+        client_cas = gw.clientCAs or []
+        if not client_cas:
+            return rendered
+        if not (pc_observed or "gateway-client-ca-bundle" in self.req.observed.resources):
+            return rendered
+        # One ConfigMap holding every fleet gateway's CA, concatenated, which is
+        # what a PEM trust bundle is.
+        resource.update(
+            self.rsp.desired.resources["gateway-client-ca-bundle"],
+            _k8s_object(
+                pc,
+                {
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": {"name": _CLIENT_CA_BUNDLE, "namespace": "modelplane-system"},
+                    "data": {
+                        "ca.crt": "".join(_pem(ca.certificate) for ca in sorted(client_cas, key=lambda c: c.name))
+                    },
+                },
+            ),
+        )
+        rendered.append("gateway-client-ca-bundle")
+        resource.update(
+            self.rsp.desired.resources["gateway-client-auth"],
+            _k8s_object(
+                pc,
+                {
+                    "apiVersion": "gateway.envoyproxy.io/v1alpha1",
+                    "kind": "ClientTrafficPolicy",
+                    "metadata": {"name": "cluster-gateway-client-auth", "namespace": "modelplane-system"},
+                    "spec": {
+                        "targetRefs": [
+                            {
+                                "group": "gateway.networking.k8s.io",
+                                "kind": "Gateway",
+                                "name": "inference-gateway",
+                                "sectionName": "https",
+                            }
+                        ],
+                        "tls": {
+                            "clientValidation": {
+                                "caCertificateRefs": [{"kind": "ConfigMap", "group": "", "name": _CLIENT_CA_BUNDLE}]
+                            }
+                        },
+                    },
+                },
+            ),
+        )
+        rendered.append("gateway-client-auth")
+        return rendered
+
     def compose_gateway_usages(self) -> None:
         """Compose Usages ordering the hand-rendered gateway teardown.
 
@@ -451,6 +644,26 @@ class Composer:
             )
             self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
 
+    def observed_ca_certificate(self) -> str | None:
+        """The cluster CA's certificate, read back off the issued Certificate.
+
+        cert-manager writes ca.crt into the CA's own Secret alongside the
+        certificate. provider-kubernetes observes the Certificate rather than the
+        Secret, and a Certificate's status carries no key material, so this reads
+        the CA certificate out of the Secret the Object reports having created.
+        Absent until cert-manager has issued, which is why an InferenceGateway
+        composes no backend for this cluster before then.
+        """
+        obj = self.req.observed.resources.get("gateway-ca-secret")
+        if obj is None:
+            return None
+        d = resource.struct_to_dict(obj.resource)
+        data = d.get("status", {}).get("atProvider", {}).get("manifest", {}).get("data", {})
+        encoded = data.get("ca.crt")
+        if not encoded:
+            return None
+        return base64.b64decode(encoded).decode()
+
     def write_status(self) -> None:
         """Extract the gateway address from the observed Gateway Object and
         write it to the XR's status."""
@@ -469,8 +682,13 @@ class Composer:
                 gateway_address = addresses[0].get("value")
 
         status = v1alpha1.Status()
-        if gateway_address:
-            status.gateway = v1alpha1.GatewayModel(address=gateway_address)
+        ca = self.observed_ca_certificate()
+        if gateway_address or ca:
+            status.gateway = v1alpha1.GatewayModel()
+            if gateway_address:
+                status.gateway.address = gateway_address
+            if ca:
+                status.gateway.caCertificate = ca
         resource.update_status(self.rsp.desired.composite, status)
 
     def mark_readiness(self, rendered: list[str]) -> None:

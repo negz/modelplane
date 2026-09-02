@@ -28,6 +28,10 @@ from typing import Any
 
 from models.ai.modelplane.infrastructure.servingstack import v1alpha1
 
+# The Secret cert-manager issues the gateway's serving certificate into (see
+# fn.compose_gateway_pki). The HTTPS listener terminates TLS with it.
+_GATEWAY_SERVING_SECRET = "cluster-gateway-serving"
+
 # CEL readiness query for the Gateway Object. The Gateway's LoadBalancer
 # address is assigned asynchronously by the controller after the Object is
 # applied. With the default SuccessfulCreate policy the Object is Ready the
@@ -50,6 +54,36 @@ def objects(gw: v1alpha1.Gateway | None) -> list[tuple[str, dict[str, Any], str 
         listeners = [{"name": ln.name, "protocol": ln.protocol, "port": ln.port} for ln in gw.listeners]
     else:
         listeners = [{"name": "http", "protocol": "HTTP", "port": 80}]
+
+    # Once the cluster has a name and something to trust, HTTPS *replaces*
+    # the HTTP listener rather than joining it.
+    #
+    # Replaces, because the gateway's Service is a public load balancer with
+    # a port per listener, and the model-serving HTTPRoutes carry no
+    # sectionName, so they attach to every listener there is. Leaving port 80
+    # open would let anything on the internet reach the engines without a
+    # certificate, which is the whole thing this exists to prevent. Nothing
+    # in the cluster needs the listener either: the endpoint picker is an
+    # ext_proc the gateway calls, not a client of it.
+    #
+    # And only once there is a client CA to trust, because a listener served
+    # without its ClientTrafficPolicy accepts everyone. Not serving HTTPS at
+    # all is the honest state while no gateway has published a CA; the
+    # cluster carries no fleet traffic then anyway, because status only
+    # publishes the hostname once this is in place.
+    if gw.hostname and (gw.clientCAs or []):
+        listeners = [
+            {
+                "name": "https",
+                "protocol": "HTTPS",
+                "port": 443,
+                "hostname": gw.hostname,
+                "tls": {
+                    "mode": "Terminate",
+                    "certificateRefs": [{"name": _GATEWAY_SERVING_SECRET}],
+                },
+            }
+        ]
 
     return [
         (
