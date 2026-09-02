@@ -51,6 +51,17 @@ _AI_GATEWAY_VERSION = "v1.1.0"
 # component below).
 _CALLER_HEADER = "x-modelplane-caller"
 
+# The cluster gateway's cert-manager Issuer that signs its CA. Composed on
+# every cluster (see the gateway-selfsigned-issuer component); fn.py's PKI
+# names it as the CA certificate's issuer, so the two must agree.
+SELFSIGNED_ISSUER = "modelplane-selfsigned"
+
+# trust-manager republishes the cluster CA's certificate into a ConfigMap
+# without its private key, which is what lets the control plane read the
+# certificate to hand to a fleet gateway. Modelplane's pin: it's gateway-path
+# contract surface, not hardware, so no generator resolves it.
+_TRUST_MANAGER_VERSION = "v0.24.0"
+
 # Must match the namespace every cloud half installs the NVIDIA DRA
 # driver into - generated and hand-written alike - so this quota lands
 # where the kubelet plugin runs.
@@ -203,6 +214,57 @@ COMPONENTS: list[Component] = [
                 },
             },
         ],
+    ),
+    # The cluster gateway's mTLS trust anchor. A self-signed Issuer signs the
+    # per-cluster CA (fn.py's compose_gateway_pki), which signs the gateway's
+    # serving certificate and validates a fleet gateway's client one. Composed
+    # on every cluster, not just a fleet-facing one: any cluster may host an
+    # InferenceGateway whose client PKI needs it, and an Issuer costs nothing.
+    # Ordered after cert-manager (its CRDs and admission webhook) and the
+    # namespace it lives in.
+    Manifests(
+        key="gateway-selfsigned-issuer",
+        depends_on=["cert-manager", "gateway-namespace"],
+        manifests=[
+            {
+                "apiVersion": "cert-manager.io/v1",
+                "kind": "Issuer",
+                "metadata": {"name": SELFSIGNED_ISSUER, "namespace": "modelplane-system"},
+                "spec": {"selfSigned": {}},
+            },
+        ],
+    ),
+    # trust-manager republishes the cluster CA's certificate into a ConfigMap
+    # without its private key, so the control plane reads the certificate
+    # through a Bundle (fn.py's compose_gateway_pki) rather than the Secret that
+    # holds the key too.
+    #
+    # Ordered after the self-signed Issuer, not just cert-manager: this chart
+    # ships its own Issuer and Certificate for its webhook, and Helm applies
+    # custom resources last, so installed alongside cert-manager they lose a
+    # race with its validating webhook and the release fails terminally
+    # (nothing sets rollbackLimit). An Issuer we composed reporting Ready proves
+    # the same webhook admits the same kind, and a component's install gate
+    # waits for exactly that.
+    Chart(
+        key="trust-manager",
+        release="mp-trust-manager",
+        namespace="modelplane-system",
+        chart="trust-manager",
+        repository="oci://quay.io/jetstack/charts",
+        version=_TRUST_MANAGER_VERSION,
+        depends_on=["gateway-selfsigned-issuer"],
+        values={
+            # Kept because the Bundles are Objects owned by other XRs, and an
+            # Object whose CRD has gone can't be observed, so it never
+            # finalizes.
+            "crds": {"enabled": True, "keep": True},
+            "app": {"trust": {"namespace": "modelplane-system"}},
+            # The default package is a public-CA trust store, for Bundles that
+            # set useDefaultCAs. These trust one private CA each, so disabling
+            # it drops an init container and the image pull it waits on.
+            "defaultPackage": {"enabled": False},
+        },
     ),
     # The DRA driver's kubelet plugin runs at system-node-critical
     # priority. GKE only admits such pods in a namespace whose

@@ -55,23 +55,24 @@ def objects(gw: v1alpha1.Gateway | None) -> list[tuple[str, dict[str, Any], str 
     else:
         listeners = [{"name": "http", "protocol": "HTTP", "port": 80}]
 
-    # Once the cluster has a name and something to trust, HTTPS *replaces*
-    # the HTTP listener rather than joining it.
+    # A cluster given a hostname is fleet facing, and a fleet-facing gateway
+    # serves mutually authenticated HTTPS or it serves nothing at all.
     #
-    # Replaces, because the gateway's Service is a public load balancer with
-    # a port per listener, and the model-serving HTTPRoutes carry no
-    # sectionName, so they attach to every listener there is. Leaving port 80
-    # open would let anything on the internet reach the engines without a
-    # certificate, which is the whole thing this exists to prevent. Nothing
-    # in the cluster needs the listener either: the endpoint picker is an
-    # ext_proc the gateway calls, not a client of it.
+    # Nothing at all, because there are only unsafe alternatives. The
+    # gateway's Service is a public load balancer with a port per listener,
+    # and the model-serving HTTPRoutes carry no sectionName, so they attach
+    # to every listener there is: an HTTP listener alongside HTTPS, or left
+    # in place while no CA is trusted, serves the engines to anything on the
+    # internet with no certificate asked for. An HTTPS listener without its
+    # ClientTrafficPolicy is worse, because it looks like it asks. Nothing in
+    # the cluster wants either: the endpoint picker is an ext_proc the
+    # gateway calls, not a client of it.
     #
-    # And only once there is a client CA to trust, because a listener served
-    # without its ClientTrafficPolicy accepts everyone. Not serving HTTPS at
-    # all is the honest state while no gateway has published a CA; the
-    # cluster carries no fleet traffic then anyway, because status only
-    # publishes the hostname once this is in place.
-    if gw.hostname and (gw.clientCAs or []):
+    # So while no fleet gateway has published a CA, fn.serves_gateway
+    # withholds the Gateway entirely (this only shapes its listeners). A
+    # cluster with no hostname isn't fleet facing and keeps the plain HTTP
+    # listener; it is never schedulable, so nothing routes to it.
+    if gw.hostname:
         listeners = [
             {
                 "name": "https",

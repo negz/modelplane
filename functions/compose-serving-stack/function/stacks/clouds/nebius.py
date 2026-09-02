@@ -34,7 +34,10 @@ COMPONENTS: list[Component] = [
         # envoy-gateway in common.py depends on this chart (a cross-half
         # edge), so its Ready must mean healthy, not just deployed.
         wait=True,
-        values={"crds": {"enabled": True, "keep": False}},
+        # Keep the CRDs on uninstall. The gateway PKI composes Certificates
+        # and Issuers as provider-kubernetes Objects; take their CRDs away and
+        # provider-kubernetes can't observe them to release their finalizers.
+        values={"crds": {"enabled": True, "keep": True}},
     ),
     Chart(
         key="kube-prometheus-stack",
