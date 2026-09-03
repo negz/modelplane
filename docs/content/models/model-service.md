@@ -118,11 +118,27 @@ spec:
 Endpoints served by different providers, on different paths, coexist behind the
 one model name.
 
+## How a service reaches its gateways
+
+A service doesn't name its gateways. Each `InferenceGateway` names the services
+it serves, through a `serviceSelector` that matches a service's labels, and a
+gateway with no selector serves every service. Label a service for a region and
+give that region's gateways a matching selector, and only they serve it.
+
+For every gateway that serves it, Modelplane composes a `ModelRoute` that renders
+the routing onto that gateway's cluster. You don't write `ModelRoute`s.
+`status.routes` counts them, and `kubectl get modelroutes -l
+modelplane.ai/service=<name>` shows each one, its gateway and whether that gateway
+is carrying the service. Look there when a service is Ready but a gateway isn't
+serving it.
+
 ## Sending a request
 
 A caller names the model rather than a path. The name is
-`<namespace>/<service>`, and `status.gateways` lists the gateways serving it;
-each publishes a base URL per API it speaks:
+`<namespace>/<service>`. `status.routes` counts the gateways serving the service,
+and `kubectl get modelroutes -l modelplane.ai/service=<name>` lists them one per
+gateway, each with its address. Every gateway publishes a base URL per API it
+speaks:
 
 ```bash
 ADDRESS=$(kubectl get ig local -o jsonpath='{.status.endpoints.openAI}')
