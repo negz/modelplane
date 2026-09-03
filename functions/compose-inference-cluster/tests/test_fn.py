@@ -27,6 +27,11 @@ from google.protobuf import struct_pb2 as structpb
 from models.ai.modelplane.inferencecluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
+# The internal name Modelplane derives for this cluster's gateway, which
+# compose-inference-gateway resolves. Built from the SDK's own child_name, so the
+# namespace and suffix are asserted independently of the function under test.
+_GATEWAY_HOSTNAME = f"{resource.child_name('gateway', 'test-cluster')}.modelplane-system.svc.cluster.local"
+
 
 @dataclasses.dataclass
 class Case:
@@ -375,6 +380,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                                 "spec": {
                                     "cloud": "Existing",
+                                    "gateway": {"hostname": _GATEWAY_HOSTNAME},
                                     "stack": "Standard",
                                     "secrets": [
                                         {
@@ -709,6 +715,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                                 "spec": {
                                     "cloud": "Existing",
+                                    "gateway": {"hostname": _GATEWAY_HOSTNAME},
                                     "stack": "Standard",
                                     "secrets": [
                                         {
@@ -1337,6 +1344,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                                 "spec": {
                                     "cloud": "GKE",
+                                    "gateway": {"hostname": _GATEWAY_HOSTNAME},
                                     "stack": "Standard",
                                     "secrets": [
                                         {
@@ -1488,6 +1496,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         },
                         "spec": {
                             "cloud": "EKS",
+                            "gateway": {"hostname": _GATEWAY_HOSTNAME},
                             "stack": "Standard",
                             "secrets": [
                                 {
@@ -1807,6 +1816,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         },
                         "spec": {
                             "cloud": "Nebius",
+                            "gateway": {"hostname": _GATEWAY_HOSTNAME},
                             "stack": "Standard",
                             "secrets": [
                                 {
@@ -2115,6 +2125,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         },
                         "spec": {
                             "cloud": "AKS",
+                            "gateway": {"hostname": _GATEWAY_HOSTNAME},
                             "stack": "Standard",
                             "secrets": [
                                 {
@@ -2508,6 +2519,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         },
                         "spec": {
                             "cloud": "Vultr",
+                            "gateway": {"hostname": _GATEWAY_HOSTNAME},
                             "stack": "Standard",
                             "secrets": [
                                 {
@@ -2838,8 +2850,9 @@ class TestGatewayStatus(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _request(*, address: str | None, ca: str | None, gateway_cas: list[str]) -> fnv1.RunFunctionRequest:
-        """A cluster with a hostname configured, and whatever its serving stack
-        and the fleet's gateways have published so far."""
+        """A cluster and whatever its serving stack and the fleet's gateways have
+        published so far. The gateway name is Modelplane's own, so nothing
+        configures it."""
         xr = v1alpha1.InferenceCluster(
             metadata=metav1.ObjectMeta(name="test-cluster", namespace="modelplane-system"),
             spec=v1alpha1.Spec(
@@ -2847,7 +2860,6 @@ class TestGatewayStatus(unittest.IsolatedAsyncioTestCase):
                     source="Existing",
                     existing=v1alpha1.Existing(secretRef=v1alpha1.SecretRef(name="my-kubeconfig")),
                 ),
-                gateway=v1alpha1.Gateway(hostname="eu.clusters.example.org"),
             ),
         )
         stack_status: dict = {"conditions": [{"type": "Ready", "status": "True"}]}
@@ -2909,7 +2921,7 @@ class TestGatewayStatus(unittest.IsolatedAsyncioTestCase):
             {
                 "address": "34.55.100.10",
                 "caCertificate": "cluster-ca",
-                "hostname": "eu.clusters.example.org",
+                "hostname": _GATEWAY_HOSTNAME,
             },
         )
 
