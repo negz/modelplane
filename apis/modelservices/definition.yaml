@@ -117,22 +117,21 @@ spec:
                   The name a caller passes as the request's model. Namespaced, so
                   two services can't collide and the namespace serving a caller
                   is legible in what it passes.
-              gateways:
-                type: array
+              routes:
+                type: object
                 description: >-
-                  The InferenceGateways serving this service, which is every
-                  gateway whose serviceSelector matches it. Empty means no
-                  gateway serves this service and no caller can reach it.
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                    hostname:
-                      type: string
-                      description: The name that gateway answers on, if it has one.
-                    address:
-                      type: string
+                  Counts of the ModelRoutes this service composes, one per gateway
+                  that serves it. ready is how many are carrying traffic; total is
+                  how many gateways serve the service. total 0 means no gateway
+                  serves it and no caller can reach it. Per-gateway detail,
+                  including each gateway's address, is on the ModelRoutes
+                  themselves: kubectl get modelroutes -l
+                  modelplane.ai/service=<name>.
+                properties:
+                  total:
+                    type: integer
+                  ready:
+                    type: integer
               endpoints:
                 type: object
                 description: Observed endpoint counts, across all priorities.
