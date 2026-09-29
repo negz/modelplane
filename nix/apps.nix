@@ -31,7 +31,7 @@
             -ignore '**/*.toml' \
             -ignore '**/*.yaml' \
             -ignore '**/*.yml' \
-            functions/ docs/utils/validate/ nix.sh
+            functions/ docs/utils/validate/ e2e/tests/ nix.sh
 
           echo "Formatting and linting Nix..."
           statix fix .
@@ -46,8 +46,8 @@
           find . -name '*.sh' -type f -exec shellcheck {} +
 
           echo "Formatting and linting Python..."
-          ruff format functions/
-          ruff check --fix functions/
+          ruff format functions/ e2e/tests/
+          ruff check --fix functions/ e2e/tests/
 
           echo "Refreshing uv.lock..."
           uv lock

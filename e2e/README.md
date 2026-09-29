@@ -127,6 +127,23 @@ failure. It's the exact command the `E2E` CI workflow runs, so a green `--verify
 locally and a green CI run mean the same thing; use the manual curls above to
 poke the endpoints interactively.
 
+## Tests
+
+`tests/` holds the checks, written with Python's stdlib `unittest`. They run on
+the host against the clusters `run.sh` brought up, and talk to both through
+`kubectl`. Requests to a gateway run curl in a pod on the control plane through
+`kubectl exec`, because a macOS host can't route to the kind network. Run them
+once `--verify` has passed:
+
+```bash
+nix develop -c python3 -m unittest discover -c -s e2e/tests -v
+```
+
+`-c` makes Ctrl-C finish the running test and clean up rather than abort. Each
+test's docstring says what it checks, and `-v` prints it beside the result. The
+EKS test in `test_clouds.py` is skipped unless you ask for it; its docstring
+says how.
+
 ## How it's structured
 
 `nix run .#e2e` materialises the Nix-built function images and hands off to
@@ -162,6 +179,7 @@ e2e/
     30-inference-cluster.yaml # source: Existing -> the workload cluster
     40-model-deployment.yaml
     50-model-service.yaml
+  tests/                     # unittest checks, run against the clusters
 ```
 
 ## Why the extra moving parts

@@ -108,10 +108,25 @@ in
         cp -r ${self} src
         chmod -R u+w src
         cd src
-        ruff format --check functions/ docs/utils/validate/
-        ruff check functions/ docs/utils/validate/
+        ruff format --check functions/ docs/utils/validate/ e2e/tests/
+        ruff check functions/ docs/utils/validate/ e2e/tests/
         mkdir -p $out
         touch $out/.python-checks-passed
+      '';
+
+  # Type-check the e2e suite. It imports only the stdlib, so it needs no venv.
+  ty-e2e =
+    pkgs.runCommand "modelplane-ty-e2e"
+      {
+        nativeBuildInputs = [ pkgs.unstable.ty ];
+      }
+      ''
+        cp -r ${self} src
+        chmod -R u+w src
+        cd src
+        ty check e2e/tests
+        mkdir -p $out
+        touch $out/.ty-passed
       '';
 
   # Fail if the generated serving stack lists are stale: regenerate them
@@ -143,10 +158,10 @@ in
       '';
 
   # Fail if any hand-written source file is missing its Apache 2.0 license
-  # header. Scoped to the files we author: the composition functions and the
-  # docs manifest validator. Generated models under schemas/python carry their
-  # own codegen banner, and config (*.toml) and vendored upstream CRDs (*.yaml)
-  # are excluded. addlicense -check only reads, so it runs against the store
+  # header. Scoped to the files we author: the composition functions, the docs
+  # manifest validator, and the e2e suite. Generated models under
+  # schemas/python carry their own codegen banner, and config (*.toml) and
+  # vendored upstream CRDs (*.yaml) are excluded. addlicense -check only reads, so it runs against the store
   # path directly. Run 'nix run .#fix' to add any missing headers.
   license =
     pkgs.runCommand "modelplane-license-check"
@@ -159,7 +174,7 @@ in
           -ignore '**/*.toml' \
           -ignore '**/*.yaml' \
           -ignore '**/*.yml' \
-          functions/ docs/utils/validate/ nix.sh
+          functions/ docs/utils/validate/ e2e/tests/ nix.sh
         mkdir -p $out
         touch $out/.license-check-passed
       '';
