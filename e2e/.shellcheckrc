@@ -1,0 +1,4 @@
+# The scenario scripts in tests/ source lib.sh. Follow it, so shellcheck sees
+# what it defines.
+external-sources=true
+source-path=SCRIPTDIR

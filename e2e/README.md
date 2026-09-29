@@ -127,6 +127,31 @@ failure. It's the exact command the `E2E` CI workflow runs, so a green `--verify
 locally and a green CI run mean the same thing; use the manual curls above to
 poke the endpoints interactively.
 
+## Tests
+
+`--verify` runs `test.sh` once the environment is up. Run it yourself, from
+`nix develop`, to test an environment that's already running:
+
+```bash
+e2e/test.sh                     # serving, lifecycle and placement
+e2e/test.sh placement serving   # just these
+```
+
+Each scenario is a script in `tests/`, and each check in it is a `check` line
+naming what must hold, followed by the code that calls `pass`, `fail` or
+`skip`. A failed check doesn't stop the others, and the summary lists every
+result. `lib.sh` holds the helpers, including `request`, which sends HTTP
+requests from a curl pod, because the host can't route to the gateways on
+macOS. To add a scenario, add a script to `tests/` and name it on the command
+line.
+
+| Scenario | Checks |
+|---|---|
+| `serving` | The InferenceGateway authenticates, routes and meters OpenAI and Anthropic requests for `ml-team/mock`, and reports the served model; the cluster gateway demands a client certificate |
+| `lifecycle` | A ModelDeployment and ModelService of its own serve, stop serving when deleted, and leave no replicas, endpoints or engine pods |
+| `placement` | Engine pods land on the pool's nodes with a DRA device; no pod tolerates every taint unless allowlisted |
+| `clouds` | An EKS InferenceCluster becomes Ready and deletes. Runs only when named, against a control plane with AWS credentials; see `tests/clouds.sh` |
+
 ## How it's structured
 
 `nix run .#e2e` materialises the Nix-built function images and hands off to
@@ -154,6 +179,9 @@ MetalLB and DRA driver, and the cross-cluster kubeconfig).
 ```
 e2e/
   run.sh                     # two-cluster orchestration
+  test.sh                    # runs the scenarios in tests/
+  lib.sh                     # helpers the scenarios source
+  tests/                     # one script per scenario
   dra-example-driver.yaml    # vendored fake DRA GPU driver (applied to workload)
   manifests/                 # applied to the control plane after setup
     00-namespaces.yaml

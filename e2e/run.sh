@@ -19,9 +19,6 @@ WL=modelplane-e2e-workload
 # v1.34.2 or newer: older kubelets deadlock on an idle DRA connection (k/k#133934).
 WL_NODE_IMAGE=kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
 METALLB_URL=https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
-# Pinned by digest (a multi-arch manifest list) so a moving :latest can't flake
-# the verify curl pod.
-CURL_IMAGE=curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
 ROOT="$(git rev-parse --show-toplevel)"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
@@ -122,9 +119,10 @@ export DOCKER_CONFIG="$docker_config"
 # Flags pick the mode:
 #   --no-apply  install and finish the control plane but skip the model
 #               manifests — for gradual, manual apply/debugging.
-#   --verify    after apply, wait for the ModelService and assert a live 200,
-#               exiting non-zero on failure. This is exactly what CI runs, so
-#               running it locally gives the same pass/fail signal (dev/CI parity).
+#   --verify    after apply, wait for the ModelService to serve, then run the
+#               e2e tests (test.sh), exiting non-zero on failure. This is
+#               exactly what CI runs, so running it locally gives the same
+#               pass/fail signal (dev/CI parity).
 manifests="$ROOT/e2e/manifests"
 cpctx="kind-$CP"
 apply_manifests=1
@@ -183,10 +181,9 @@ fi
 
 # --verify: project run returns once the config is healthy and the resources are
 # applied, so the serving-stack install and model rollout are still reconciling.
-# Wait for the ModelService to report RoutingReady, then route a real request to
-# the engine and assert a 200. Any failure exits non-zero — that is what makes
-# this usable as a CI gate.
-log "Verifying the model serves end to end"
+# Wait for them to settle, then run the e2e tests against the result. Any
+# failure exits non-zero — that is what makes this usable as a CI gate.
+log "Waiting for the model to serve"
 ns=ml-team
 svc=mock
 
@@ -233,264 +230,5 @@ kubectl --context "$WLCTX" -n envoy-gateway-system rollout status deploy -l "$pr
 	exit 1
 }
 
-# A caller names a ModelService as the request's model, so read it from status.
-model="$(kubectl --context "$cpctx" -n "$ns" get modelservice "$svc" -o jsonpath='{.status.model}')"
-[ -n "$model" ] || {
-	echo "verify: ModelService $ns/$svc published no model name" >&2
-	exit 1
-}
-
-base=""
-for _ in $(seq 1 80); do
-	base="$(kubectl --context "$cpctx" get inferencegateway local -o jsonpath='{.status.endpoints.openAI}' 2>/dev/null || true)"
-	[ -n "$base" ] && break
-	sleep 15
-done
-[ -n "$base" ] || {
-	echo "verify: InferenceGateway local never published an OpenAI endpoint" >&2
-	exit 1
-}
-log "Gateway ${base}, model ${model}"
-
-# GET a URL from the workload cluster, reporting curl's own exit code rather
-# than an HTTP status. Used to assert a request is refused before there is any
-# HTTP response to report. -k skips server verification, so a non-zero exit is
-# the server rejecting us rather than us rejecting its certificate.
-wl_curl_exit() {
-	local pod="$1" url="$2"
-	kubectl --context "$WLCTX" -n default run "$pod" --restart=Never \
-		--labels=app.kubernetes.io/name=e2e-verify --image="$CURL_IMAGE" \
-		--command -- sh -c "curl -sS -k --max-time 15 -o /dev/null \"$url\"; echo EXIT=\$?" \
-		>/dev/null 2>&1 || true
-	local c=""
-	for _ in $(seq 1 30); do
-		c="$(kubectl --context "$WLCTX" -n default logs "$pod" 2>/dev/null | sed -n 's/.*EXIT=\([0-9]*\).*/\1/p' || true)"
-		[ -n "$c" ] && break
-		sleep 2
-	done
-	kubectl --context "$WLCTX" -n default delete pod "$pod" --now >/dev/null 2>&1 || true
-	printf '%s' "$c"
-}
-
-# The address is on the kind Docker subnet the host can't route to on macOS, so
-# curl from a pod on the control plane, reading the status from the pod's logs
-# (not `run -i`, whose attach drops output on a headless runner). curl_status
-# runs one throwaway pod per call and echoes the HTTP code; it polls the logs
-# (curl writes the code once, then exits) so a failed attempt costs seconds, and
-# a unique pod name per call keeps retries from reading a prior pod's output.
-curl_status() {
-	local pod="$1" url="$2"
-	shift 2
-	kubectl --context "$cpctx" -n "$ns" run "$pod" --restart=Never \
-		--labels=app.kubernetes.io/name=e2e-verify --image="$CURL_IMAGE" \
-		--command -- curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$url" "$@" \
-		>/dev/null 2>&1 || true
-	local c=""
-	for _ in $(seq 1 30); do
-		c="$(kubectl --context "$cpctx" -n "$ns" logs "$pod" 2>/dev/null | tr -dc '0-9' || true)"
-		[ -n "$c" ] && break
-		sleep 2
-	done
-	printf '%s' "$c"
-}
-
-# curl_body is the same, but returns the response body. Used where the assertion
-# is about what came back rather than only that something did.
-curl_body() {
-	local pod="$1" url="$2"
-	shift 2
-	kubectl --context "$cpctx" -n "$ns" run "$pod" --restart=Never \
-		--labels=app.kubernetes.io/name=e2e-verify --image="$CURL_IMAGE" \
-		--command -- curl -sS --max-time 15 "$url" "$@" >/dev/null 2>&1 || true
-	local b=""
-	for _ in $(seq 1 30); do
-		b="$(kubectl --context "$cpctx" -n "$ns" logs "$pod" 2>/dev/null || true)"
-		[ -n "$b" ] && break
-		sleep 2
-	done
-	printf '%s' "$b"
-}
-
-cleanup_verify_pods() {
-	kubectl --context "$cpctx" -n "$ns" delete pod -l app.kubernetes.io/name=e2e-verify --now >/dev/null 2>&1 || true
-}
-
-# The gateway authenticates callers against the key in
-# e2e/manifests/10-inference-gateway.yaml. OpenAI requests send it as a bearer
-# token, Anthropic ones in x-api-key.
-caller_key=sk-e2e-caller
-
-# OpenAI /v1/chat/completions, retried: the gateway can publish an endpoint a
-# moment before the route is serving, and a slower CI runner widens that gap.
-oai='{"model":"'"$model"'","messages":[{"role":"user","content":"ping"}]}'
-code=""
-for attempt in $(seq 1 10); do
-	code="$(curl_status "e2e-verify-oai-$attempt" "$base/chat/completions" -H "authorization: Bearer $caller_key" -H 'content-type: application/json' -d "$oai")"
-	log "verify attempt $attempt (OpenAI): HTTP ${code:-none}"
-	[ "$code" = "200" ] && break
-	sleep 10
-done
-[ "$code" = "200" ] || {
-	echo "verify: $base/chat/completions did not return 200 within retries (last: ${code:-none})" >&2
-	cleanup_verify_pods
-	exit 1
-}
-
-# The same request with no key, and with a key no Secret holds, is refused.
-for nokey in none wrong; do
-	if [ "$nokey" = none ]; then
-		kcode="$(curl_status "e2e-verify-nokey-$nokey" "$base/chat/completions" -H 'content-type: application/json' -d "$oai")"
-	else
-		kcode="$(curl_status "e2e-verify-nokey-$nokey" "$base/chat/completions" -H 'authorization: Bearer sk-wrong' -H 'content-type: application/json' -d "$oai")"
-	fi
-	log "verify (key: ${nokey}): HTTP ${kcode:-none}"
-	[ "$kcode" = "401" ] || {
-		echo "verify: expected 401 for a request with key ${nokey}, got ${kcode:-none}" >&2
-		cleanup_verify_pods
-		exit 1
-	}
-done
-
-# The engine only answers to the name Modelplane started it under, and rejects
-# anything else with a 404. So a 200 above already proves the gateway rewrote the
-# caller's ModelService name to the deployment's. Assert the response reports the
-# served model rather than what the caller asked for, which is the visible half
-# of the same mechanism.
-body="$(curl_body e2e-verify-served "$base/chat/completions" -H "authorization: Bearer $caller_key" -H 'content-type: application/json' -d "$oai")"
-case "$body" in
-*'"model": "ml-team/mock-demo"'* | *'"model":"ml-team/mock-demo"'*)
-	log "verify (model rewriting): caller asked for ${model}, engine served ml-team/mock-demo"
-	;;
-*)
-	echo "verify: response did not report the served model; got: $body" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-esac
-
-# A model no ModelService claims must not route anywhere. Catches a route
-# matching too broadly, which would send a caller to an arbitrary backend.
-ncode="$(curl_status e2e-verify-unknown "$base/chat/completions" -H "authorization: Bearer $caller_key" \
-	-H 'content-type: application/json' -d '{"model":"ml-team/nope","messages":[{"role":"user","content":"ping"}]}')"
-log "verify (unknown model): HTTP ${ncode:-none}"
-[ "$ncode" = "200" ] && {
-	echo "verify: an unclaimed model name was routed and served" >&2
-	cleanup_verify_pods
-	exit 1
-}
-
-# The cluster gateway must refuse a caller that presents no client certificate.
-# Every check above goes through the InferenceGateway, which holds a
-# certificate, so none of them would notice this lapsing. A ClientTrafficPolicy
-# that stopped applying, or an HTTP listener beside the HTTPS one, would leave
-# the engines open to anything that can reach the load balancer.
-#
-# Run from the workload cluster, where the Service compose-inference-gateway
-# composed resolves the gateway's name. A plain GET is enough: the handshake
-# fails before any request is sent. The trailing dot skips the pod's search
-# domains, which ndots:5 would otherwise try ahead of the name itself. A resolve
-# failure returns curl 6, which the checks below reject rather than pass.
-cluster_gw_name="$(kubectl --context "$cpctx" get inferencecluster local -o jsonpath='{.status.gateway.hostname}')"
-cluster_gw="https://${cluster_gw_name}./v1/models"
-ecode="$(wl_curl_exit e2e-verify-nocert "$cluster_gw")"
-log "verify (cluster gateway, no client certificate): curl exit ${ecode:-none}"
-case "$ecode" in
-0)
-	echo "verify: the cluster gateway served a caller presenting no client certificate" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-35 | 52 | 55 | 56) ;;
-*)
-	echo "verify: expected the cluster gateway to refuse an uncertified caller mid-handshake," >&2
-	echo "verify: but curl failed with ${ecode:-no exit code}, which is a different failure" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-esac
-
-# And nothing on port 80. The serving HTTPRoutes carry no sectionName, so they
-# attach to every listener there is, and an HTTP listener would serve the
-# engines without a certificate. The gateway's only listener is HTTPS, and the
-# load balancer publishes a port per listener, so the connection is refused.
-hcode="$(wl_curl_exit e2e-verify-plaintext "http://${cluster_gw_name}./v1/models")"
-log "verify (cluster gateway, plaintext): curl exit ${hcode:-none}"
-case "$hcode" in
-0)
-	echo "verify: the cluster gateway served plaintext HTTP on port 80" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-7 | 28 | 35 | 52 | 56) ;;
-*)
-	echo "verify: expected no listener on port 80, but curl failed with ${hcode:-no exit code}," >&2
-	echo "verify: which is a different failure" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-esac
-
-# /v1/models lists what this gateway serves. Only exact model matches appear, so
-# this also proves the route matches exactly rather than by pattern.
-models="$(curl_body e2e-verify-models "$base/models" -H "authorization: Bearer $caller_key")"
-case "$models" in
-*"$model"*) log "verify (/v1/models): lists ${model}" ;;
-*)
-	echo "verify: /v1/models did not list $model; got: $models" >&2
-	cleanup_verify_pods
-	exit 1
-	;;
-esac
-
-# Anthropic's Messages API on the same gateway. The endpoint's API is OpenAI, so
-# the gateway translates the request. The mock serves /v1/messages too, the way
-# vLLM does, so a 200 alone doesn't tell translation from passthrough. The key
-# goes in x-api-key, as Anthropic clients send it.
-anthropic_base="${base%/v1}/anthropic/v1"
-ant='{"model":"'"$model"'","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
-mcode="$(curl_status e2e-verify-anthropic "$anthropic_base/messages" -H "x-api-key: $caller_key" -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' -d "$ant")"
-log "verify (Anthropic /v1/messages): HTTP ${mcode:-none}"
-[ "$mcode" = "200" ] || {
-	echo "verify: $anthropic_base/messages did not return 200 (got: ${mcode:-none})" >&2
-	cleanup_verify_pods
-	exit 1
-}
-
-# Assert the gateway emits a usage record attributing the request's tokens to
-# its caller. Read it off the InferenceGateway's Envoy. It runs two proxy pods
-# and each request lands on either, so read both. --tail has to be explicit,
-# because with a selector kubectl logs keeps only the last 10 lines per pod.
-usage="$(kubectl --context "$WLCTX" -n envoy-gateway-system logs \
-	-l "$proxy" -c envoy --tail=200 2>/dev/null |
-	grep '"input_tokens":12' | tail -1 || true)"
-# Check each field on its own. The access log serialises its keys
-# alphabetically, so a single glob spanning two of them depends on that order.
-#
-# The endpoint is the ModelRoute's backend for it, in ml-team's mirrored
-# namespace (child_name("mp", "ml-team")) and named after the route
-# (child_name("mock", "local")) and the endpoint.
-missing=""
-for want in \
-	'"caller":"e2e"' \
-	'"service":"'"$model"'"' \
-	'"endpoint":"mp-ml-team-51733/mock-local-' \
-	'"served_model":"ml-team/mock-demo"' \
-	'"input_tokens":12' \
-	'"output_tokens":9' \
-	'"total_tokens":21' \
-	'"status":200'; do
-	case "$usage" in
-	*"$want"*) ;;
-	*) missing="$missing $want" ;;
-	esac
-done
-[ -z "$missing" ] || {
-	echo "verify: usage record missing:$missing" >&2
-	echo "verify: record was: ${usage:-none}" >&2
-	cleanup_verify_pods
-	exit 1
-}
-log "verify (usage record): ${usage}"
-
-cleanup_verify_pods
-log "End to end OK: ${base} authenticates callers, serves ${model} over OpenAI and Anthropic, rewrites the model, and meters it"
+log "Running the e2e tests"
+bash "$ROOT/e2e/test.sh"
