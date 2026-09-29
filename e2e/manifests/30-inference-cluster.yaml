@@ -19,4 +19,6 @@ spec:
   nodePools:
   - name: gpu-synthetic
     className: synthetic-gpu
-    nodeCount: 1
+    # Bake-off only: declare room for the ml-team model plus one lifecycle
+    # test model per option. The single real node has 8 fake GPUs.
+    nodeCount: 5
