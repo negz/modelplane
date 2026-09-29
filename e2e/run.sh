@@ -125,7 +125,7 @@ export DOCKER_CONFIG="$docker_config"
 #   --verify    after apply, wait for the ModelService and assert a live 200,
 #               exiting non-zero on failure. This is exactly what CI runs, so
 #               running it locally gives the same pass/fail signal (dev/CI parity).
-manifests="$ROOT/e2e/manifests"
+manifests="$ROOT/e2e/manifests/platform"
 cpctx="kind-$CP"
 apply_manifests=1
 verify=0
