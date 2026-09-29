@@ -191,6 +191,7 @@
               pkgs.kubectl
               pkgs.kubernetes-helm
               pkgs.kind
+              pkgs.kyverno-chainsaw
               pkgs.docker-client
               pkgs.unstable.uv
               pkgs.python3

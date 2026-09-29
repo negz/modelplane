@@ -1,0 +1,280 @@
+# Sends requests for ml-team/mock through the InferenceGateway, and reads the
+# usage record the gateway meters them with. Read-only apart from the curl pod
+# and this test's namespace.
+#
+# Request bodies match run.sh's: the mock engine's token counts depend on them.
+# Chainsaw sets $NAMESPACE to the test namespace, where the curl pod runs.
+# Each step reads the ModelService's model and the gateway's endpoints when it
+# starts, because bindings don't carry between steps.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: serving
+  labels:
+    scenario: serving
+spec:
+  description: The InferenceGateway authenticates, routes, translates and meters requests.
+  cluster: controlplane
+  namespace: bakeoff-chainsaw-serving
+  steps:
+  - name: ready
+    description: ml-team/mock is routable, and there's a pod to send requests from.
+    try:
+    - apply:
+        file: ../../curl.yaml
+    - assert:
+        resource:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: curl
+          status:
+            phase: Running
+    # On a fresh environment these wait for the model to roll out.
+    - assert:
+        timeout: 20m
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelService
+          metadata:
+            name: mock
+            namespace: ml-team
+          status:
+            (conditions[?type == 'RoutingReady']):
+            - status: 'True'
+    - assert:
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: InferenceGateway
+          metadata:
+            name: local
+          status:
+            endpoints:
+              (openAI != null): true
+              (anthropic != null): true
+    # AI Gateway rolls the gateway's proxy pods, stamping them with its config
+    # hash, once the first route reaches it. Requests can fail until that
+    # rollout finishes.
+    - assert:
+        cluster: workload
+        timeout: 5m
+        resource:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            namespace: envoy-gateway-system
+            labels:
+              gateway.envoyproxy.io/owning-gateway-name: inference-gateway
+          spec:
+            template:
+              metadata:
+                annotations:
+                  ("aigateway.envoyproxy.io/extproc-config-hash" != null): true
+          status:
+            (updatedReplicas == replicas && availableReplicas == replicas): true
+    catch:
+    - describe:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelService
+        namespace: ml-team
+        name: mock
+    - get:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelReplica
+        namespace: ml-team
+    - get:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelEndpoint
+        namespace: ml-team
+
+  - name: a1-openai-chat-completion
+    description: >-
+      An OpenAI chat completion naming the ModelService's status.model, with
+      the caller key, returns 200.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', 'ml-team', 'mock').status.model)
+    - name: openai
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+    try:
+    - continueOnError: true
+      script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        # The gateway can publish an endpoint a moment before its route
+        # serves, so retry until a 2xx. --fail makes an HTTP error retryable.
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15 -o /dev/null -w '%{http_code}'
+          --fail --retry 10 --retry-delay 5 --retry-all-errors
+          "$OPENAI/chat/completions"
+          -H 'authorization: Bearer sk-e2e-caller'
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($stdout): '200'
+
+  - name: a2-openai-rejects-bad-keys
+    description: The same request returns 401 with no key, and 401 with key sk-wrong.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', 'ml-team', 'mock').status.model)
+    - name: openai
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+    try:
+    - continueOnError: true
+      script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15 -o /dev/null -w '%{http_code}'
+          "$OPENAI/chat/completions"
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($stdout): '401'
+    - continueOnError: true
+      script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15 -o /dev/null -w '%{http_code}'
+          "$OPENAI/chat/completions"
+          -H 'authorization: Bearer sk-wrong'
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($stdout): '401'
+
+  - name: a3-served-model
+    description: >-
+      The response names the model the engine served, ml-team/mock-demo, not
+      the ModelService the caller asked for.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', 'ml-team', 'mock').status.model)
+    - name: openai
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+    try:
+    - continueOnError: true
+      script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15 --fail-with-body
+          "$OPENAI/chat/completions"
+          -H 'authorization: Bearer sk-e2e-caller'
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($error): ~
+          (json_parse($stdout).model): ml-team/mock-demo
+
+  - name: a4-anthropic-messages
+    description: >-
+      An Anthropic Messages request, with the caller key in x-api-key,
+      returns 200.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', 'ml-team', 'mock').status.model)
+    - name: anthropic
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.anthropic)
+    try:
+    - continueOnError: true
+      script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: ANTHROPIC
+          value: ($anthropic)
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15 -o /dev/null -w '%{http_code}'
+          "$ANTHROPIC/messages"
+          -H 'x-api-key: sk-e2e-caller'
+          -H 'anthropic-version: 2023-06-01'
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($stdout): '200'
+
+  - name: a5-usage-record
+    description: >-
+      The gateway's Envoy access log records a request's caller, service,
+      served model, token counts and status.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', 'ml-team', 'mock').status.model)
+    - name: openai
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+    try:
+    # Send a request of our own, noting when the curl pod sent it. The pod and
+    # Envoy run on kind nodes that share the host's clock, which the machine
+    # running chainsaw (a Mac, say) may not.
+    - script:
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        content: |
+          since="$(kubectl -n "$NAMESPACE" exec curl -- date -u +%Y-%m-%dT%H:%M:%S)"
+          code="$(kubectl -n "$NAMESPACE" exec curl -- \
+            curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+            "$OPENAI/chat/completions" \
+            -H 'authorization: Bearer sk-e2e-caller' \
+            -H 'content-type: application/json' \
+            -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}")"
+          echo "{\"since\":\"$since\",\"code\":\"$code\"}"
+        outputs:
+        - name: since
+          value: (json_parse($stdout).since)
+        check:
+          (json_parse($stdout).code): '200'
+    # Other callers use this gateway too, and authenticate as e2e as well, so
+    # this can't tell our request's record from one sent in the same second.
+    # It checks the latest record for the service that started no earlier
+    # than our request. Envoy buffers its access log, so the record can take
+    # a few seconds to appear. Read both proxy pods: a request lands on either.
+    - script:
+        cluster: workload
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: SINCE
+          value: ($since)
+        content: |
+          for _ in $(seq 1 12); do
+            records="$(kubectl -n envoy-gateway-system logs -c envoy --since=5m --tail=-1 \
+              -l gateway.envoyproxy.io/owning-gateway-name=inference-gateway |
+              grep -F "\"service\":\"$MODEL\"" |
+              awk -v since="$SINCE" -F '"start_time":"' 'substr($2, 1, 19) >= since' || true)"
+            [ -n "$records" ] && break
+            sleep 5
+          done
+          [ -n "$records" ] || echo "no usage record for $MODEL since $SINCE" >&2
+          echo "[$(printf '%s' "$records" | paste -sd, -)]"
+        check:
+          (sort_by(json_parse($stdout), &start_time)[-1]):
+            caller: e2e
+            service: ml-team/mock
+            served_model: ml-team/mock-demo
+            input_tokens: 12
+            output_tokens: 9
+            total_tokens: 21
+            status: 200

@@ -1,0 +1,178 @@
+# Deploys a model in the test's own namespace, serves it, then deletes it and
+# checks what it leaves behind. Chainsaw creates the namespace and, whether or
+# not the test passes, deletes everything the test applied and then the
+# namespace.
+#
+# Modelplane mirrors the namespace onto the workload cluster, and leaves the
+# mirror behind when the namespace goes. The test doesn't delete it.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: lifecycle
+  labels:
+    scenario: lifecycle
+spec:
+  description: A model becomes routable once deployed, and stops being once deleted.
+  cluster: controlplane
+  namespace: bakeoff-chainsaw
+  steps:
+  - name: setup
+    description: Deploy the same mock engine as ml-team/mock-demo, and a ModelService for it.
+    try:
+    - apply:
+        file: ../../curl.yaml
+    # Deploy the manifest run.sh deploys, under another name and namespace.
+    - script:
+        content: cat ../../../manifests/40-model-deployment.yaml
+        skipLogOutput: true
+        outputs:
+        - name: deployment
+          value: (parse_yaml($stdout))
+    - apply:
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelDeployment
+          metadata:
+            name: mock-chainsaw
+          spec: ($deployment.spec)
+    - apply:
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelService
+          metadata:
+            name: mock-chainsaw
+          spec:
+            endpoints:
+            - name: mock-chainsaw
+              selector:
+                matchLabels:
+                  modelplane.ai/deployment: mock-chainsaw
+    - assert:
+        resource:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: curl
+          status:
+            phase: Running
+
+  - name: b1-routing-ready
+    description: >-
+      The ModelService becomes RoutingReady, and a request naming its
+      status.model returns 200 from the served model.
+    try:
+    - assert:
+        # About 95s on a quiet kind environment, and over 3m with four
+        # suites sharing it.
+        timeout: 10m
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelService
+          metadata:
+            name: mock-chainsaw
+          status:
+            (conditions[?type == 'RoutingReady']):
+            - status: 'True'
+    - script:
+        env:
+        - name: MODEL
+          value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', $namespace, 'mock-chainsaw').status.model)
+        - name: OPENAI
+          value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+        # The route can go ready a moment before the gateway serves it, so
+        # retry until a 2xx. --fail makes an HTTP error retryable.
+        content: >-
+          kubectl -n "$NAMESPACE" exec curl --
+          curl -sS --max-time 15
+          --fail --retry 10 --retry-delay 5 --retry-all-errors
+          "$OPENAI/chat/completions"
+          -H 'authorization: Bearer sk-e2e-caller'
+          -H 'content-type: application/json'
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+        check:
+          ($error): ~
+          (json_parse($stdout).model): bakeoff-chainsaw/mock-chainsaw
+    catch:
+    - describe:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelService
+        name: mock-chainsaw
+    - get:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelReplica
+    - get:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: ModelEndpoint
+
+  - name: b2-delete-model-service
+    description: Once the ModelService is deleted, requests naming it stop returning 200 within 5 minutes.
+    bindings:
+    - name: model
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'ModelService', $namespace, 'mock-chainsaw').status.model)
+    - name: openai
+      value: (x_k8s_get($client, 'modelplane.ai/v1alpha1', 'InferenceGateway', '', 'local').status.endpoints.openAI)
+    try:
+    - delete:
+        ref:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelService
+          name: mock-chainsaw
+    - script:
+        timeout: 6m
+        env:
+        - name: MODEL
+          value: ($model)
+        - name: OPENAI
+          value: ($openai)
+        content: |
+          deadline=$(($(date +%s) + 300))
+          while :; do
+            code="$(kubectl -n "$NAMESPACE" exec curl -- \
+              curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+              "$OPENAI/chat/completions" \
+              -H 'authorization: Bearer sk-e2e-caller' \
+              -H 'content-type: application/json' \
+              -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}")"
+            [ "$code" != 200 ] || [ "$(date +%s)" -ge "$deadline" ] && break
+            sleep 5
+          done
+          # No trailing newline: chainsaw compares stdout verbatim.
+          printf %s "$code"
+        check:
+          ($stdout != '200'): true
+
+  - name: b3-delete-model-deployment
+    description: >-
+      Once the ModelDeployment is deleted with foreground propagation, its
+      ModelReplicas and ModelEndpoints are gone from the control plane, and
+      its engine pods from the workload cluster.
+    bindings:
+    # Engine pods are labelled with the name of the ModelReplica they serve.
+    # Read the names before deleting the replicas.
+    - name: replicas
+      value: (x_k8s_list($client, 'modelplane.ai/v1alpha1', 'ModelReplica', $namespace).items[].metadata.name)
+    try:
+    - delete:
+        deletionPropagationPolicy: Foreground
+        ref:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelDeployment
+          name: mock-chainsaw
+    - continueOnError: true
+      error:
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelReplica
+    - continueOnError: true
+      error:
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelEndpoint
+    # This assert polls the cluster itself, rather than a binding, so it
+    # waits out the engine's termination grace period.
+    - continueOnError: true
+      assert:
+        cluster: workload
+        resource:
+          (length($replicas) > `0`): true
+          (x_k8s_list($client, 'v1', 'Pod').items[?contains($replicas, metadata.labels."modelplane.ai/serving" || '')].metadata.name): []

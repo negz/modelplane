@@ -1,0 +1,20 @@
+# Defaults for every Chainsaw e2e test. test.sh registers the two clusters
+# (controlplane and workload) on the command line, because Chainsaw reads a
+# cluster from a kubeconfig file path and the path differs per machine.
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: modelplane-e2e
+spec:
+  # Chainsaw's defaults (5s to apply, 30s to assert) suit a controller's unit
+  # of work, not a model rolling out across two clusters. Steps that wait on
+  # something slower set their own timeout.
+  timeouts:
+    apply: 30s
+    assert: 2m
+    error: 2m
+    delete: 5m
+    # Covers the namespace deletion that ends a lifecycle test, which waits on
+    # Crossplane to finalize everything composed in it.
+    cleanup: 5m
+    exec: 1m

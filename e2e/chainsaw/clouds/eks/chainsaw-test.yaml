@@ -1,0 +1,69 @@
+# Provisions a real EKS InferenceCluster, then deletes it. It costs money and
+# takes most of an hour, so test.sh never runs it: it lives outside local/,
+# and runs only when a maintainer names this directory.
+#
+# It needs a different environment from local/. There's no workload kind
+# cluster, and the control plane must be able to provision EKS: a full
+# Modelplane install rather than run.sh's lean one, with AWS credentials
+# configured per docs/content/getting-started/build-the-platform.md (Secret
+# crossplane-system/aws-creds and ClusterProviderConfig default). To run it
+# against the control plane in kube context <ctx>:
+#
+#   chainsaw test --config e2e/chainsaw/.chainsaw.yaml --kube-context <ctx> \
+#     e2e/chainsaw/clouds/eks
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: eks
+  labels:
+    scenario: clouds
+spec:
+  description: An EKS InferenceCluster becomes Ready, and is deleted cleanly.
+  namespace: bakeoff-chainsaw-clouds
+  steps:
+  - name: d1-precondition
+    description: The control plane has the AWS credentials EKS InferenceClusters use.
+    try:
+    - assert:
+        timeout: 10s
+        resource:
+          apiVersion: aws.m.upbound.io/v1beta1
+          kind: ClusterProviderConfig
+          metadata:
+            name: default
+
+  - name: d1-eks-ready
+    description: An EKS InferenceCluster based on the getting started guide's becomes Ready.
+    try:
+    - apply:
+        file: cluster.yaml
+    - assert:
+        timeout: 45m
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: InferenceCluster
+          metadata:
+            name: e2e-eks
+          status:
+            (conditions[?type == 'Ready']):
+            - status: 'True'
+    catch:
+    - describe:
+        apiVersion: modelplane.ai/v1alpha1
+        kind: InferenceCluster
+        name: e2e-eks
+    - script:
+        content: crossplane resource trace inferencecluster e2e-eks
+
+  - name: d1-eks-deleted
+    description: Deleting the InferenceCluster removes it, and everything it composed.
+    try:
+    - delete:
+        timeout: 30m
+        ref:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: InferenceCluster
+          name: e2e-eks
+    catch:
+    - script:
+        content: crossplane resource trace inferencecluster e2e-eks

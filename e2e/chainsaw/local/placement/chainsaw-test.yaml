@@ -1,0 +1,91 @@
+# Checks where pods land on the workload cluster. Read-only: it creates only
+# the namespace Chainsaw runs every test in.
+#
+# Each check lists the pods that break a rule and asserts the list is empty,
+# so a failure names every offending pod. The lists are bindings, which
+# Chainsaw evaluates once when the assert starts, so these asserts check a
+# snapshot and don't retry.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: placement
+  labels:
+    scenario: placement
+spec:
+  description: Engine pods land on GPU nodes, and nothing else tolerates every taint.
+  cluster: workload
+  namespace: bakeoff-chainsaw-placement
+  steps:
+  - name: c1-engine-placement
+    description: >-
+      Every engine pod for ml-team/mock-demo runs on a node labelled
+      modelplane.ai/pool=gpu-synthetic, and its ResourceClaim has a device
+      allocated from driver gpu.example.com.
+    try:
+    # RoutingReady means the engine is serving, so its pods have been placed.
+    # This only waits on a fresh environment.
+    - assert:
+        cluster: controlplane
+        timeout: 20m
+        resource:
+          apiVersion: modelplane.ai/v1alpha1
+          kind: ModelService
+          metadata:
+            name: mock
+            namespace: ml-team
+          status:
+            (conditions[?type == 'RoutingReady']):
+            - status: 'True'
+    # Engine pods are labelled with the name of the ModelReplica they serve,
+    # and ModelReplicas live on the control plane.
+    - script:
+        cluster: controlplane
+        content: kubectl -n ml-team get modelreplica -l modelplane.ai/deployment=mock-demo -o json
+        skipLogOutput: true
+        outputs:
+        - name: replicas
+          value: (json_parse($stdout).items[].metadata.name)
+    - continueOnError: true
+      assert:
+        timeout: 10s
+        bindings:
+        - name: engines
+          value: (x_k8s_list($client, 'v1', 'Pod').items[?contains($replicas, metadata.labels."modelplane.ai/serving" || '')])
+        - name: gpuNodes
+          value: (x_k8s_list($client, 'v1', 'Node').items[?metadata.labels."modelplane.ai/pool" == 'gpu-synthetic'].metadata.name)
+        # A ResourceClaim lists the pods it's allocated to in reservedFor.
+        - name: gpuClaimPods
+          value: (x_k8s_list($client, 'resource.k8s.io/v1', 'ResourceClaim').items[?contains(status.allocation.devices.results[].driver, 'gpu.example.com')].status.reservedFor[].name)
+        - name: unserved
+          value: ($replicas[?!contains($engines[].metadata.labels."modelplane.ai/serving", @)])
+        - name: offPool
+          value: ($engines[?!contains($gpuNodes, spec.nodeName)].metadata.name)
+        - name: noDevice
+          value: ($engines[?!contains($gpuClaimPods, metadata.name)].metadata.name)
+        resource:
+          # Without a replica, and an engine pod for each, the pod checks
+          # pass vacuously.
+          (length($replicas) > `0`): true
+          ($unserved): []
+          ($offPool): []
+          ($noDevice): []
+
+  - name: c2-no-wildcard-tolerations
+    description: >-
+      No pod outside kube-system tolerates every taint (operator Exists with
+      no key, whatever the effect), unless its DaemonSet is allowlisted.
+    bindings:
+    # DaemonSets whose pods may carry a wildcard toleration, as namespace/name.
+    - name: allowlist
+      value:
+      - monitoring/mp-kube-prometheus-stack-prometheus-node-exporter
+    try:
+    - assert:
+        timeout: 10s
+        bindings:
+        - name: wildcards
+          value: (x_k8s_list($client, 'v1', 'Pod').items[?metadata.namespace != 'kube-system' && spec.tolerations[?operator == 'Exists' && !key]])
+        - name: offenders
+          value: ($wildcards[?!contains($allowlist, join('/', [metadata.namespace, metadata.ownerReferences[?kind == 'DaemonSet'] | [0].name || '']))].join('/', [metadata.namespace, metadata.name]))
+        resource:
+          ($offenders): []

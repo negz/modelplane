@@ -1,0 +1,16 @@
+# A pod to send gateway requests from. Gateway addresses are on the kind Docker
+# network, which a macOS host can't route to, so tests `kubectl exec` curl in
+# this pod rather than running it on the host. Chainsaw injects the test's
+# namespace, and deletes the pod when the test ends.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curl
+spec:
+  # sleep runs as PID 1 and ignores SIGTERM, so don't wait for it on delete.
+  terminationGracePeriodSeconds: 0
+  containers:
+  - name: curl
+    # Pinned by digest, like run.sh's, so a moving tag can't flake the tests.
+    image: curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    command: ["sleep", "3600"]

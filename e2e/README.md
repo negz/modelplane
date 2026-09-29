@@ -127,6 +127,15 @@ failure. It's the exact command the `E2E` CI workflow runs, so a green `--verify
 locally and a green CI run mean the same thing; use the manual curls above to
 poke the endpoints interactively.
 
+The [Chainsaw](https://kyverno.github.io/chainsaw/) tests under `chainsaw/`
+check serving, a model's lifecycle, and placement against clusters that are
+already up. Run them from `nix develop`:
+
+```bash
+e2e/chainsaw/test.sh                              # every test under local/
+e2e/chainsaw/test.sh --selector scenario=serving  # one of them
+```
+
 ## How it's structured
 
 `nix run .#e2e` materialises the Nix-built function images and hands off to
@@ -162,6 +171,10 @@ e2e/
     30-inference-cluster.yaml # source: Existing -> the workload cluster
     40-model-deployment.yaml
     50-model-service.yaml
+  chainsaw/
+    test.sh                  # runs local/ against the two kind clusters
+    local/                   # serving, lifecycle and placement tests
+    clouds/                  # tests that provision real clouds; run by hand
 ```
 
 ## Why the extra moving parts
