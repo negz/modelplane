@@ -1,0 +1,21 @@
+# The cluster docs/manifests/getting-started/eks/platform.yaml defines, renamed
+# so it can't collide with one a person made by hand.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: e2e-eks-us-east
+  labels:
+    modelplane.ai/region: us-east
+spec:
+  cluster:
+    source: EKS
+    eks:
+      region: us-east-1
+  nodePools:
+  - name: gpu-l4
+    className: e2e-l4-1x-g6
+    nodeCount: 1
+    minNodeCount: 1
+    maxNodeCount: 1
+    zones:
+    - us-east-1b

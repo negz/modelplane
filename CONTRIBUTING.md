@@ -117,13 +117,12 @@ opening a PR.
 
 `nix flake check` is the unit layer — fast and sandboxed, proving each
 composition function renders the right resources. The integration layer is
-`nix run .#e2e`, which brings up two local `kind` clusters and runs the
-whole path — scheduling, the serving-stack install on a registered cluster,
-gateway routing, a live request — with no cloud credentials. Add `-- --verify`
-and it waits for readiness, asserts a 200, and exits non-zero on failure. That
-verify command is what the label-gated `E2E` workflow runs on CI (add the
-`test-e2e` label to a PR), so a green local `--verify` and a green CI run mean
-the same thing. See `e2e/README.md`.
+`nix run .#e2e`, which brings up two local `kind` clusters and runs the pytest
+suite in `e2e/` against the whole path — scheduling, the serving-stack install
+on a registered cluster, gateway routing, live requests — with no cloud
+credentials. It exits non-zero if any test fails. That command is what the
+label-gated `E2E` workflow runs on CI (add the `test-e2e` label to a PR), so a
+green local run and a green CI run mean the same thing. See `e2e/README.md`.
 
 ## Submitting changes
 

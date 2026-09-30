@@ -1,0 +1,13 @@
+# Selects the ModelDeployment beside it, the way ../platform/50-model-service.yaml
+# selects ml-team's.
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelService
+metadata:
+  name: mock-pytest
+  namespace: bakeoff-pytest
+spec:
+  endpoints:
+  - name: mock-pytest
+    selector:
+      matchLabels:
+        modelplane.ai/deployment: mock-pytest

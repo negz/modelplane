@@ -1,0 +1,15 @@
+# Points the AWS provider at the aws-creds Secret the test creates from
+# --aws-credentials, as docs/manifests/getting-started/clusterproviderconfig-aws.yaml
+# does. Named default, so an EKS InferenceCluster uses it without further
+# configuration.
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: aws-creds
+      key: credentials

@@ -14,15 +14,16 @@
 let
   docs = import ./docs.nix { inherit pkgs self; };
 
-  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = self; };
-  pythonSet =
-    (pkgs.callPackage pyproject-nix.build.packages { python = pkgs.python312; }).overrideScope
-      (
-        pkgs.lib.composeManyExtensions [
-          pyproject-build-systems.overlays.wheel
-          (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-        ]
-      );
+  pythonEnvs = import ./python.nix {
+    inherit
+      pkgs
+      self
+      pyproject-nix
+      uv2nix
+      pyproject-build-systems
+      ;
+  };
+  pythonSet = pythonEnvs.set;
 
   # Each function exports a 'function' Python module, so tests must run from
   # a directory where that module is importable via the venv. We copy tests/
@@ -99,6 +100,23 @@ in
       touch $out/.docs-manifests-validated
     '';
 
+  # Type-check the end-to-end tests against the venv the e2e app runs them
+  # in. Checking them needs no cluster. Building the check also builds the
+  # venv, so a dependency the e2e app can't install fails here rather than on
+  # the next e2e run.
+  ty-e2e =
+    pkgs.runCommand "modelplane-ty-e2e"
+      {
+        nativeBuildInputs = [ pkgs.unstable.ty ];
+      }
+      ''
+        cp -r ${self}/e2e e2e
+        cp ${self}/pyproject.toml pyproject.toml
+        ty check e2e --python ${pythonEnvs.e2e}
+        mkdir -p $out
+        touch $out/.ty-passed
+      '';
+
   python =
     pkgs.runCommand "modelplane-python-checks"
       {
@@ -108,8 +126,8 @@ in
         cp -r ${self} src
         chmod -R u+w src
         cd src
-        ruff format --check functions/ docs/utils/validate/
-        ruff check functions/ docs/utils/validate/
+        ruff format --check functions/ docs/utils/validate/ e2e/
+        ruff check functions/ docs/utils/validate/ e2e/
         mkdir -p $out
         touch $out/.python-checks-passed
       '';
@@ -159,7 +177,7 @@ in
           -ignore '**/*.toml' \
           -ignore '**/*.yaml' \
           -ignore '**/*.yml' \
-          functions/ docs/utils/validate/ nix.sh
+          functions/ docs/utils/validate/ e2e/ nix.sh
         mkdir -p $out
         touch $out/.license-check-passed
       '';
