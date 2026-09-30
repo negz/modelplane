@@ -9,7 +9,17 @@ A coding agent built each option on its own branch, from one [brief](https://git
 
 The pytest option also ported bring-up to Python. The others kept it in `run.sh`.
 
-I ran each prototype three times against one shared kind environment: healthy, then with two faults injected, then healthy again. The faults changed the caller's API key and added a pod that tolerates every taint. Three more agents then scored each prototype from 1 to 5 on seven criteria, each seeing the options in a different order. The criteria were legibility, failure output, the cost of adding the next test, how much code we'd own, toolchain fit, coverage and robustness, and each counts equally in the totals. All the agents ran on the same model, and I went in leaning toward pytest, so treat the scores as one input among several.
+I ran each prototype three times against one shared kind environment: healthy, then with two faults injected, then healthy again. The faults changed the caller's API key and added a pod that tolerates every taint. Three more agents then scored each prototype from 1 to 5, each seeing the options in a different order. All the agents ran on the same model, and I went in leaning toward pytest, so treat the scores as one input among several.
+
+They scored these criteria, which count equally in the totals:
+
+- Legibility
+- Failure output
+- Cost of adding the next test
+- How much code we'd own
+- Toolchain fit
+- Coverage
+- Robustness
 
 All four prototypes passed both healthy runs, and failed the right checks under the faults.
 
