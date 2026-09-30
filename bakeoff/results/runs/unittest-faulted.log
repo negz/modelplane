@@ -1,0 +1,115 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+test_d1_eks_inference_cluster (test_clouds.Clouds.test_d1_eks_inference_cluster)
+D1: An EKS InferenceCluster becomes Ready, then deletes. ... skipped 'provisions a real EKS cluster; set MODELPLANE_E2E_EKS_CONTEXT to run it'
+test_b1_model_service_serves (test_lifecycle.Lifecycle.test_b1_model_service_serves)
+B1: The ModelService becomes RoutingReady, then serves as bakeoff-unittest/mock-unittest. ... FAIL
+test_b2_deleted_model_service_stops_serving (test_lifecycle.Lifecycle.test_b2_deleted_model_service_stops_serving)
+B2: Within 5 minutes of deleting the ModelService, requests naming it stop returning 200. ... skipped "bakeoff-unittest/mock-unittest isn't serving (HTTP 401), so it can't stop"
+test_b3_foreground_delete_removes_replicas_endpoints_and_pods (test_lifecycle.Lifecycle.test_b3_foreground_delete_removes_replicas_endpoints_and_pods)
+B3: A foreground delete of the ModelDeployment removes its ModelReplicas, ModelEndpoints and engine pods. ... ok
+test_c1_engine_pods_on_gpu_pool_with_dra_device (test_placement.Placement.test_c1_engine_pods_on_gpu_pool_with_dra_device)
+C1: Every ml-team/mock-demo engine pod runs in pool gpu-synthetic, with a gpu.example.com device. ... ok
+test_c2_no_wildcard_tolerations (test_placement.Placement.test_c2_no_wildcard_tolerations)
+C2: No pod outside kube-system tolerates every taint, apart from those allowed. ... FAIL
+test_a1_chat_completion (test_serving.Serving.test_a1_chat_completion)
+A1: An OpenAI chat completion with the caller's key returns 200. ... FAIL
+test_a2_unauthenticated_chat_completion (test_serving.Serving.test_a2_unauthenticated_chat_completion)
+A2: The same request returns 401 with no key, and with a key no caller holds. ... ok
+test_a3_response_names_served_model (test_serving.Serving.test_a3_response_names_served_model)
+A3: The response names the model the engine serves, not the ModelService the caller asked for. ... FAIL
+test_a4_anthropic_messages (test_serving.Serving.test_a4_anthropic_messages)
+A4: An Anthropic Messages request with the key in x-api-key returns 200. ... FAIL
+test_a5_usage_record (test_serving.Serving.test_a5_usage_record)
+A5: The gateway's access log meters a chat completion to caller e2e. ... FAIL
+
+======================================================================
+FAIL: test_b1_model_service_serves (test_lifecycle.Lifecycle.test_b1_model_service_serves)
+B1: The ModelService becomes RoutingReady, then serves as bakeoff-unittest/mock-unittest.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_lifecycle.py", line 108, in test_b1_model_service_serves
+    self.assertEqual(got.status, 200, got.body)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200 : Client authentication failed.
+
+======================================================================
+FAIL: test_c2_no_wildcard_tolerations (test_placement.Placement.test_c2_no_wildcard_tolerations)
+C2: No pod outside kube-system tolerates every taint, apart from those allowed.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_placement.py", line 79, in test_c2_no_wildcard_tolerations
+    self.assertEqual(offenders, [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ["cert-manager/bakeoff-rogue tolerates [{'operator': 'Exists'}]"] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+"cert-manager/bakeoff-rogue tolerates [{'operator': 'Exists'}]"
+
+- ["cert-manager/bakeoff-rogue tolerates [{'operator': 'Exists'}]"]
++ []
+
+======================================================================
+FAIL: test_a1_chat_completion (test_serving.Serving.test_a1_chat_completion)
+A1: An OpenAI chat completion with the caller's key returns 200.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_serving.py", line 84, in test_a1_chat_completion
+    self.assertEqual(got.status, 200, self.explain(got))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200 : HTTP 401: Client authentication failed.
+ModelService mock: RoutingReady=True (RoutesAccepted); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+InferenceGateway local: GatewayReady=True (GatewayProgrammed); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+
+======================================================================
+FAIL: test_a3_response_names_served_model (test_serving.Serving.test_a3_response_names_served_model)
+A3: The response names the model the engine serves, not the ModelService the caller asked for.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_serving.py", line 100, in test_a3_response_names_served_model
+    self.assertEqual(got.status, 200, self.explain(got))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200 : HTTP 401: Client authentication failed.
+ModelService mock: RoutingReady=True (RoutesAccepted); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+InferenceGateway local: GatewayReady=True (GatewayProgrammed); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+
+======================================================================
+FAIL: test_a4_anthropic_messages (test_serving.Serving.test_a4_anthropic_messages)
+A4: An Anthropic Messages request with the key in x-api-key returns 200.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_serving.py", line 107, in test_a4_anthropic_messages
+    self.assertEqual(got.status, 200, self.explain(got))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200 : HTTP 401: Client authentication failed.
+ModelService mock: RoutingReady=True (RoutesAccepted); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+InferenceGateway local: GatewayReady=True (GatewayProgrammed); Synced=True (ReconcileSuccess); Ready=True (Available); Responsive=True (WatchCircuitClosed)
+
+======================================================================
+FAIL: test_a5_usage_record (test_serving.Serving.test_a5_usage_record)
+A5: The gateway's access log meters a chat completion to caller e2e.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/negz/control/modelplaneai/modelplane-unit-of-measure/e2e/tests/test_serving.py", line 137, in test_a5_usage_record
+    self.fail(f"no access log record since the request matches\n{json.dumps(want)}\nRecords seen:\n{seen}")
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: no access log record since the request matches
+{"caller": "e2e", "service": "ml-team/mock", "served_model": "ml-team/mock-demo", "input_tokens": 12, "output_tokens": 9, "total_tokens": 21, "status": 200}
+Records seen:
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+{"caller": null, "service": null, "served_model": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "status": 401}
+
+----------------------------------------------------------------------
+Ran 11 tests in 243.659s
+
+FAILED (failures=6, skipped=2)

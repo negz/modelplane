@@ -1,0 +1,22 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+   Building crossplane-models @ file:///home/negz/control/modelplaneai/modelplane-py-in-the-sky/schemas/python
+      Built crossplane-models @ file:///home/negz/control/modelplaneai/modelplane-py-in-the-sky/schemas/python
+Uninstalled 1 package in 0.54ms
+Installed 1 package in 0.31ms
+$ crossplane project stop --control-plane-name=modelplane-e2e-local
+  Tearing down control plane...
+  ✓ Tearing down control plane
+  Local dev control plane "modelplane-e2e-local" has been torn down.
+$ kind delete cluster --name=modelplane-e2e-local
+  Deleting cluster "modelplane-e2e-local" ...
+$ kind delete cluster --name=modelplane-e2e-workload
+  Deleting cluster "modelplane-e2e-workload" ...
+  Deleted nodes: ["modelplane-e2e-workload-control-plane"]
+$ docker rm --force modelplane-e2e-local-registry
+  Error response from daemon: No such container: modelplane-e2e-local-registry

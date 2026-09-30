@@ -1,0 +1,271 @@
+warning: Git tree '/home/negz/control/modelplaneai/modelplane-py-in-the-sky' is dirty
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/negz/control/modelplaneai/modelplane-py-in-the-sky
+configfile: pyproject.toml
+testpaths: e2e
+collected 12 items
+
+e2e/test_clouds.py::test_d1_eks_inference_cluster_provisions_and_deletes SKIPPED [  8%]
+e2e/test_lifecycle.py::test_b1_model_service_serves 
+-------------------------------- live log setup --------------------------------
+18:00:25 Building and running the control plane modelplane-e2e-local
+18:00:25 $ crossplane project run --control-plane-name=modelplane-e2e-local --cluster-admin --timeout=25m --init-resources=/home/negz/control/modelplaneai/modelplane-py-in-the-sky/e2e/lean-control-plane.yaml --crossplane-version=2.4.0
+18:00:25   Setting up control plane...
+18:00:25   Collecting resources...
+18:00:25   ✓ Collecting resources
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-gcp-compute:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-vultr:v1.0.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-aws-efs:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-aws-eks:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-nebius:v1.0.1...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-helm:v1.4.0...
+18:00:25   Updating dependency https://github.com/crossplane/crossplane (v2.3.2) at cluster/crds...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-azure-containerservice:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-gcp-cloudplatform:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-kubernetes:v1.3.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-azure-network:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-gcp-container:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-aws-ec2:v2.6.0...
+18:00:25   Updating dependency xpkg.upbound.io/upbound/provider-aws-iam:v2.6.0...
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-helm:v1.4.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-aws-eks:v2.6.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-aws-efs:v2.6.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-kubernetes:v1.3.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-vultr:v1.0.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-gcp-container:v2.6.0
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-nebius:v1.0.1
+18:00:26   ✓ Updating dependency https://github.com/crossplane/crossplane (v2.3.2) at cluster/crds
+18:00:26   ✓ Updating dependency xpkg.upbound.io/upbound/provider-gcp-cloudplatform:v2.6.0
+18:00:27   ✓ Updating dependency xpkg.upbound.io/upbound/provider-azure-containerservice:v2.6.0
+18:00:27   ✓ Updating dependency xpkg.upbound.io/upbound/provider-aws-iam:v2.6.0
+18:00:27   ✓ Updating dependency xpkg.upbound.io/upbound/provider-azure-network:v2.6.0
+18:00:27   ✓ Updating dependency xpkg.upbound.io/upbound/provider-aws-ec2:v2.6.0
+18:00:27   ✓ Updating dependency xpkg.upbound.io/upbound/provider-gcp-compute:v2.6.0
+18:00:27   Generating schemas...
+18:00:31   ✓ Generating schemas
+18:00:31   Building function compose-vultr-cluster...
+18:00:31   Building function compose-gke-cluster...
+18:00:31   Building function compose-inference-class...
+18:00:31   Building function compose-aks-cluster...
+18:00:31   Building function compose-inference-cluster...
+18:00:31   Building function compose-nebius-cluster...
+18:00:31   Building function compose-inference-gateway...
+18:00:31   Building function compose-model-replica...
+18:00:43   ✓ Building function compose-inference-cluster
+18:00:43   Building function compose-model-cache...
+18:00:43   ✓ Building function compose-inference-gateway
+18:00:43   Building function compose-serving-stack...
+18:00:43   ✓ Building function compose-inference-class
+18:00:43   Building function compose-model-service...
+18:00:43   ✓ Building function compose-gke-cluster
+18:00:43   Building function compose-usages...
+18:00:43   ✓ Building function compose-model-replica
+18:00:43   Building function compose-model-route...
+18:00:44   ✓ Building function compose-aks-cluster
+18:00:44   Building function compose-model-endpoint...
+18:00:44   ✓ Building function compose-nebius-cluster
+18:00:44   Building function compose-eks-cluster...
+18:00:44   ✓ Building function compose-vultr-cluster
+18:00:44   Building function compose-model-deployment...
+18:00:56   ✓ Building function compose-model-service
+18:00:56   ✓ Building function compose-usages
+18:00:56   ✓ Building function compose-model-route
+18:00:56   ✓ Building function compose-model-endpoint
+18:00:56   ✓ Building function compose-model-cache
+18:00:56   ✓ Building function compose-eks-cluster
+18:00:56   ✓ Building function compose-serving-stack
+18:00:56   ✓ Building function compose-model-deployment
+18:00:56   Building configuration package...
+18:00:56   ✓ Building configuration package
+18:01:10   ✓ Setting up control plane
+18:01:10   Loading packages into control plane...
+18:01:33   ✓ Loading packages into control plane
+18:01:33   Applying init resources...
+18:01:33   ✓ Applying init resources
+18:01:33   Installing configuration...
+18:05:27   ✓ Installing configuration
+18:05:27   Local dev control plane running in kind cluster "modelplane-e2e-local".
+18:05:27   Kubeconfig updated. Current context is "kind-modelplane-e2e-local".
+18:05:27   Run `kubectl get configurations` to see the installed project configuration.
+18:05:27   Run `kind delete cluster --name modelplane-e2e-local` to clean up.
+18:05:27 Applying the prerequisites and provider runtime configs
+18:05:27 $ kubectl --context=kind-modelplane-e2e-local apply --filename=/home/negz/control/modelplaneai/modelplane-py-in-the-sky/docs/manifests/install/prerequisites.yaml
+18:05:27   namespace/modelplane-system created
+18:05:27   clusterrole.rbac.authorization.k8s.io/crossplane-compose-modelplane created
+18:05:27   deploymentruntimeconfig.pkg.crossplane.io/provider-helm-modelplane created
+18:05:27   clusterrolebinding.rbac.authorization.k8s.io/provider-helm-modelplane created
+18:05:27   imageconfig.pkg.crossplane.io/provider-helm-modelplane created
+18:05:27   deploymentruntimeconfig.pkg.crossplane.io/provider-kubernetes-modelplane created
+18:05:27   imageconfig.pkg.crossplane.io/provider-kubernetes-modelplane created
+18:05:27 $ kubectl --context=kind-modelplane-e2e-local patch provider.pkg.crossplane.io/upbound-provider-helm --type=merge '--patch={"spec": {"runtimeConfigRef": {"apiVersion": "pkg.crossplane.io/v1beta1", "kind": "DeploymentRuntimeConfig", "name": "provider-helm-modelplane"}}}'
+18:05:27   provider.pkg.crossplane.io/upbound-provider-helm patched
+18:05:27 $ kubectl --context=kind-modelplane-e2e-local patch provider.pkg.crossplane.io/upbound-provider-kubernetes --type=merge '--patch={"spec": {"runtimeConfigRef": {"apiVersion": "pkg.crossplane.io/v1beta1", "kind": "DeploymentRuntimeConfig", "name": "provider-kubernetes-modelplane"}}}'
+18:05:28   provider.pkg.crossplane.io/upbound-provider-kubernetes patched
+18:05:28 Creating workload cluster modelplane-e2e-workload
+18:05:28 $ kind create cluster --name=modelplane-e2e-workload --image=kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+18:05:28   Creating cluster "modelplane-e2e-workload" ...
+18:05:28    • Ensuring node image (kindest/node:v1.34.8) 🖼  ...
+18:05:28    ✓ Ensuring node image (kindest/node:v1.34.8) 🖼
+18:05:28    • Preparing nodes 📦   ...
+18:05:29    ✓ Preparing nodes 📦
+18:05:29    • Writing configuration 📜  ...
+18:05:30    ✓ Writing configuration 📜
+18:05:30    • Starting control-plane 🕹️  ...
+18:05:36    ✓ Starting control-plane 🕹️
+18:05:36    • Installing CNI 🔌  ...
+18:05:36    ✓ Installing CNI 🔌
+18:05:36    • Installing StorageClass 💾  ...
+18:05:37    ✓ Installing StorageClass 💾
+18:05:37   Set kubectl context to "kind-modelplane-e2e-workload"
+18:05:37   You can now use your cluster with:
+18:05:37   
+18:05:37   kubectl cluster-info --context kind-modelplane-e2e-workload
+18:05:37   
+18:05:37   Thanks for using kind! 😊
+18:05:37 kind Docker subnet is 172.18.0.0/16
+18:05:37 Installing MetalLB on the workload cluster, with pool 172.18.255.100-149
+18:05:37 $ kubectl --context=kind-modelplane-e2e-workload apply --filename=https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+18:05:37   namespace/metallb-system created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/bfdprofiles.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/bgpadvertisements.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/bgppeers.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/communities.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/ipaddresspools.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/l2advertisements.metallb.io created
+18:05:37   customresourcedefinition.apiextensions.k8s.io/servicel2statuses.metallb.io created
+18:05:37   serviceaccount/controller created
+18:05:37   serviceaccount/speaker created
+18:05:37   role.rbac.authorization.k8s.io/controller created
+18:05:37   role.rbac.authorization.k8s.io/pod-lister created
+18:05:37   clusterrole.rbac.authorization.k8s.io/metallb-system:controller created
+18:05:37   clusterrole.rbac.authorization.k8s.io/metallb-system:speaker created
+18:05:37   rolebinding.rbac.authorization.k8s.io/controller created
+18:05:37   rolebinding.rbac.authorization.k8s.io/pod-lister created
+18:05:37   clusterrolebinding.rbac.authorization.k8s.io/metallb-system:controller created
+18:05:37   clusterrolebinding.rbac.authorization.k8s.io/metallb-system:speaker created
+18:05:37   configmap/metallb-excludel2 created
+18:05:37   secret/metallb-webhook-cert created
+18:05:37   service/metallb-webhook-service created
+18:05:37   deployment.apps/controller created
+18:05:37   daemonset.apps/speaker created
+18:05:37   validatingwebhookconfiguration.admissionregistration.k8s.io/metallb-webhook-configuration created
+18:05:37 $ kubectl --context=kind-modelplane-e2e-workload rollout status --namespace=metallb-system deploy/controller --timeout=180s
+18:05:37   Waiting for deployment spec update to be observed...
+18:05:43   Waiting for deployment spec update to be observed...
+18:05:43   Waiting for deployment "controller" rollout to finish: 0 out of 1 new replicas have been updated...
+18:05:43   Waiting for deployment "controller" rollout to finish: 0 of 1 updated replicas are available...
+18:06:11   deployment "controller" successfully rolled out
+18:06:11 $ kubectl --context=kind-modelplane-e2e-workload apply --filename=-
+18:06:12   ipaddresspool.metallb.io/kind-pool created
+18:06:12   l2advertisement.metallb.io/kind-l2 created
+18:06:12 Installing dra-example-driver (fake GPUs) on the workload cluster
+18:06:12 $ kubectl --context=kind-modelplane-e2e-workload apply --filename=/home/negz/control/modelplaneai/modelplane-py-in-the-sky/e2e/dra-example-driver.yaml
+18:06:12   namespace/dra-example-driver created
+18:06:12   serviceaccount/dra-example-driver-service-account created
+18:06:12   clusterrole.rbac.authorization.k8s.io/dra-example-driver-role created
+18:06:12   clusterrolebinding.rbac.authorization.k8s.io/dra-example-driver-role-binding created
+18:06:12   service/dra-example-driver-kubeletplugin-metrics created
+18:06:12   daemonset.apps/dra-example-driver-kubeletplugin created
+18:06:12   deviceclass.resource.k8s.io/gpu.example.com created
+18:06:12   validatingadmissionpolicy.admissionregistration.k8s.io/resourceslices-policy-dra-example-driver created
+18:06:12   validatingadmissionpolicybinding.admissionregistration.k8s.io/resourceslices-policy-dra-example-driver created
+18:06:12 $ kubectl --context=kind-modelplane-e2e-workload rollout status --namespace=dra-example-driver ds/dra-example-driver-kubeletplugin --timeout=120s
+18:06:12   Waiting for daemon set "dra-example-driver-kubeletplugin" rollout to finish: 0 of 1 updated pods are available...
+18:06:15   daemon set "dra-example-driver-kubeletplugin" successfully rolled out
+18:06:15 Labelling the workload node for pool gpu-synthetic
+18:06:15 $ kubectl --context=kind-modelplane-e2e-workload label node modelplane-e2e-workload-control-plane modelplane.ai/pool=gpu-synthetic --overwrite
+18:06:15   node/modelplane-e2e-workload-control-plane labeled
+18:06:15 Registering the workload cluster's kubeconfig with the control plane
+18:06:15 $ kubectl --context=kind-modelplane-e2e-local apply --filename=-
+18:06:15   secret/local-cluster-kubeconfig created
+18:06:15 Applying the platform manifests
+18:06:15 $ kubectl --context=kind-modelplane-e2e-local apply --filename=/home/negz/control/modelplaneai/modelplane-py-in-the-sky/e2e/manifests/platform
+18:06:16   namespace/ml-team created
+18:06:16   inferencegateway.modelplane.ai/local created
+18:06:16   secret/e2e-callers created
+18:06:16   inferenceclass.modelplane.ai/synthetic-gpu created
+18:06:16   inferencecluster.modelplane.ai/local created
+18:06:16   modeldeployment.modelplane.ai/mock-demo created
+18:06:16   modelservice.modelplane.ai/mock created
+18:06:16 Waiting up to 1200s for modelservice ml-team/mock RoutingReady
+18:13:35 Done after 439s
+18:13:35 Waiting up to 120s for AI Gateway to stamp the InferenceGateway's proxy pods
+18:13:35 Done after 0s
+18:13:35 Waiting up to 120s for pod bakeoff-pytest-client/curl Ready
+18:13:40 Done after 5s
+18:13:40 Waiting up to 300s for InferenceGateway local to publish its endpoints
+18:13:40 Done after 0s
+-------------------------------- live log call ---------------------------------
+18:13:40 Waiting up to 300s for modelservice bakeoff-pytest/mock-pytest RoutingReady
+18:14:51 Done after 71s
+18:14:51 Waiting up to 120s for bakeoff-pytest/mock-pytest to serve a chat completion
+18:14:51 Done after 0s
+PASSED                                                                   [ 16%]
+e2e/test_lifecycle.py::test_b2_deleting_model_service_stops_routing 
+-------------------------------- live log call ---------------------------------
+18:14:51 Waiting up to 300s for bakeoff-pytest/mock-pytest to stop serving
+18:14:51 Done after 0s
+18:14:51 The gateway answered 404: No matching route found. It is likely because the model specified in your request is not configured in the Gateway.
+PASSED                                                                   [ 25%]
+e2e/test_lifecycle.py::test_b3_foreground_delete_removes_replicas 
+-------------------------------- live log call ---------------------------------
+18:14:51 Waiting up to 180s for ModelDeployment bakeoff-pytest/mock-pytest's replicas to be removed
+18:15:27 Done after 36s
+PASSED                                                                   [ 33%]
+------------------------------ live log teardown -------------------------------
+18:15:27 Waiting up to 300s for modeldeployment bakeoff-pytest/mock-pytest to be deleted
+18:15:27 Done after 0s
+18:15:27 Waiting up to 300s for namespace bakeoff-pytest to be deleted
+18:15:37 Done after 10s
+
+e2e/test_placement.py::test_c1_engine_pods_run_on_gpu_pool PASSED        [ 41%]
+e2e/test_placement.py::test_c2_no_pod_tolerates_every_taint PASSED       [ 50%]
+e2e/test_serving.py::test_a1_chat_completion_returns_200 
+-------------------------------- live log setup --------------------------------
+18:15:37 Waiting up to 120s for ModelService ml-team/mock to publish its model name
+18:15:37 Done after 0s
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for a chat completion for ml-team/mock to return 200
+18:15:37 Done after 0s
+PASSED                                                                   [ 58%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[no key] 
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+18:15:37 Done after 0s
+PASSED                                                                   [ 66%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[wrong key] 
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+18:15:37 Done after 0s
+PASSED                                                                   [ 75%]
+e2e/test_serving.py::test_a3_response_names_served_model 
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for a chat completion to report ml-team/mock-demo
+18:15:37 Done after 0s
+PASSED                                                                   [ 83%]
+e2e/test_serving.py::test_a4_anthropic_message_returns_200 
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for an Anthropic message for ml-team/mock to return 200
+18:15:37 Done after 0s
+PASSED                                                                   [ 91%]
+e2e/test_serving.py::test_a5_gateway_logs_usage_record 
+-------------------------------- live log call ---------------------------------
+18:15:37 Waiting up to 120s for a matching usage record in the gateway's access log
+18:15:43 Done after 5s
+PASSED                                                                   [100%]
+------------------------------ live log teardown -------------------------------
+18:15:43 Waiting up to 120s for namespace bakeoff-pytest-client to be deleted
+18:15:53 Done after 10s
+
+
+=========================== short test summary info ============================
+SKIPPED [1] e2e/test_clouds.py:72: provisions real eks infrastructure; run with --cloud=eks
+================== 11 passed, 1 skipped in 928.03s (0:15:28) ===================

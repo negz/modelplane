@@ -1,0 +1,138 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+
+##### serving
+namespace/bakeoff-shell-serving created
+pod/probe created
+pod/probe condition met
+namespace/bakeoff-shell-serving created
+pod/probe created
+pod/probe condition met
+
+=== A1: An OpenAI chat completion naming ml-team/mock with the caller key returns 200
+--- FAIL A1: after 2 minutes of retries, the last request to http://172.18.255.100/v1 got HTTP 401: Client authentication failed.
+    $ trace modelservice mock -n ml-team
+    NAME                                       RESOURCE                    SYNCED   READY   STATUS
+    ModelService/mock (ml-team)                                            True     True    Available
+    └─ ModelRoute/mock-local-934fc (ml-team)   route-local                 True     True    Available
+       ├─ Object/mock-1d4f46be89cb (ml-team)   route                       True     True    Available
+       ├─ Object/mock-4f0aab6ab0b5 (ml-team)   aibackend-mock-demo-da96c   True     True    Available
+       ├─ Object/mock-64cfddc031b3 (ml-team)   cluster-ca-local            True     True    Available
+       ├─ Object/mock-973e46743dc0 (ml-team)   backend-mock-demo-da96c     True     True    Available
+       └─ Object/mock-c74598e887ae (ml-team)   client-certificate          True     True    Available
+    $ trace inferencegateway local
+    NAME                                               RESOURCE                                 SYNCED   READY   STATUS
+    InferenceGateway/local                                                                      True     True    Available
+    ├─ Object/local-082d4509b61b (modelplane-system)   cluster-name-slice-gateway-local-dc36a   True     True    Available
+    ├─ Object/local-115206f30193 (modelplane-system)   client-traffic-policy                    True     True    Available
+    ├─ Object/local-1339498d9764 (modelplane-system)   client-ca-bundle                         True     True    Available
+    ├─ Object/local-2c5aa93055e4 (modelplane-system)   envoy-proxy                              True     True    Available
+    ├─ Object/local-2cecda7996f3 (modelplane-system)   client-ca-certificate                    True     True    Available
+    ├─ Object/local-3a04de8b23e0 (modelplane-system)   failover-policy                          True     True    Available
+    ├─ Object/local-4bf1ce05ce98 (modelplane-system)   caller-auth                              True     True    Available
+    ├─ Object/local-5085bd63f234 (modelplane-system)   client-ca-issuer                         True     True    Available
+    ├─ Object/local-5acad3335471 (modelplane-system)   caller-secret-e2e-callers                True     True    Available
+    ├─ Object/local-92d49f431e98 (modelplane-system)   client-ca-configmap                      True     True    Available
+    ├─ Object/local-96047b0cc5f8 (modelplane-system)   cluster-name-gateway-local-dc36a         True     True    Available
+    ├─ Object/local-ad1191a7a9e6 (modelplane-system)   client-selfsigned-issuer                 True     True    Available
+    ├─ Object/local-d2714d330bbe (modelplane-system)   healthz-route                            True     True    Available
+    ├─ Object/local-dc77b54f0d5a (modelplane-system)   healthz-auth                             True     True    Available
+    ├─ Object/local-e22e35b2e9f1 (modelplane-system)   healthz-filter                           True     True    Available
+    └─ Object/local-ef333e489f36 (modelplane-system)   gateway                                  True     True    Available
+
+=== A2: The same request returns 401 with no key, and with key sk-wrong
+--- PASS A2
+
+=== A3: A1's response reports served model ml-team/mock-demo, not ml-team/mock
+--- SKIP A3: A1 got no 200 response to read
+
+=== A4: An Anthropic /v1/messages request at http://172.18.255.100/anthropic/v1, with the key in x-api-key, returns 200
+--- FAIL A4: after 1 minute of retries, the last request got HTTP 401: Client authentication failed.
+
+=== A5: Since 2026-09-30T00:14:56Z, the Envoy access log holds a usage record for ml-team/mock with caller e2e, served model ml-team/mock-demo, 12+9=21 tokens and status 200
+--- SKIP A5: A1 sent no request that was served
+
+=== A6: A model no ModelService claims isn't served
+--- PASS A6: HTTP 401
+
+=== A7: The cluster gateway refuses a caller with no client certificate
+--- PASS A7: curl exit 55
+
+=== A8: The cluster gateway has no plaintext listener on port 80
+--- PASS A8: curl exit 7
+
+=== A9: /v1/models lists ml-team/mock
+--- FAIL A9: HTTP 401: Client authentication failed.
+
+FAIL A1
+PASS A2
+SKIP A3
+FAIL A4
+SKIP A5
+PASS A6
+PASS A7
+PASS A8
+FAIL A9
+namespace "bakeoff-shell-serving" deleted
+namespace "bakeoff-shell-serving" deleted
+
+##### lifecycle
+namespace/bakeoff-shell created
+pod/probe created
+pod/probe condition met
+modeldeployment.modelplane.ai/mock-shell created
+modelservice.modelplane.ai/mock-shell created
+
+=== B1: ModelService bakeoff-shell/mock-shell becomes RoutingReady, then a request naming it returns 200 from served model bakeoff-shell/mock-shell
+--- FAIL B1: RoutingReady after 71s, but after 2 minutes of retries a request naming 'bakeoff-shell/mock-shell' got HTTP 401: Client authentication failed.
+
+=== B2: Requests naming ModelService bakeoff-shell/mock-shell stop returning 200 within 5 minutes of deleting it
+--- SKIP B2: B1 never got a 200, so there's nothing to stop
+
+=== B3: Deleting ModelDeployment bakeoff-shell/mock-shell in the foreground removes its ModelReplicas and ModelEndpoints, then its engine pods
+modeldeployment.modelplane.ai "mock-shell" deleted from bakeoff-shell namespace
+--- PASS B3: engine pods gone 26s after the delete returned
+
+=== teardown: Namespace bakeoff-shell and everything in it are deleted
+namespace "bakeoff-shell" deleted
+--- PASS teardown
+
+FAIL B1
+SKIP B2
+PASS B3
+PASS teardown
+
+##### placement
+
+=== C1: Every engine pod for ml-team/mock-demo runs on a gpu-synthetic node, with a device allocated from gpu.example.com
+--- PASS C1: 1 pod(s)
+
+=== C2: No pod outside kube-system carries a wildcard toleration (operator Exists, no key), except those allowlisted
+--- FAIL C2: 1 pod(s) tolerate every taint:
+    cert-manager/bakeoff-rogue (owned by /)
+
+PASS C1
+FAIL C2
+
+##### Summary
+FAIL A1
+PASS A2
+SKIP A3
+FAIL A4
+SKIP A5
+PASS A6
+PASS A7
+PASS A8
+FAIL A9
+FAIL B1
+SKIP B2
+PASS B3
+PASS teardown
+PASS C1
+FAIL C2
+FAILED: serving lifecycle placement

@@ -1,0 +1,110 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+
+##### serving
+namespace/bakeoff-shell-serving created
+pod/probe created
+pod/probe condition met
+namespace/bakeoff-shell-serving created
+pod/probe created
+pod/probe condition met
+
+=== A1: An OpenAI chat completion naming ml-team/mock with the caller key returns 200
+--- PASS A1
+
+=== A2: The same request returns 401 with no key, and with key sk-wrong
+--- PASS A2
+
+=== A3: A1's response reports served model ml-team/mock-demo, not ml-team/mock
+--- PASS A3
+
+=== A4: An Anthropic /v1/messages request at http://172.18.255.100/anthropic/v1, with the key in x-api-key, returns 200
+--- PASS A4
+
+=== A5: Since 2026-09-30T00:04:58Z, the Envoy access log holds a usage record for ml-team/mock with caller e2e, served model ml-team/mock-demo, 12+9=21 tokens and status 200
+--- PASS A5
+
+=== A6: A model no ModelService claims isn't served
+--- PASS A6: HTTP 404
+
+=== A7: The cluster gateway refuses a caller with no client certificate
+--- PASS A7: curl exit 55
+
+=== A8: The cluster gateway has no plaintext listener on port 80
+--- PASS A8: curl exit 7
+
+=== A9: /v1/models lists ml-team/mock
+--- PASS A9
+
+PASS A1
+PASS A2
+PASS A3
+PASS A4
+PASS A5
+PASS A6
+PASS A7
+PASS A8
+PASS A9
+namespace "bakeoff-shell-serving" deleted
+namespace "bakeoff-shell-serving" deleted
+
+##### lifecycle
+namespace/bakeoff-shell created
+pod/probe created
+pod/probe condition met
+modeldeployment.modelplane.ai/mock-shell created
+modelservice.modelplane.ai/mock-shell created
+
+=== B1: ModelService bakeoff-shell/mock-shell becomes RoutingReady, then a request naming it returns 200 from served model bakeoff-shell/mock-shell
+--- PASS B1: RoutingReady after 61s
+
+=== B2: Requests naming ModelService bakeoff-shell/mock-shell stop returning 200 within 5 minutes of deleting it
+modelservice.modelplane.ai "mock-shell" deleted from bakeoff-shell namespace
+--- PASS B2: HTTP 404 after 0s
+
+=== B3: Deleting ModelDeployment bakeoff-shell/mock-shell in the foreground removes its ModelReplicas and ModelEndpoints, then its engine pods
+modeldeployment.modelplane.ai "mock-shell" deleted from bakeoff-shell namespace
+--- PASS B3: engine pods gone 30s after the delete returned
+
+=== teardown: Namespace bakeoff-shell and everything in it are deleted
+namespace "bakeoff-shell" deleted
+--- PASS teardown
+
+PASS B1
+PASS B2
+PASS B3
+PASS teardown
+
+##### placement
+
+=== C1: Every engine pod for ml-team/mock-demo runs on a gpu-synthetic node, with a device allocated from gpu.example.com
+--- PASS C1: 1 pod(s)
+
+=== C2: No pod outside kube-system carries a wildcard toleration (operator Exists, no key), except those allowlisted
+--- PASS C2
+
+PASS C1
+PASS C2
+
+##### Summary
+PASS A1
+PASS A2
+PASS A3
+PASS A4
+PASS A5
+PASS A6
+PASS A7
+PASS A8
+PASS A9
+PASS B1
+PASS B2
+PASS B3
+PASS teardown
+PASS C1
+PASS C2
+PASSED: serving lifecycle placement

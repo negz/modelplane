@@ -1,0 +1,34 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+test_d1_eks_inference_cluster (test_clouds.Clouds.test_d1_eks_inference_cluster)
+D1: An EKS InferenceCluster becomes Ready, then deletes. ... skipped 'provisions a real EKS cluster; set MODELPLANE_E2E_EKS_CONTEXT to run it'
+test_b1_model_service_serves (test_lifecycle.Lifecycle.test_b1_model_service_serves)
+B1: The ModelService becomes RoutingReady, then serves as bakeoff-unittest/mock-unittest. ... ok
+test_b2_deleted_model_service_stops_serving (test_lifecycle.Lifecycle.test_b2_deleted_model_service_stops_serving)
+B2: Within 5 minutes of deleting the ModelService, requests naming it stop returning 200. ... ok
+test_b3_foreground_delete_removes_replicas_endpoints_and_pods (test_lifecycle.Lifecycle.test_b3_foreground_delete_removes_replicas_endpoints_and_pods)
+B3: A foreground delete of the ModelDeployment removes its ModelReplicas, ModelEndpoints and engine pods. ... ok
+test_c1_engine_pods_on_gpu_pool_with_dra_device (test_placement.Placement.test_c1_engine_pods_on_gpu_pool_with_dra_device)
+C1: Every ml-team/mock-demo engine pod runs in pool gpu-synthetic, with a gpu.example.com device. ... ok
+test_c2_no_wildcard_tolerations (test_placement.Placement.test_c2_no_wildcard_tolerations)
+C2: No pod outside kube-system tolerates every taint, apart from those allowed. ... ok
+test_a1_chat_completion (test_serving.Serving.test_a1_chat_completion)
+A1: An OpenAI chat completion with the caller's key returns 200. ... ok
+test_a2_unauthenticated_chat_completion (test_serving.Serving.test_a2_unauthenticated_chat_completion)
+A2: The same request returns 401 with no key, and with a key no caller holds. ... ok
+test_a3_response_names_served_model (test_serving.Serving.test_a3_response_names_served_model)
+A3: The response names the model the engine serves, not the ModelService the caller asked for. ... ok
+test_a4_anthropic_messages (test_serving.Serving.test_a4_anthropic_messages)
+A4: An Anthropic Messages request with the key in x-api-key returns 200. ... ok
+test_a5_usage_record (test_serving.Serving.test_a5_usage_record)
+A5: The gateway's access log meters a chat completion to caller e2e. ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 142.983s
+
+OK (skipped=1)

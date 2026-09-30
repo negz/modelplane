@@ -1,0 +1,87 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/negz/control/modelplaneai/modelplane-py-in-the-sky
+configfile: pyproject.toml
+testpaths: e2e
+collected 12 items
+
+e2e/test_clouds.py::test_d1_eks_inference_cluster_provisions_and_deletes SKIPPED [  8%]
+e2e/test_lifecycle.py::test_b1_model_service_serves 
+-------------------------------- live log setup --------------------------------
+17:10:14 Waiting up to 120s for pod bakeoff-pytest-client/curl Ready
+17:10:19 Done after 5s
+17:10:19 Waiting up to 300s for InferenceGateway local to publish its endpoints
+17:10:19 Done after 0s
+-------------------------------- live log call ---------------------------------
+17:10:19 Waiting up to 300s for modelservice bakeoff-pytest/mock-pytest RoutingReady
+17:11:25 Done after 66s
+17:11:25 Waiting up to 120s for bakeoff-pytest/mock-pytest to serve a chat completion
+17:11:25 Done after 0s
+PASSED                                                                   [ 16%]
+e2e/test_lifecycle.py::test_b2_deleting_model_service_stops_routing 
+-------------------------------- live log call ---------------------------------
+17:11:25 Waiting up to 300s for bakeoff-pytest/mock-pytest to stop serving
+17:11:25 Done after 0s
+17:11:25 The gateway answered 404: No matching route found. It is likely because the model specified in your request is not configured in the Gateway.
+PASSED                                                                   [ 25%]
+e2e/test_lifecycle.py::test_b3_foreground_delete_removes_replicas 
+-------------------------------- live log call ---------------------------------
+17:11:25 Waiting up to 180s for ModelDeployment bakeoff-pytest/mock-pytest's replicas to be removed
+17:12:01 Done after 36s
+PASSED                                                                   [ 33%]
+------------------------------ live log teardown -------------------------------
+17:12:01 Waiting up to 300s for modeldeployment bakeoff-pytest/mock-pytest to be deleted
+17:12:01 Done after 0s
+17:12:01 Waiting up to 300s for namespace bakeoff-pytest to be deleted
+17:12:11 Done after 10s
+
+e2e/test_placement.py::test_c1_engine_pods_run_on_gpu_pool PASSED        [ 41%]
+e2e/test_placement.py::test_c2_no_pod_tolerates_every_taint PASSED       [ 50%]
+e2e/test_serving.py::test_a1_chat_completion_returns_200 
+-------------------------------- live log setup --------------------------------
+17:12:11 Waiting up to 120s for ModelService ml-team/mock to publish its model name
+17:12:11 Done after 0s
+-------------------------------- live log call ---------------------------------
+17:12:11 Waiting up to 120s for a chat completion for ml-team/mock to return 200
+17:12:11 Done after 0s
+PASSED                                                                   [ 58%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[no key] 
+-------------------------------- live log call ---------------------------------
+17:12:11 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+17:12:11 Done after 0s
+PASSED                                                                   [ 66%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[wrong key] 
+-------------------------------- live log call ---------------------------------
+17:12:11 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+17:12:11 Done after 0s
+PASSED                                                                   [ 75%]
+e2e/test_serving.py::test_a3_response_names_served_model 
+-------------------------------- live log call ---------------------------------
+17:12:11 Waiting up to 120s for a chat completion to report ml-team/mock-demo
+17:12:12 Done after 0s
+PASSED                                                                   [ 83%]
+e2e/test_serving.py::test_a4_anthropic_message_returns_200 
+-------------------------------- live log call ---------------------------------
+17:12:12 Waiting up to 120s for an Anthropic message for ml-team/mock to return 200
+17:12:12 Done after 0s
+PASSED                                                                   [ 91%]
+e2e/test_serving.py::test_a5_gateway_logs_usage_record 
+-------------------------------- live log call ---------------------------------
+17:12:12 Waiting up to 120s for a matching usage record in the gateway's access log
+17:12:22 Done after 10s
+PASSED                                                                   [100%]
+------------------------------ live log teardown -------------------------------
+17:12:22 Waiting up to 120s for namespace bakeoff-pytest-client to be deleted
+17:12:32 Done after 10s
+
+
+=========================== short test summary info ============================
+SKIPPED [1] e2e/test_clouds.py:72: provisions real eks infrastructure; run with --cloud=eks
+================== 11 passed, 1 skipped in 138.35s (0:02:18) ===================

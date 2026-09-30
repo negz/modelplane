@@ -1,0 +1,375 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/negz/control/modelplaneai/modelplane-py-in-the-sky
+configfile: pyproject.toml
+testpaths: e2e
+collected 12 items
+
+e2e/test_clouds.py::test_d1_eks_inference_cluster_provisions_and_deletes SKIPPED [  8%]
+e2e/test_lifecycle.py::test_b1_model_service_serves 
+-------------------------------- live log setup --------------------------------
+17:32:29 Waiting up to 120s for pod bakeoff-pytest-client/curl Ready
+17:32:34 Done after 5s
+17:32:34 Waiting up to 300s for InferenceGateway local to publish its endpoints
+17:32:34 Done after 0s
+-------------------------------- live log call ---------------------------------
+17:32:34 Waiting up to 300s for modelservice bakeoff-pytest/mock-pytest RoutingReady
+17:33:40 Done after 66s
+17:33:40 Waiting up to 120s for bakeoff-pytest/mock-pytest to serve a chat completion
+FAILED                                                                   [ 16%]
+e2e/test_lifecycle.py::test_b2_deleting_model_service_stops_routing 
+-------------------------------- live log call ---------------------------------
+17:35:37 Waiting up to 300s for bakeoff-pytest/mock-pytest to stop serving
+17:35:37 Done after 0s
+17:35:37 The gateway answered 401: Client authentication failed.
+PASSED                                                                   [ 25%]
+e2e/test_lifecycle.py::test_b3_foreground_delete_removes_replicas 
+-------------------------------- live log call ---------------------------------
+17:35:37 Waiting up to 180s for ModelDeployment bakeoff-pytest/mock-pytest's replicas to be removed
+17:36:13 Done after 36s
+PASSED                                                                   [ 33%]
+------------------------------ live log teardown -------------------------------
+17:36:13 Waiting up to 300s for modeldeployment bakeoff-pytest/mock-pytest to be deleted
+17:36:13 Done after 0s
+17:36:13 Waiting up to 300s for namespace bakeoff-pytest to be deleted
+17:36:23 Done after 10s
+
+e2e/test_placement.py::test_c1_engine_pods_run_on_gpu_pool PASSED        [ 41%]
+e2e/test_placement.py::test_c2_no_pod_tolerates_every_taint FAILED       [ 50%]
+e2e/test_serving.py::test_a1_chat_completion_returns_200 
+-------------------------------- live log setup --------------------------------
+17:36:23 Waiting up to 120s for ModelService ml-team/mock to publish its model name
+17:36:23 Done after 0s
+-------------------------------- live log call ---------------------------------
+17:36:23 Waiting up to 120s for a chat completion for ml-team/mock to return 200
+FAILED                                                                   [ 58%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[no key] 
+-------------------------------- live log call ---------------------------------
+17:38:20 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+17:38:21 Done after 0s
+PASSED                                                                   [ 66%]
+e2e/test_serving.py::test_a2_request_without_valid_key_returns_401[wrong key] 
+-------------------------------- live log call ---------------------------------
+17:38:21 Waiting up to 120s for a chat completion for ml-team/mock to return 401
+17:38:21 Done after 0s
+PASSED                                                                   [ 75%]
+e2e/test_serving.py::test_a3_response_names_served_model 
+-------------------------------- live log call ---------------------------------
+17:38:21 Waiting up to 120s for a chat completion to report ml-team/mock-demo
+FAILED                                                                   [ 83%]
+e2e/test_serving.py::test_a4_anthropic_message_returns_200 
+-------------------------------- live log call ---------------------------------
+17:40:18 Waiting up to 120s for an Anthropic message for ml-team/mock to return 200
+FAILED                                                                   [ 91%]
+e2e/test_serving.py::test_a5_gateway_logs_usage_record 
+-------------------------------- live log call ---------------------------------
+17:42:15 Waiting up to 120s for a matching usage record in the gateway's access log
+FAILED                                                                   [100%]
+------------------------------ live log teardown -------------------------------
+17:44:14 Waiting up to 120s for namespace bakeoff-pytest-client to be deleted
+17:44:24 Done after 10s
+
+
+=================================== FAILURES ===================================
+_________________________ test_b1_model_service_serves _________________________
+
+control_plane = Cluster(context='kind-modelplane-e2e-local')
+client = Client(cluster=Cluster(context='kind-modelplane-e2e-local'), namespace='bakeoff-pytest-client', pod='curl')
+endpoints = Endpoints(anthropic='http://172.18.255.100/anthropic/v1', openAI='http://172.18.255.100/v1')
+
+    def test_b1_model_service_serves(
+        control_plane: kube.Cluster, client: gateway.Client, endpoints: inferencegatewayv1alpha1.Endpoints
+    ) -> None:
+        """B1: The ModelService becomes RoutingReady, then serves requests as bakeoff-pytest/mock-pytest."""
+        obj = control_plane.wait_for_condition("modelservice", NAME, NAMESPACE, "RoutingReady", timeout=5 * 60)
+        ms = modelservicev1alpha1.ModelService.model_validate(obj)
+        assert ms.status is not None
+        assert ms.status.model is not None, f"ModelService {NAMESPACE}/{NAME} is RoutingReady but has no model name"
+        model = ms.status.model
+    
+        # The route can be accepted a moment before the gateway serves it, and AI
+        # Gateway then rolls the gateway's proxy pods to pick it up.
+        def serves() -> None:
+            r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+            assert r.status == 200, r
+            assert r.json()["model"] == f"{NAMESPACE}/{NAME}", r
+    
+>       wait.until(serves, timeout=2 * 60, what=f"{model} to serve a chat completion")
+
+e2e/test_lifecycle.py:83: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+e2e/wait.py:34: in until
+    result = check()
+             ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def serves() -> None:
+        r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+>       assert r.status == 200, r
+E       AssertionError: Response(status=401, body='Client authentication failed.')
+E       assert 401 == 200
+E        +  where 401 = Response(status=401, body='Client authentication failed.').status
+E       Still failing after waiting 120s for bakeoff-pytest/mock-pytest to serve a chat completion.
+
+e2e/test_lifecycle.py:80: AssertionError
+------------------------------ Captured log setup ------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for pod bakeoff-pytest-client/curl Ready
+INFO     e2e.wait:wait.py:41 Done after 5s
+INFO     e2e.wait:wait.py:30 Waiting up to 300s for InferenceGateway local to publish its endpoints
+INFO     e2e.wait:wait.py:41 Done after 0s
+------------------------------ Captured log call -------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 300s for modelservice bakeoff-pytest/mock-pytest RoutingReady
+INFO     e2e.wait:wait.py:41 Done after 66s
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for bakeoff-pytest/mock-pytest to serve a chat completion
+-------------------- Modelplane resources in bakeoff-pytest --------------------
+ModelDeployment bakeoff-pytest/mock-pytest: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica bakeoff-pytest/mock-pytest-1c930: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint bakeoff-pytest/mock-pytest-1c930: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService bakeoff-pytest/mock-pytest: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+_____________________ test_c2_no_pod_tolerates_every_taint _____________________
+
+workload = Cluster(context='kind-modelplane-e2e-workload')
+
+    def test_c2_no_pod_tolerates_every_taint(workload: kube.Cluster) -> None:
+        """C2: No pod outside kube-system tolerates every taint, unless its controller is allowlisted."""
+        offenders = []
+        for pod in workload.list_objects("pod"):
+            namespace = pod["metadata"]["namespace"]
+            if namespace == "kube-system":
+                continue
+            # A toleration with operator Exists and no key matches every taint.
+            wildcards = [
+                t for t in pod["spec"].get("tolerations", []) if t.get("operator") == "Exists" and not t.get("key")
+            ]
+            if not wildcards:
+                continue
+            controllers = {
+                (namespace, o["kind"], o["name"]) for o in pod["metadata"].get("ownerReferences", []) if o.get("controller")
+            }
+            if controllers & WILDCARD_TOLERATION_ALLOWLIST:
+                continue
+            offenders.append(f"{kube.qualified(namespace, pod['metadata']['name'])} tolerates {wildcards}")
+    
+>       assert offenders == []
+E       assert ["cert-manage...: 'Exists'}]"] == []
+E         
+E         Left contains one more item: "cert-manager/bakeoff-rogue tolerates [{'operator': 'Exists'}]"
+E         
+E         Full diff:
+E         - []
+E         + [
+E         +     "cert-manager/bakeoff-rogue tolerates [{'operator': 'Exists'}]",
+E         + ]
+
+e2e/test_placement.py:92: AssertionError
+----------------------- Modelplane resources in ml-team ------------------------
+ModelDeployment ml-team/mock-demo: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica ml-team/mock-demo-da96c: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint ml-team/mock-demo-da96c: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService ml-team/mock: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+_____________________ test_a1_chat_completion_returns_200 ______________________
+
+client = Client(cluster=Cluster(context='kind-modelplane-e2e-local'), namespace='bakeoff-pytest-client', pod='curl')
+endpoints = Endpoints(anthropic='http://172.18.255.100/anthropic/v1', openAI='http://172.18.255.100/v1')
+model = 'ml-team/mock'
+
+    def test_a1_chat_completion_returns_200(
+        client: gateway.Client, endpoints: inferencegatewayv1alpha1.Endpoints, model: str
+    ) -> None:
+        """A1: An OpenAI chat completion naming the ModelService, with the caller's key, returns 200."""
+    
+        def returns_200() -> None:
+            r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+            assert r.status == 200, r
+    
+>       wait.until(returns_200, timeout=SERVING_TIMEOUT, what=f"a chat completion for {model} to return 200")
+
+e2e/test_serving.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+e2e/wait.py:34: in until
+    result = check()
+             ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def returns_200() -> None:
+        r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+>       assert r.status == 200, r
+E       AssertionError: Response(status=401, body='Client authentication failed.')
+E       assert 401 == 200
+E        +  where 401 = Response(status=401, body='Client authentication failed.').status
+E       Still failing after waiting 120s for a chat completion for ml-team/mock to return 200.
+
+e2e/test_serving.py:74: AssertionError
+------------------------------ Captured log setup ------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for ModelService ml-team/mock to publish its model name
+INFO     e2e.wait:wait.py:41 Done after 0s
+------------------------------ Captured log call -------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for a chat completion for ml-team/mock to return 200
+----------------------- Modelplane resources in ml-team ------------------------
+ModelDeployment ml-team/mock-demo: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica ml-team/mock-demo-da96c: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint ml-team/mock-demo-da96c: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService ml-team/mock: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+_____________________ test_a3_response_names_served_model ______________________
+
+client = Client(cluster=Cluster(context='kind-modelplane-e2e-local'), namespace='bakeoff-pytest-client', pod='curl')
+endpoints = Endpoints(anthropic='http://172.18.255.100/anthropic/v1', openAI='http://172.18.255.100/v1')
+model = 'ml-team/mock'
+
+    def test_a3_response_names_served_model(
+        client: gateway.Client, endpoints: inferencegatewayv1alpha1.Endpoints, model: str
+    ) -> None:
+        """A3: The response names the model the engine served, not the one the caller asked for."""
+    
+        def names_served_model() -> None:
+            r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+            assert r.status == 200, r
+            assert r.json()["model"] == SERVED_MODEL, r
+    
+>       wait.until(names_served_model, timeout=SERVING_TIMEOUT, what=f"a chat completion to report {SERVED_MODEL}")
+
+e2e/test_serving.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+e2e/wait.py:34: in until
+    result = check()
+             ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def names_served_model() -> None:
+        r = client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+>       assert r.status == 200, r
+E       AssertionError: Response(status=401, body='Client authentication failed.')
+E       assert 401 == 200
+E        +  where 401 = Response(status=401, body='Client authentication failed.').status
+E       Still failing after waiting 120s for a chat completion to report ml-team/mock-demo.
+
+e2e/test_serving.py:105: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for a chat completion to report ml-team/mock-demo
+----------------------- Modelplane resources in ml-team ------------------------
+ModelDeployment ml-team/mock-demo: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica ml-team/mock-demo-da96c: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint ml-team/mock-demo-da96c: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService ml-team/mock: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+____________________ test_a4_anthropic_message_returns_200 _____________________
+
+client = Client(cluster=Cluster(context='kind-modelplane-e2e-local'), namespace='bakeoff-pytest-client', pod='curl')
+endpoints = Endpoints(anthropic='http://172.18.255.100/anthropic/v1', openAI='http://172.18.255.100/v1')
+model = 'ml-team/mock'
+
+    def test_a4_anthropic_message_returns_200(
+        client: gateway.Client, endpoints: inferencegatewayv1alpha1.Endpoints, model: str
+    ) -> None:
+        """A4: An Anthropic Messages API request, with the key in x-api-key, returns 200."""
+        headers = {"x-api-key": gateway.CALLER_KEY, "anthropic-version": "2023-06-01"}
+    
+        def returns_200() -> None:
+            r = client.request(f"{endpoints.anthropic}/messages", headers, gateway.message(model))
+            assert r.status == 200, r
+    
+>       wait.until(returns_200, timeout=SERVING_TIMEOUT, what=f"an Anthropic message for {model} to return 200")
+
+e2e/test_serving.py:121: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+e2e/wait.py:34: in until
+    result = check()
+             ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def returns_200() -> None:
+        r = client.request(f"{endpoints.anthropic}/messages", headers, gateway.message(model))
+>       assert r.status == 200, r
+E       AssertionError: Response(status=401, body='Client authentication failed.')
+E       assert 401 == 200
+E        +  where 401 = Response(status=401, body='Client authentication failed.').status
+E       Still failing after waiting 120s for an Anthropic message for ml-team/mock to return 200.
+
+e2e/test_serving.py:119: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for an Anthropic message for ml-team/mock to return 200
+----------------------- Modelplane resources in ml-team ------------------------
+ModelDeployment ml-team/mock-demo: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica ml-team/mock-demo-da96c: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint ml-team/mock-demo-da96c: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService ml-team/mock: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+______________________ test_a5_gateway_logs_usage_record _______________________
+
+client = Client(cluster=Cluster(context='kind-modelplane-e2e-local'), namespace='bakeoff-pytest-client', pod='curl')
+endpoints = Endpoints(anthropic='http://172.18.255.100/anthropic/v1', openAI='http://172.18.255.100/v1')
+model = 'ml-team/mock'
+workload = Cluster(context='kind-modelplane-e2e-workload')
+
+    def test_a5_gateway_logs_usage_record(
+        client: gateway.Client, endpoints: inferencegatewayv1alpha1.Endpoints, model: str, workload: kube.Cluster
+    ) -> None:
+        """A5: The gateway's access log attributes a request's tokens to its caller, service and served model.
+    
+        Other tests send the same request as the same caller, so a matching record
+        shows the gateway meters requests, but not that it metered this one.
+        """
+        want = {
+            "caller": "e2e",
+            "service": "ml-team/mock",
+            "served_model": SERVED_MODEL,
+            "input_tokens": 12,
+            "output_tokens": 9,
+            "total_tokens": 21,
+            "status": 200,
+        }
+        # A little before now, in case the node's clock and ours disagree.
+        since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=10)
+    
+        # Envoy buffers its access log for a while before writing it out. If the pod
+        # that served a request is replaced before it does, the record is lost, so
+        # each attempt sends another request.
+        def logged() -> None:
+            client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+            records = [r for r in gateway.usage_records(workload, since) if r.get("service") == want["service"]]
+            got = [{k: r.get(k) for k in want} for r in records]
+            assert want in got, f"no matching usage record; the last few for {want['service']} were {records[-3:]}"
+    
+>       wait.until(logged, timeout=SERVING_TIMEOUT, what="a matching usage record in the gateway's access log")
+
+e2e/test_serving.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+e2e/wait.py:34: in until
+    result = check()
+             ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def logged() -> None:
+        client.request(f"{endpoints.openAI}/chat/completions", BEARER, gateway.chat_completion(model))
+        records = [r for r in gateway.usage_records(workload, since) if r.get("service") == want["service"]]
+        got = [{k: r.get(k) for k in want} for r in records]
+>       assert want in got, f"no matching usage record; the last few for {want['service']} were {records[-3:]}"
+E       AssertionError: no matching usage record; the last few for ml-team/mock were []
+E       assert {'caller': 'e2e', 'service': 'ml-team/mock', 'served_model': 'ml-team/mock-demo', 'input_tokens': 12, ...} in []
+E       Still failing after waiting 120s for a matching usage record in the gateway's access log.
+
+e2e/test_serving.py:151: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for a matching usage record in the gateway's access log
+----------------------- Modelplane resources in ml-team ------------------------
+ModelDeployment ml-team/mock-demo: ReplicasScheduled=True (ReplicasCreated: Scheduled 1 of 1 replicas), ReplicasReady=True (AllReplicasReady: 1 of 1 ready), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelReplica ml-team/mock-demo-da96c: ModelAccepted=True (Accepted), ModelReady=True (Serving), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelEndpoint ml-team/mock-demo-da96c: EndpointReady=True (EndpointUsable), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+ModelService ml-team/mock: RoutingReady=True (RoutesAccepted), Synced=True (ReconcileSuccess), Ready=True (Available), Responsive=True (WatchCircuitClosed)
+---------------------------- Captured log teardown -----------------------------
+INFO     e2e.wait:wait.py:30 Waiting up to 120s for namespace bakeoff-pytest-client to be deleted
+INFO     e2e.wait:wait.py:41 Done after 10s
+=========================== short test summary info ============================
+SKIPPED [1] e2e/test_clouds.py:72: provisions real eks infrastructure; run with --cloud=eks
+FAILED e2e/test_lifecycle.py::test_b1_model_service_serves - AssertionError: ...
+FAILED e2e/test_placement.py::test_c2_no_pod_tolerates_every_taint - assert [...
+FAILED e2e/test_serving.py::test_a1_chat_completion_returns_200 - AssertionEr...
+FAILED e2e/test_serving.py::test_a3_response_names_served_model - AssertionEr...
+FAILED e2e/test_serving.py::test_a4_anthropic_message_returns_200 - Assertion...
+FAILED e2e/test_serving.py::test_a5_gateway_logs_usage_record - AssertionErro...
+============== 6 failed, 5 passed, 1 skipped in 715.24s (0:11:55) ==============

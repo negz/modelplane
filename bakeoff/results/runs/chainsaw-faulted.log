@@ -1,0 +1,348 @@
+Modelplane development shell
+
+  nix flake check               nix run .#fix
+  nix run .#build               nix run .#push
+  nix run .#run                 nix run .#stop
+  nix run .#stacks
+
+Version: v0.2.15
+Loading config (/home/negz/control/modelplaneai/modelplane-saw-point/e2e/chainsaw/.chainsaw.yaml)...
+- Using test file: chainsaw-test
+- TestDirs [/home/negz/control/modelplaneai/modelplane-saw-point/e2e/chainsaw/local]
+- Quiet false
+- SkipDelete false
+- FailFast false
+- Namespace ''
+- FastNamespaceDeletion false
+- FullName false
+- IncludeTestRegex ''
+- ExcludeTestRegex ''
+- ApplyTimeout 30s
+- AssertTimeout 2m0s
+- CleanupTimeout 5m0s
+- DeleteTimeout 5m0s
+- ErrorTimeout 2m0s
+- ExecTimeout 1m0s
+- DeletionPropagationPolicy Background
+- Template true
+- Clusters map[controlplane:{/tmp/nix-shell.XzxpRu/tmp.nCuZLCEEun/controlplane } workload:{/tmp/nix-shell.XzxpRu/tmp.nCuZLCEEun/workload }]
+- NoCluster false
+- PauseOnFailure false
+Loading tests...
+- lifecycle (/home/negz/control/modelplaneai/modelplane-saw-point/e2e/chainsaw/local/lifecycle)
+- placement (/home/negz/control/modelplaneai/modelplane-saw-point/e2e/chainsaw/local/placement)
+- serving (/home/negz/control/modelplaneai/modelplane-saw-point/e2e/chainsaw/local/serving)
+Loading values...
+Running tests...
+=== RUN   chainsaw
+=== PAUSE chainsaw
+=== CONT  chainsaw
+=== RUN   chainsaw/lifecycle
+=== PAUSE chainsaw/lifecycle
+=== RUN   chainsaw/placement
+=== PAUSE chainsaw/placement
+=== RUN   chainsaw/serving
+=== PAUSE chainsaw/serving
+=== CONT  chainsaw/lifecycle
+=== CONT  chainsaw/serving
+=== CONT  chainsaw/placement
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:26 | [32;1mserving[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw-serving
+    sink.go:61: | 17:44:26 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [32;1mplacement[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw-placement
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc1-engine-placement       [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc1-engine-placement       [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/ModelService @ ml-team/mock
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mAPPLY[0;22m     | [36;1mRUN[0;22m   | v1/Pod @ bakeoff-chainsaw/curl
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:26 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mAPPLY[0;22m     | [36;1mRUN[0;22m   | v1/Pod @ bakeoff-chainsaw-serving/curl
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | v1/Pod @ bakeoff-chainsaw/curl
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:26 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | v1/Pod @ bakeoff-chainsaw-serving/curl
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mAPPLY[0;22m     | [32;1mDONE[0;22m  | v1/Pod @ bakeoff-chainsaw/curl
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:26 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mAPPLY[0;22m     | [32;1mDONE[0;22m  | v1/Pod @ bakeoff-chainsaw-serving/curl
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [32;1mplacement[0;22m | [32;1mc1-engine-placement       [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/ModelService @ ml-team/mock
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c cat ../../../manifests/40-model-deployment.yaml
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc1-engine-placement       [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n ml-team get modelreplica -l modelplane.ai/deployment=mock-demo -o json
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:26 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | v1/Pod @ bakeoff-chainsaw-serving/curl
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mSCRIPT[0;22m    | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mAPPLY[0;22m     | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/ModelDeployment @ bakeoff-chainsaw/mock-chainsaw
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [32;1mplacement[0;22m | [32;1mc1-engine-placement       [0;22m | [32;1mSCRIPT[0;22m    | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc1-engine-placement       [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | / @ *
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | modelplane.ai/v1alpha1/ModelDeployment @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mAPPLY[0;22m     | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/ModelDeployment @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mAPPLY[0;22m     | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [32;1mplacement[0;22m | [32;1mc1-engine-placement       [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | / @ *
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc1-engine-placement       [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc2-no-wildcard-tolerations[0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mCREATE[0;22m    | [32;1mOK[0;22m    | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:44:26 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mAPPLY[0;22m     | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:26 | [36;1mplacement[0;22m | [36;1mc2-no-wildcard-tolerations[0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | / @ *
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:26 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | v1/Pod @ bakeoff-chainsaw/curl
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:27 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | v1/Pod @ bakeoff-chainsaw-serving/curl
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/ModelService @ ml-team/mock
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:44:27 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | v1/Pod @ bakeoff-chainsaw/curl
+    sink.go:61: | 17:44:27 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:44:27 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:44:27 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:44:27 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/ModelService @ ml-team/mock
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | modelplane.ai/v1alpha1/InferenceGateway @ local
+    sink.go:61: | 17:44:27 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/InferenceGateway @ local
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mASSERT[0;22m    | [36;1mRUN[0;22m   | apps/v1/Deployment @ envoy-gateway-system/*
+    sink.go:61: | 17:44:27 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | apps/v1/Deployment @ envoy-gateway-system/*
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1ma1-openai-chat-completion [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:44:27 | [36;1mserving[0;22m | [36;1ma1-openai-chat-completion [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 -o /dev/null -w '%{http_code}' --fail --retry 10 --retry-delay 5 --retry-all-errors "$OPENAI/chat/completions" -H 'authorization: Bearer sk-e2e-caller' -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+=== NAME  chainsaw/placement
+    sink.go:61: | 17:44:36 | [31;1mplacement[0;22m | [31;1mc2-no-wildcard-tolerations[0;22m | [31;1mASSERT[0;22m    | [31;1mERROR[0;22m | / @ *
+        === ERROR
+        ($offenders): Invalid value: ["cert-manager/bakeoff-rogue"]: lengths of slices don't match
+    sink.go:61: | 17:44:36 | [36;1mplacement[0;22m | [36;1mc2-no-wildcard-tolerations[0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:44:36 | [36;1mplacement[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:44:36 | [32;1mplacement[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw-placement
+    sink.go:61: | 17:44:41 | [36;1mplacement[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mEND[0;22m   |
+=== NAME  chainsaw/serving
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma1-openai-chat-completion [0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        401
+        === STDERR
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        command terminated with exit code 22
+    sink.go:61: | 17:45:17 | [31;1mserving[0;22m | [31;1ma1-openai-chat-completion [0;22m | [31;1mSCRIPT[0;22m    | [31;1mERROR[0;22m |
+        === ERROR
+        ($stdout): Invalid value: "401": Expected value: "200"
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma1-openai-chat-completion [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$OPENAI/chat/completions" -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        401
+    sink.go:61: | 17:45:17 | [32;1mserving[0;22m | [32;1ma2-openai-rejects-bad-keys[0;22m | [32;1mSCRIPT[0;22m    | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:45:17 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$OPENAI/chat/completions" -H 'authorization: Bearer sk-wrong' -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        401
+    sink.go:61: | 17:45:18 | [32;1mserving[0;22m | [32;1ma2-openai-rejects-bad-keys[0;22m | [32;1mSCRIPT[0;22m    | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma2-openai-rejects-bad-keys[0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma3-served-model           [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma3-served-model           [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 --fail-with-body "$OPENAI/chat/completions" -H 'authorization: Bearer sk-e2e-caller' -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma3-served-model           [0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        Client authentication failed.
+        === STDERR
+        curl: (22) The requested URL returned error: 401
+        command terminated with exit code 22
+    sink.go:61: | 17:45:18 | [31;1mserving[0;22m | [31;1ma3-served-model           [0;22m | [31;1mSCRIPT[0;22m    | [31;1mERROR[0;22m |
+        === ERROR
+        (json_parse($stdout).model): Internal error: invalid character 'C' looking for beginning of value
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma3-served-model           [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma4-anthropic-messages     [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma4-anthropic-messages     [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$ANTHROPIC/messages" -H 'x-api-key: sk-e2e-caller' -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma4-anthropic-messages     [0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        401
+    sink.go:61: | 17:45:18 | [31;1mserving[0;22m | [31;1ma4-anthropic-messages     [0;22m | [31;1mSCRIPT[0;22m    | [31;1mERROR[0;22m |
+        === ERROR
+        ($stdout): Invalid value: "401": Expected value: "200"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma4-anthropic-messages     [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma5-usage-record           [0;22m | [36;1mTRY[0;22m       | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma5-usage-record           [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c since="$(kubectl -n "$NAMESPACE" exec curl -- date -u +%Y-%m-%dT%H:%M:%S)"
+        code="$(kubectl -n "$NAMESPACE" exec curl -- \
+          curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+          "$OPENAI/chat/completions" \
+          -H 'authorization: Bearer sk-e2e-caller' \
+          -H 'content-type: application/json' \
+          -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}")"
+        echo "{\"since\":\"$since\",\"code\":\"$code\"}"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma5-usage-record           [0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDOUT
+        {"since":"2026-09-30T00:45:18","code":"401"}
+    sink.go:61: | 17:45:18 | [31;1mserving[0;22m | [31;1ma5-usage-record           [0;22m | [31;1mSCRIPT[0;22m    | [31;1mERROR[0;22m |
+        === ERROR
+        (json_parse($stdout).code): Invalid value: "401": Expected value: "200"
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1ma5-usage-record           [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mCLEANUP[0;22m   | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:18 | [32;1mserving[0;22m | [32;1mready                     [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | v1/Pod @ bakeoff-chainsaw-serving/curl
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1mready                     [0;22m | [36;1mCLEANUP[0;22m   | [36;1mEND[0;22m   |
+    sink.go:61: | 17:45:18 | [36;1mserving[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:45:18 | [32;1mserving[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw-serving
+    sink.go:61: | 17:45:23 | [36;1mserving[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mEND[0;22m   |
+=== NAME  chainsaw/lifecycle
+    sink.go:61: | 17:45:58 | [32;1mlifecycle[0;22m | [32;1mb1-routing-ready          [0;22m | [32;1mASSERT[0;22m    | [32;1mDONE[0;22m  | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:45:58 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/9vkrxfpdg6khwjyfszq0d84shv82988i-bash-5.3p9/bin/sh -c kubectl -n "$NAMESPACE" exec curl -- curl -sS --max-time 15 --fail --retry 10 --retry-delay 5 --retry-all-errors "$OPENAI/chat/completions" -H 'authorization: Bearer sk-e2e-caller' -H 'content-type: application/json' -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mSCRIPT[0;22m    | [36;1mLOG[0;22m   |
+        === STDERR
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        curl: (22) The requested URL returned error: 401
+        command terminated with exit code 22
+    sink.go:61: | 17:46:49 | [31;1mlifecycle[0;22m | [31;1mb1-routing-ready          [0;22m | [31;1mSCRIPT[0;22m    | [31;1mERROR[0;22m |
+        === ERROR
+        (json_parse($stdout).model): Internal error: unexpected end of JSON input
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mTRY[0;22m       | [36;1mEND[0;22m   |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCATCH[0;22m     | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/akf2q25s4ljarpl5k11k6z5fngim2wkh-kubectl-1.36.3/bin/kubectl describe modelservices.v1alpha1.modelplane.ai mock-chainsaw -n bakeoff-chainsaw
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mLOG[0;22m   |
+        === STDOUT
+        Name:         mock-chainsaw
+        Namespace:    bakeoff-chainsaw
+        Labels:       crossplane.io/composite=mock-chainsaw
+        Annotations:  <none>
+        API Version:  modelplane.ai/v1alpha1
+        Kind:         ModelService
+        Metadata:
+          Creation Timestamp:  2026-09-30T00:44:26Z
+          Finalizers:
+            composite.apiextensions.crossplane.io
+          Generation:        4
+          Resource Version:  37042
+          UID:               e61b5fd8-38f4-4654-b7d1-afeaaa4a16cd
+        Spec:
+          Crossplane:
+            Composition Ref:
+              Name:  modelservices.modelplane.ai
+            Composition Revision Ref:
+              Name:                     modelservices.modelplane.ai-9575961
+            Composition Update Policy:  Automatic
+            Resource Refs:
+              API Version:  modelplane.ai/v1alpha1
+              Kind:         ModelRoute
+              Name:         mock-chainsaw-local-f1009
+          Endpoints:
+            Name:      mock-chainsaw
+            Priority:  0
+            Selector:
+              Match Labels:
+                modelplane.ai/deployment:  mock-chainsaw
+            Weight:                        1
+          Timeouts:
+            Idle:     60s
+            Request:  300s
+        Status:
+          Conditions:
+            Last Transition Time:  2026-09-30T00:45:58Z
+            Reason:                RoutesAccepted
+            Status:                True
+            Type:                  RoutingReady
+            Last Transition Time:  2026-09-30T00:44:26Z
+            Observed Generation:   4
+            Reason:                ReconcileSuccess
+            Status:                True
+            Type:                  Synced
+            Last Transition Time:  2026-09-30T00:45:58Z
+            Observed Generation:   4
+            Reason:                Available
+            Status:                True
+            Type:                  Ready
+            Last Transition Time:  2026-09-30T00:44:26Z
+            Observed Generation:   4
+            Reason:                WatchCircuitClosed
+            Status:                True
+            Type:                  Responsive
+          Model:                   bakeoff-chainsaw/mock-chainsaw
+          Routes:
+            Ready:  1
+            Total:  1
+        Events:
+          Type    Reason             Age                   From                                                             Message
+          ----    ------             ----                  ----                                                             -------
+          Normal  SelectComposition  2m23s                 defined/compositeresourcedefinition.apiextensions.crossplane.io  Successfully selected composition: modelservices.modelplane.ai
+          Normal  SelectComposition  2m23s                 defined/compositeresourcedefinition.apiextensions.crossplane.io  Selected composition revision: modelservices.modelplane.ai-9575961
+          Normal  ComposeResources   83s (x12 over 2m23s)  defined/compositeresourcedefinition.apiextensions.crossplane.io  Pipeline step "compose-model-service": Waiting for routes on gateways: local
+          Normal  ComposeResources   83s (x11 over 2m23s)  defined/compositeresourcedefinition.apiextensions.crossplane.io  Composed resource "route-local" is not yet ready
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1mb1-routing-ready          [0;22m | [32;1mCMD[0;22m       | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/akf2q25s4ljarpl5k11k6z5fngim2wkh-kubectl-1.36.3/bin/kubectl get modelreplicas.v1alpha1.modelplane.ai -n bakeoff-chainsaw
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mLOG[0;22m   |
+        === STDOUT
+        NAME                  CLUSTER   SYNCED   READY   COMPOSITION                   AGE
+        mock-chainsaw-c28ff   local     True     True    modelreplicas.modelplane.ai   2m23s
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1mb1-routing-ready          [0;22m | [32;1mCMD[0;22m       | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mRUN[0;22m   |
+        === COMMAND
+        /nix/store/akf2q25s4ljarpl5k11k6z5fngim2wkh-kubectl-1.36.3/bin/kubectl get modelendpoints.v1alpha1.modelplane.ai -n bakeoff-chainsaw
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCMD[0;22m       | [36;1mLOG[0;22m   |
+        === STDOUT
+        NAME                  ORIGIN                                                            MODEL                            SYNCED   READY   COMPOSITION                    AGE
+        mock-chainsaw-c28ff   https://gateway-local-dc36a.modelplane-system.svc.cluster.local   bakeoff-chainsaw/mock-chainsaw   True     True    modelendpoints.modelplane.ai   83s
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1mb1-routing-ready          [0;22m | [32;1mCMD[0;22m       | [32;1mDONE[0;22m  |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1mb1-routing-ready          [0;22m | [36;1mCATCH[0;22m     | [36;1mEND[0;22m   |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mCLEANUP[0;22m   | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | modelplane.ai/v1alpha1/ModelService @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | modelplane.ai/v1alpha1/ModelDeployment @ bakeoff-chainsaw/mock-chainsaw
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1msetup                     [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | v1/Pod @ bakeoff-chainsaw/curl
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1msetup                     [0;22m | [36;1mCLEANUP[0;22m   | [36;1mEND[0;22m   |
+    sink.go:61: | 17:46:49 | [36;1mlifecycle[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mBEGIN[0;22m |
+    sink.go:61: | 17:46:49 | [32;1mlifecycle[0;22m | [32;1m@chainsaw                 [0;22m | [32;1mDELETE[0;22m    | [32;1mOK[0;22m    | v1/Namespace @ bakeoff-chainsaw
+    sink.go:61: | 17:46:54 | [36;1mlifecycle[0;22m | [36;1m@chainsaw                 [0;22m | [36;1mCLEANUP[0;22m   | [36;1mEND[0;22m   |
+--- FAIL: chainsaw (0.00s)
+    --- FAIL: chainsaw/placement (15.35s)
+    --- FAIL: chainsaw/serving (57.11s)
+    --- FAIL: chainsaw/lifecycle (148.32s)
+FAIL
+Tests Summary...
+- Passed  tests 0
+- Failed  tests 3
+- Skipped tests 0
+Done with failures.
+Error: some tests failed
