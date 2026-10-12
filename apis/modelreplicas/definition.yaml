@@ -74,11 +74,27 @@ spec:
                   InferencePool + endpoint picker and role-labels the engine
                   each marks with its phase; Unified (or absent) fronts them
                   with a Service.
+                x-kubernetes-validations:
+                - rule: "!has(self.prefillDecode) || (has(self.mode) && self.mode == 'PrefillDecode')"
+                  message: "prefillDecode may only be set when mode is PrefillDecode"
                 properties:
                   mode:
                     type: string
                     enum: [Unified, PrefillDecode]
                     default: Unified
+                  prefillDecode:
+                    type: object
+                    description: >-
+                      How the engines hand KV cache from prefill to decode.
+                      Omitted means kvTransfer VLLMNixl.
+                    required: [kvTransfer]
+                    properties:
+                      kvTransfer:
+                        type: string
+                        enum: [VLLMNixl, SGLang]
+                        description: >-
+                          The KV transfer format the engines speak. Modelplane
+                          composes the routing for this format.
               engines:
                 type: array
                 description: >-
