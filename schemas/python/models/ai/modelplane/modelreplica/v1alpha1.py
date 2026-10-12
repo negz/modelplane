@@ -154,8 +154,19 @@ class ModelCacheRef(BaseModel):
     name: constr(min_length=1)
 
 
+class PrefillDecode(BaseModel):
+    kvTransfer: Literal['VLLMNixl', 'SGLang']
+    """
+    The KV transfer format the engines speak. Modelplane composes the routing for this format.
+    """
+
+
 class Serving(BaseModel):
     mode: Literal['Unified', 'PrefillDecode'] | None = 'Unified'
+    prefillDecode: PrefillDecode | None = None
+    """
+    How the engines hand KV cache from prefill to decode. Omitted means kvTransfer VLLMNixl.
+    """
 
 
 class SpecModel(BaseModel):

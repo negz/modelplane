@@ -220,10 +220,21 @@ class ModelCacheRef(BaseModel):
     """
 
 
+class PrefillDecode(BaseModel):
+    kvTransfer: Literal['VLLMNixl', 'SGLang']
+    """
+    The KV transfer format the engines speak, which the engine flags select. VLLMNixl is vLLM with "kv_connector":"NixlConnector" in --kv-transfer-config. SGLang is SGLang with --disaggregation-mode, on any transfer backend. Modelplane composes the routing for this format.
+    """
+
+
 class Serving(BaseModel):
     mode: Literal['Unified', 'PrefillDecode']
     """
     Unified serves prefill and decode on one engine. PrefillDecode splits them across two engines, each marking its phase as Prefill or Decode.
+    """
+    prefillDecode: PrefillDecode | None = None
+    """
+    How a PrefillDecode deployment's engines hand KV cache from prefill to decode. Set only when mode is PrefillDecode. Omitted means kvTransfer VLLMNixl.
     """
 
 
