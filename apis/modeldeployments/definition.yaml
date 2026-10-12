@@ -139,6 +139,9 @@ spec:
                           engines marking those phases, with inference-aware routing that
                           sequences prefill then decode. Omitted means Unified.
                         required: [mode]
+                        x-kubernetes-validations:
+                        - rule: "!has(self.prefillDecode) || self.mode == 'PrefillDecode'"
+                          message: "prefillDecode may only be set when mode is PrefillDecode"
                         properties:
                           mode:
                             type: string
@@ -148,6 +151,24 @@ spec:
                               Unified serves prefill and decode on one engine.
                               PrefillDecode splits them across two engines, each marking
                               its phase as Prefill or Decode.
+                          prefillDecode:
+                            type: object
+                            description: >-
+                              How a PrefillDecode deployment's engines hand KV cache
+                              from prefill to decode. Set only when mode is
+                              PrefillDecode. Omitted means kvTransfer VLLMNixl.
+                            required: [kvTransfer]
+                            properties:
+                              kvTransfer:
+                                type: string
+                                enum: [VLLMNixl, SGLang]
+                                description: >-
+                                  The KV transfer format the engines speak, which the
+                                  engine flags select. VLLMNixl is vLLM with
+                                  "kv_connector":"NixlConnector" in --kv-transfer-config.
+                                  SGLang is SGLang with --disaggregation-mode, on any
+                                  transfer backend. Modelplane composes the routing for
+                                  this format.
                       tolerations:
                         type: array
                         description: >-
