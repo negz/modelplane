@@ -329,6 +329,12 @@ _PART_SUFFIX = {"Count": "_count", "Sum": "_sum"}
 #
 # Written out rather than as a Python float so nothing has to render one:
 # 1e-09 is not an OTTL literal. Every one carries a decimal point, because
+# Rates a GPU exporter samples, which the gpu-operator's metrics CSV types a
+# counter and GKE's managed exporter a gauge. A counter reaches a Prometheus
+# backend with _total on its name, so the one metric would arrive under two
+# names, by cloud. Made a gauge on every cluster before it's renamed.
+_SAMPLED_RATES = ("DCGM_FI_PROF_PCIE_TX_BYTES", "DCGM_FI_PROF_PCIE_RX_BYTES")
+
 # scale_metric takes a float and the collector refuses to start on an integer
 # literal in that position.
 _UNIT_FACTOR = {
@@ -415,9 +421,9 @@ def _label_statements(source: str, labels: list[Any]) -> list[str]:
 
 
 def _transform(mappings: list[mmv1alpha1.MetricMapping]) -> dict[str, Any]:
-    """Parts extracted, then units converted, then labels, then every rename.
+    """Sampled rates made gauges, parts extracted, units converted, labels, then every rename.
 
-    Four blocks rather than one list. Each block finishes over every metric
+    Blocks rather than one list. Each block finishes over every metric
     before the next one starts, and each step here depends on the one before
     having finished everywhere: an extraction mints the metric a conversion
     scales, a conversion has to reach a datapoint the rename would otherwise
@@ -431,7 +437,12 @@ def _transform(mappings: list[mmv1alpha1.MetricMapping]) -> dict[str, Any]:
     not just the one it could not convert.
     """
     extract, scale, datapoint, metric = statements(mappings)
-    blocks: list[dict[str, Any]] = []
+    blocks: list[dict[str, Any]] = [
+        {
+            "context": "metric",
+            "statements": [f'convert_sum_to_gauge() where metric.name == "{name}"' for name in _SAMPLED_RATES],
+        }
+    ]
     if extract:
         blocks.append({"context": "metric", "statements": extract})
     if scale:

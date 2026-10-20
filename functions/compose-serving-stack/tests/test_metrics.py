@@ -67,9 +67,9 @@ class PublishedCase:
     reason: str
     mapping: str
     file: str
-    # Names the component publishes only from the first event it counts, so a
-    # scrape of a lightly loaded pod can't show them, checked against the
-    # component's source at that version instead.
+    # Names this scrape can't show: ones the component publishes only from the
+    # first event it counts, or only when it's started with a feature the
+    # scraped pod didn't run. Each is checked against the component's source.
     unscraped: tuple[str, ...]
     want: list[str]
 
@@ -83,20 +83,44 @@ PUBLISHED_CASES = [
         unscraped=(),
         want=[],
     ),
+    # A KV offload tier is v0.27.1's (offloading_metrics.py), an external prefix
+    # cache v0.23.0's (v1/metrics/loggers.py), and speculative decoding is off
+    # unless configured (v1/spec_decode/metrics.py), so neither scraped version
+    # shows them, and v0.11.0 publishes none of the first two at all.
     PublishedCase(
         name="VLLMOlder",
-        reason="vLLM v0.11.0 publishes every name the vLLM mapping reads.",
+        reason="vLLM v0.11.0 publishes every name the vLLM mapping reads that it has.",
         mapping="modelplane-vllm",
         file="vllm-v0.11.0.json",
-        unscraped=(),
+        unscraped=(
+            "vllm:external_prefix_cache_hits_total",
+            "vllm:external_prefix_cache_queries_total",
+            "vllm:kv_offload_store_bytes_total",
+            "vllm:kv_offload_load_bytes_total",
+            "vllm:kv_offload_store_time_total",
+            "vllm:kv_offload_load_time_total",
+            "vllm:kv_offload_cpu_cache_usage_perc",
+            "vllm:spec_decode_num_drafts_total",
+            "vllm:spec_decode_num_draft_tokens_total",
+            "vllm:spec_decode_num_accepted_tokens_per_pos_total",
+        ),
         want=[],
     ),
     PublishedCase(
         name="VLLMNewer",
-        reason="vLLM v0.23.0 publishes every name the vLLM mapping reads.",
+        reason="vLLM v0.23.0 publishes every name the vLLM mapping reads that it has.",
         mapping="modelplane-vllm",
         file="vllm-v0.23.0.json",
-        unscraped=(),
+        unscraped=(
+            "vllm:kv_offload_store_bytes_total",
+            "vllm:kv_offload_load_bytes_total",
+            "vllm:kv_offload_store_time_total",
+            "vllm:kv_offload_load_time_total",
+            "vllm:kv_offload_cpu_cache_usage_perc",
+            "vllm:spec_decode_num_drafts_total",
+            "vllm:spec_decode_num_draft_tokens_total",
+            "vllm:spec_decode_num_accepted_tokens_per_pos_total",
+        ),
         want=[],
     ),
     # SGLang runs prometheus_client in multiprocess mode, which writes a
@@ -127,12 +151,15 @@ PUBLISHED_CASES = [
         unscraped=(),
         want=[],
     ),
+    # GKE's managed exporter has a fixed field list without SM occupancy, so
+    # modelplane_gpu_sm_occupancy_ratio is empty on GKE. The gpu-operator's
+    # metrics CSV the other clouds use has it (generated/aicr/dcgm.py).
     PublishedCase(
         name="GKEDCGM",
-        reason="GKE's managed DCGM exporter publishes every name the GPU mapping reads.",
+        reason="GKE's managed DCGM exporter publishes every name the GPU mapping reads apart from SM occupancy.",
         mapping="modelplane-gpu",
         file="dcgm-gke.json",
-        unscraped=(),
+        unscraped=("DCGM_FI_PROF_SM_OCCUPANCY",),
         want=[],
     ),
 ]

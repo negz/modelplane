@@ -63,6 +63,23 @@ _VLLM = {
     "vllm:num_preemptions_total": "modelplane_requests_preempted_total",
     "vllm:prefix_cache_hits_total": "modelplane_prefix_cache_hits_total",
     "vllm:prefix_cache_queries_total": "modelplane_prefix_cache_lookups_total",
+    # The rest are published only when the engine is started with the feature:
+    # a prefix cache outside the GPU, such as the host-RAM KV offload tier
+    # (from v0.23.0), that tier's transfers (--kv-offloading-backend, from
+    # v0.27.1), and speculative decoding. kv_offload_cpu_cache_usage_perc is the
+    # fraction of the tier's chunks in transfer, neither free nor evictable, not
+    # how full the tier is, and nothing publishes how full it is.
+    "vllm:external_prefix_cache_hits_total": "modelplane_external_prefix_cache_hits_total",
+    "vllm:external_prefix_cache_queries_total": "modelplane_external_prefix_cache_lookups_total",
+    "vllm:kv_offload_store_bytes_total": "modelplane_kv_offload_store_bytes_total",
+    "vllm:kv_offload_load_bytes_total": "modelplane_kv_offload_load_bytes_total",
+    "vllm:kv_offload_store_time_total": "modelplane_kv_offload_store_seconds_total",
+    "vllm:kv_offload_load_time_total": "modelplane_kv_offload_load_seconds_total",
+    "vllm:kv_offload_cpu_cache_usage_perc": "modelplane_kv_offload_in_transfer_ratio",
+    "vllm:spec_decode_num_drafts_total": "modelplane_spec_decode_drafts_total",
+    "vllm:spec_decode_num_draft_tokens_total": "modelplane_spec_decode_draft_tokens_total",
+    # By draft position, in the engine's own position label.
+    "vllm:spec_decode_num_accepted_tokens_per_pos_total": "modelplane_spec_decode_accepted_tokens_total",
 }
 
 # SGLang's prefix-cache and retraction counters count what vLLM's do, in the
@@ -98,20 +115,29 @@ _PICKER = {
 }
 
 # The GPUs, through whichever vendor's exporter the stack installed. DCGM
-# reports framebuffer memory in MiB and energy in millijoules, and both are
-# renamed onto a name that claims a different unit, so both say so.
+# reports framebuffer memory in MiB and energy in millijoules, and each is
+# renamed onto a name that claims a different unit, so each says so. PCIe
+# traffic is a rate DCGM samples, in bytes per second, though some exporters
+# type it a counter (see collector._SAMPLED_RATES). GKE's managed exporter
+# doesn't publish SM occupancy.
 _GPU = {
     "DCGM_FI_DEV_FB_USED": "modelplane_gpu_memory_used_bytes",
+    "DCGM_FI_DEV_FB_FREE": "modelplane_gpu_memory_free_bytes",
     "DCGM_FI_PROF_GR_ENGINE_ACTIVE": "modelplane_gpu_compute_active_ratio",
     "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE": "modelplane_gpu_tensor_active_ratio",
     "DCGM_FI_PROF_DRAM_ACTIVE": "modelplane_gpu_memory_bandwidth_ratio",
     "DCGM_FI_DEV_GPU_TEMP": "modelplane_gpu_temperature_celsius",
     "DCGM_FI_DEV_POWER_USAGE": "modelplane_gpu_power_watts",
     "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION": "modelplane_energy_joules_total",
+    "DCGM_FI_PROF_PCIE_TX_BYTES": "modelplane_gpu_pcie_transmit_bytes_per_second",
+    "DCGM_FI_PROF_PCIE_RX_BYTES": "modelplane_gpu_pcie_receive_bytes_per_second",
+    "DCGM_FI_PROF_SM_ACTIVE": "modelplane_gpu_sm_active_ratio",
+    "DCGM_FI_PROF_SM_OCCUPANCY": "modelplane_gpu_sm_occupancy_ratio",
 }
 
 _GPU_UNITS = {
     "DCGM_FI_DEV_FB_USED": "Mebibytes",
+    "DCGM_FI_DEV_FB_FREE": "Mebibytes",
     "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION": "Millijoules",
 }
 

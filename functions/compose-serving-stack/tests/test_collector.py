@@ -348,6 +348,13 @@ def _config(
             },
             "transform/modelplane": {
                 "metric_statements": [
+                    {
+                        "context": "metric",
+                        "statements": [
+                            'convert_sum_to_gauge() where metric.name == "DCGM_FI_PROF_PCIE_TX_BYTES"',
+                            'convert_sum_to_gauge() where metric.name == "DCGM_FI_PROF_PCIE_RX_BYTES"',
+                        ],
+                    },
                     # The engines' token histograms as counters, extracted ahead of the
                     # statements that select on the names extraction gives them.
                     {
@@ -374,6 +381,7 @@ def _config(
                         "error_mode": "ignore",
                         "statements": [
                             'scale_metric(1048576.0) where metric.name == "DCGM_FI_DEV_FB_USED"',
+                            'scale_metric(1048576.0) where metric.name == "DCGM_FI_DEV_FB_FREE"',
                             'scale_metric(0.001) where metric.name == "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION"',
                         ],
                     },
@@ -403,6 +411,16 @@ def _config(
                             'set(metric.name, "modelplane_requests_preempted_total") where metric.name == "vllm:num_preemptions_total"',
                             'set(metric.name, "modelplane_prefix_cache_hits_total") where metric.name == "vllm:prefix_cache_hits_total"',
                             'set(metric.name, "modelplane_prefix_cache_lookups_total") where metric.name == "vllm:prefix_cache_queries_total"',
+                            'set(metric.name, "modelplane_external_prefix_cache_hits_total") where metric.name == "vllm:external_prefix_cache_hits_total"',
+                            'set(metric.name, "modelplane_external_prefix_cache_lookups_total") where metric.name == "vllm:external_prefix_cache_queries_total"',
+                            'set(metric.name, "modelplane_kv_offload_store_bytes_total") where metric.name == "vllm:kv_offload_store_bytes_total"',
+                            'set(metric.name, "modelplane_kv_offload_load_bytes_total") where metric.name == "vllm:kv_offload_load_bytes_total"',
+                            'set(metric.name, "modelplane_kv_offload_store_seconds_total") where metric.name == "vllm:kv_offload_store_time_total"',
+                            'set(metric.name, "modelplane_kv_offload_load_seconds_total") where metric.name == "vllm:kv_offload_load_time_total"',
+                            'set(metric.name, "modelplane_kv_offload_in_transfer_ratio") where metric.name == "vllm:kv_offload_cpu_cache_usage_perc"',
+                            'set(metric.name, "modelplane_spec_decode_drafts_total") where metric.name == "vllm:spec_decode_num_drafts_total"',
+                            'set(metric.name, "modelplane_spec_decode_draft_tokens_total") where metric.name == "vllm:spec_decode_num_draft_tokens_total"',
+                            'set(metric.name, "modelplane_spec_decode_accepted_tokens_total") where metric.name == "vllm:spec_decode_num_accepted_tokens_per_pos_total"',
                             'set(metric.name, "modelplane_engine_tokens_total") where metric.name == "vllm:request_prompt_tokens_sum"',
                             'set(metric.name, "modelplane_engine_tokens_total") where metric.name == "vllm:request_generation_tokens_sum"',
                             'set(metric.name, "modelplane_engine_requests_total") where metric.name == "vllm:request_prompt_tokens_count"',
@@ -417,12 +435,17 @@ def _config(
                             'set(metric.name, "modelplane_engine_requests_total") where metric.name == "sglang:prompt_tokens_histogram_count"',
                             'set(metric.name, "modelplane_route_decision_seconds") where metric.name == "llm_d_epp_scheduler_e2e_duration_seconds"',
                             'set(metric.name, "modelplane_gpu_memory_used_bytes") where metric.name == "DCGM_FI_DEV_FB_USED"',
+                            'set(metric.name, "modelplane_gpu_memory_free_bytes") where metric.name == "DCGM_FI_DEV_FB_FREE"',
                             'set(metric.name, "modelplane_gpu_compute_active_ratio") where metric.name == "DCGM_FI_PROF_GR_ENGINE_ACTIVE"',
                             'set(metric.name, "modelplane_gpu_tensor_active_ratio") where metric.name == "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE"',
                             'set(metric.name, "modelplane_gpu_memory_bandwidth_ratio") where metric.name == "DCGM_FI_PROF_DRAM_ACTIVE"',
                             'set(metric.name, "modelplane_gpu_temperature_celsius") where metric.name == "DCGM_FI_DEV_GPU_TEMP"',
                             'set(metric.name, "modelplane_gpu_power_watts") where metric.name == "DCGM_FI_DEV_POWER_USAGE"',
                             'set(metric.name, "modelplane_energy_joules_total") where metric.name == "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION"',
+                            'set(metric.name, "modelplane_gpu_pcie_transmit_bytes_per_second") where metric.name == "DCGM_FI_PROF_PCIE_TX_BYTES"',
+                            'set(metric.name, "modelplane_gpu_pcie_receive_bytes_per_second") where metric.name == "DCGM_FI_PROF_PCIE_RX_BYTES"',
+                            'set(metric.name, "modelplane_gpu_sm_active_ratio") where metric.name == "DCGM_FI_PROF_SM_ACTIVE"',
+                            'set(metric.name, "modelplane_gpu_sm_occupancy_ratio") where metric.name == "DCGM_FI_PROF_SM_OCCUPANCY"',
                         ],
                     },
                 ]
@@ -734,6 +757,7 @@ STATEMENTS_CASES = [
             ],
             [
                 'scale_metric(1048576.0) where metric.name == "DCGM_FI_DEV_FB_USED"',
+                'scale_metric(1048576.0) where metric.name == "DCGM_FI_DEV_FB_FREE"',
                 'scale_metric(0.001) where metric.name == "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION"',
             ],
             [
@@ -757,6 +781,16 @@ STATEMENTS_CASES = [
                 'set(metric.name, "modelplane_requests_preempted_total") where metric.name == "vllm:num_preemptions_total"',
                 'set(metric.name, "modelplane_prefix_cache_hits_total") where metric.name == "vllm:prefix_cache_hits_total"',
                 'set(metric.name, "modelplane_prefix_cache_lookups_total") where metric.name == "vllm:prefix_cache_queries_total"',
+                'set(metric.name, "modelplane_external_prefix_cache_hits_total") where metric.name == "vllm:external_prefix_cache_hits_total"',
+                'set(metric.name, "modelplane_external_prefix_cache_lookups_total") where metric.name == "vllm:external_prefix_cache_queries_total"',
+                'set(metric.name, "modelplane_kv_offload_store_bytes_total") where metric.name == "vllm:kv_offload_store_bytes_total"',
+                'set(metric.name, "modelplane_kv_offload_load_bytes_total") where metric.name == "vllm:kv_offload_load_bytes_total"',
+                'set(metric.name, "modelplane_kv_offload_store_seconds_total") where metric.name == "vllm:kv_offload_store_time_total"',
+                'set(metric.name, "modelplane_kv_offload_load_seconds_total") where metric.name == "vllm:kv_offload_load_time_total"',
+                'set(metric.name, "modelplane_kv_offload_in_transfer_ratio") where metric.name == "vllm:kv_offload_cpu_cache_usage_perc"',
+                'set(metric.name, "modelplane_spec_decode_drafts_total") where metric.name == "vllm:spec_decode_num_drafts_total"',
+                'set(metric.name, "modelplane_spec_decode_draft_tokens_total") where metric.name == "vllm:spec_decode_num_draft_tokens_total"',
+                'set(metric.name, "modelplane_spec_decode_accepted_tokens_total") where metric.name == "vllm:spec_decode_num_accepted_tokens_per_pos_total"',
                 'set(metric.name, "modelplane_engine_tokens_total") where metric.name == "vllm:request_prompt_tokens_sum"',
                 'set(metric.name, "modelplane_engine_tokens_total") where metric.name == "vllm:request_generation_tokens_sum"',
                 'set(metric.name, "modelplane_engine_requests_total") where metric.name == "vllm:request_prompt_tokens_count"',
@@ -774,12 +808,17 @@ STATEMENTS_CASES = [
                 'set(metric.name, "modelplane_engine_requests_total") where metric.name == "sglang:prompt_tokens_histogram_count"',
                 'set(metric.name, "modelplane_route_decision_seconds") where metric.name == "llm_d_epp_scheduler_e2e_duration_seconds"',
                 'set(metric.name, "modelplane_gpu_memory_used_bytes") where metric.name == "DCGM_FI_DEV_FB_USED"',
+                'set(metric.name, "modelplane_gpu_memory_free_bytes") where metric.name == "DCGM_FI_DEV_FB_FREE"',
                 'set(metric.name, "modelplane_gpu_compute_active_ratio") where metric.name == "DCGM_FI_PROF_GR_ENGINE_ACTIVE"',
                 'set(metric.name, "modelplane_gpu_tensor_active_ratio") where metric.name == "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE"',
                 'set(metric.name, "modelplane_gpu_memory_bandwidth_ratio") where metric.name == "DCGM_FI_PROF_DRAM_ACTIVE"',
                 'set(metric.name, "modelplane_gpu_temperature_celsius") where metric.name == "DCGM_FI_DEV_GPU_TEMP"',
                 'set(metric.name, "modelplane_gpu_power_watts") where metric.name == "DCGM_FI_DEV_POWER_USAGE"',
                 'set(metric.name, "modelplane_energy_joules_total") where metric.name == "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION"',
+                'set(metric.name, "modelplane_gpu_pcie_transmit_bytes_per_second") where metric.name == "DCGM_FI_PROF_PCIE_TX_BYTES"',
+                'set(metric.name, "modelplane_gpu_pcie_receive_bytes_per_second") where metric.name == "DCGM_FI_PROF_PCIE_RX_BYTES"',
+                'set(metric.name, "modelplane_gpu_sm_active_ratio") where metric.name == "DCGM_FI_PROF_SM_ACTIVE"',
+                'set(metric.name, "modelplane_gpu_sm_occupancy_ratio") where metric.name == "DCGM_FI_PROF_SM_OCCUPANCY"',
             ],
         ),
     ),
@@ -915,6 +954,13 @@ TRANSFORM_CASES = [
             "metric_statements": [
                 {
                     "context": "metric",
+                    "statements": [
+                        'convert_sum_to_gauge() where metric.name == "DCGM_FI_PROF_PCIE_TX_BYTES"',
+                        'convert_sum_to_gauge() where metric.name == "DCGM_FI_PROF_PCIE_RX_BYTES"',
+                    ],
+                },
+                {
+                    "context": "metric",
                     "statements": ['extract_count_metric(true) where metric.name == "my_engine_duration_ms"'],
                 },
                 {
@@ -980,7 +1026,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="2da9f6e58d950a75",
+                    config_hash="79ad96ed3a82cd8a",
                     volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                     volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                     env_from=None,
@@ -1025,7 +1071,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="ab8b8495e213d843",
+                    config_hash="8dbeb08f8af78597",
                     volumes=[
                         {"name": "config", "configMap": {"name": "modelplane-collector"}},
                         {"name": "credentials-primary", "secret": {"secretName": "telemetry-credentials"}},
@@ -1092,7 +1138,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="02f6aae224af2b56",
+                    config_hash="fad56a783dfa5691",
                     volumes=[
                         {"name": "config", "configMap": {"name": "modelplane-collector"}},
                         {"name": "credentials-vendor", "secret": {"secretName": "vendor-token"}},

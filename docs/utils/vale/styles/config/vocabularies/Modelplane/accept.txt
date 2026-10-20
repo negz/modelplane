@@ -601,3 +601,5 @@ OTTL
 per-deployment
 opt-out
 Framebuffer
+PCIe
+SM
