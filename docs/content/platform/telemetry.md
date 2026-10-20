@@ -21,13 +21,14 @@ collector has an exporter for, not only OTLP.
 Modelplane allows you to write one destination for your metrics. You don't need
 to manage per-deployment configurations or update your configuration when a
 deployment changes. The collector finds pods itself, so a leader/worker split or
-a prefill/decode pair is collected the same way as one pod.
+a prefill/decode pair doesn't need configuration of its own.
 
 ## Telemetry workflow
 
 Every series has `cluster`, `job`, and `instance` labels of the target resource.
 A series about a deployment also has `deployment`, `replica`, `namespace`,
-`engine`, and `role` labels.
+`engine`, and `role` labels. On a prefill/decode deployment, an engine's series also
+has a `phase` label, `Prefill` or `Decode`.
 
 The gateway's `modelplane_frontend_*` series have no `deployment` label. They
 carry the model instead: `gen_ai_original_model` is the model the caller sent,
@@ -60,6 +61,15 @@ max by (deployment, replica) (modelplane_kv_cache_utilization_ratio)
 ```
 `instance` is the pod's address, which keeps two pods of the same replica apart. It
 turns over on every rolling update, so group by `replica` rather than by `instance`.
+
+A prefill/decode deployment runs each request on two engines, and both count it.
+Count requests and generated tokens on the decode engines, and prompt processing on
+the prefill engines:
+
+```promql
+sum by (deployment) (rate(modelplane_engine_requests_total{phase!="Prefill"}[5m]))
+sum by (deployment) (rate(modelplane_engine_tokens_total{direction="input", phase!="Decode"}[5m]))
+```
 
 Some examples of the available metrics:
 
@@ -293,6 +303,12 @@ Both engines' token counts are histograms, but their buckets differ between the
 engines, and vLLM's also follow each deployment's `--max-model-len`, so Modelplane
 exports only their sums and counts, as `modelplane_engine_tokens_total` and
 `modelplane_engine_requests_total`, which add up correctly across any mix of engines.
+
+SGLang publishes `modelplane_requests_running` and `modelplane_requests_waiting` more
+than once per engine under `--enable-priority-scheduling`, once in total and once per
+priority, and once per tensor-parallel rank under
+`--enable-metrics-for-all-schedulers`. With either flag, a sum over them counts each
+request more than once.
 
 Because the gateway, not the engine, measures the `modelplane_frontend_*` series, they
 work without configuration for an engine Modelplane has never seen.

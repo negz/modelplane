@@ -70,6 +70,7 @@ _IDENTITY = (
     "replica",
     "engine",
     "role",
+    "phase",
     "node",
     # What the scrape came from, as the Prometheus receiver names it, which an
     # exporter renders as job and instance.
@@ -114,6 +115,7 @@ def _relabel_pod_identity() -> list[dict[str, Any]]:
             ("modelplane_ai_replica", "replica"),
             ("modelplane_ai_engine", "engine"),
             ("modelplane_ai_role", "role"),
+            ("modelplane_ai_phase", "phase"),
         )
     ] + [{"source_labels": ["__meta_kubernetes_namespace"], "target_label": "namespace"}]
 

@@ -120,6 +120,18 @@ class RemoteNamespaceCase:
     want: str
 
 
+@dataclasses.dataclass
+class TelemetryLabelsCase:
+    """A test case for base.telemetry_labels."""
+
+    name: str
+    reason: str
+    replica: v1alpha1.ModelReplica
+    engine: v1alpha1.Engine
+    member: v1alpha1.Member
+    want: dict[str, str]
+
+
 def _route() -> dict:
     """The Object composing the replica's HTTPRoute to its InferencePool."""
     return {
@@ -6966,3 +6978,79 @@ REMOTE_NAMESPACE_CASES = [
 def test_remote_namespace(case: RemoteNamespaceCase) -> None:
     """A replica's objects land in a namespace mirroring its own."""
     assert base.remote_namespace(case.replica) == case.want, case.reason
+
+
+def _telemetry_member() -> v1alpha1.Member:
+    """The one member of the engine whose pods' labels a telemetry case checks."""
+    return v1alpha1.Member(
+        nodePoolName="pool",
+        template=v1alpha1.Template(
+            spec=v1alpha1.Spec(containers=[v1alpha1.Container(name="engine", image="vllm/vllm-openai:latest")])
+        ),
+    )
+
+
+def _telemetry_replica(*, engine: v1alpha1.Engine) -> v1alpha1.ModelReplica:
+    """Replica 0 of deployment chat, running engine."""
+    return _replica(
+        name="chat-0",
+        namespace="ml-team",
+        cluster_name="cluster-a",
+        labels={"modelplane.ai/deployment": "chat", "modelplane.ai/replica-index": "0"},
+        model_cache_ref=None,
+        serving=None,
+        engines=[engine],
+    )
+
+
+TELEMETRY_LABELS_CASES = [
+    TelemetryLabelsCase(
+        name="Unified",
+        reason="An engine with no phase serves a request alone, so its pods carry no phase label.",
+        replica=_telemetry_replica(engine=v1alpha1.Engine(name="main", members=[_telemetry_member()])),
+        engine=v1alpha1.Engine(name="main", members=[_telemetry_member()]),
+        member=_telemetry_member(),
+        want={
+            "modelplane.ai/deployment": "chat",
+            "modelplane.ai/replica": "0",
+            "modelplane.ai/engine": "main",
+            "modelplane.ai/role": "Standalone",
+        },
+    ),
+    # A disaggregated request runs on both engines, and each counts it, so a
+    # query needs the phase to count it once.
+    TelemetryLabelsCase(
+        name="Prefill",
+        reason="A prefill engine's pods carry its phase, so a query can tell its count of a request from the decode engine's.",
+        replica=_telemetry_replica(engine=v1alpha1.Engine(name="main", phase="Prefill", members=[_telemetry_member()])),
+        engine=v1alpha1.Engine(name="main", phase="Prefill", members=[_telemetry_member()]),
+        member=_telemetry_member(),
+        want={
+            "modelplane.ai/deployment": "chat",
+            "modelplane.ai/replica": "0",
+            "modelplane.ai/engine": "main",
+            "modelplane.ai/role": "Standalone",
+            "modelplane.ai/phase": "Prefill",
+        },
+    ),
+    TelemetryLabelsCase(
+        name="Decode",
+        reason="A decode engine's pods carry its phase.",
+        replica=_telemetry_replica(engine=v1alpha1.Engine(name="main", phase="Decode", members=[_telemetry_member()])),
+        engine=v1alpha1.Engine(name="main", phase="Decode", members=[_telemetry_member()]),
+        member=_telemetry_member(),
+        want={
+            "modelplane.ai/deployment": "chat",
+            "modelplane.ai/replica": "0",
+            "modelplane.ai/engine": "main",
+            "modelplane.ai/role": "Standalone",
+            "modelplane.ai/phase": "Decode",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize("case", TELEMETRY_LABELS_CASES, ids=lambda case: case.name)
+def test_telemetry_labels(case: TelemetryLabelsCase) -> None:
+    """A serving pod carries the identity its metrics are attributed to."""
+    assert base.telemetry_labels(case.replica, case.engine, case.member) == case.want, case.reason

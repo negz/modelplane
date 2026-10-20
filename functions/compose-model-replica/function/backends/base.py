@@ -255,6 +255,7 @@ LABEL_DEPLOYMENT = "modelplane.ai/deployment"
 LABEL_REPLICA = "modelplane.ai/replica"
 LABEL_ENGINE = "modelplane.ai/engine"
 LABEL_ROLE = "modelplane.ai/role"
+LABEL_PHASE = "modelplane.ai/phase"
 
 
 # Set on the ModelReplica by the composite that scheduled it.
@@ -288,6 +289,12 @@ def telemetry_labels(
         labels[LABEL_ENGINE] = engine.name
     if member.role:
         labels[LABEL_ROLE] = member.role
+    # A disaggregated request runs on both a prefill and a decode engine, and
+    # each counts it, so a deployment's requests and tokens summed over both are
+    # twice what callers sent. The phase lets a query count each request
+    # once. Absent on a unified engine, which handles a request alone.
+    if engine.phase:
+        labels[LABEL_PHASE] = engine.phase
     return labels
 
 

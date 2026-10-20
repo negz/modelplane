@@ -1405,6 +1405,10 @@ def _collector_config(
                                     "source_labels": ["__meta_kubernetes_pod_label_modelplane_ai_role"],
                                     "target_label": "role",
                                 },
+                                {
+                                    "source_labels": ["__meta_kubernetes_pod_label_modelplane_ai_phase"],
+                                    "target_label": "phase",
+                                },
                                 {"source_labels": ["__meta_kubernetes_namespace"], "target_label": "namespace"},
                             ],
                         },
@@ -1534,7 +1538,7 @@ def _collector_config(
                     {
                         "context": "resource",
                         "statements": [
-                            'keep_keys(resource.attributes, ["cluster", "deployment", "engine", "namespace", "node", "replica", "role", "service.instance.id", "service.name"])'
+                            'keep_keys(resource.attributes, ["cluster", "deployment", "engine", "namespace", "node", "phase", "replica", "role", "service.instance.id", "service.name"])'
                         ],
                     }
                 ]
@@ -1620,6 +1624,7 @@ def _collector_config(
                     "replica",
                     "engine",
                     "role",
+                    "phase",
                     "node",
                     "service.name",
                     "service.instance.id",
@@ -4445,7 +4450,7 @@ COMPOSE_CASES = [
                         service_extensions=None,
                     ),
                     "collector": _collector(
-                        config_hash="19745d8484f4478c",
+                        config_hash="d86aa86523e82622",
                         volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                         volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                         env_from=None,
@@ -4802,7 +4807,7 @@ COMPOSE_CASES = [
                         ready=fnv1.READY_TRUE,
                     ),
                     "collector": _collector(
-                        config_hash="12f9e1eb0cb30eb4",
+                        config_hash="b0774a0e1b3d0aa9",
                         volumes=[
                             {"name": "config", "configMap": {"name": "modelplane-collector"}},
                             {"name": "credentials-primary", "secret": {"secretName": "telemetry-credentials"}},
@@ -5127,7 +5132,7 @@ COMPOSE_CASES = [
                         service_extensions=None,
                     ),
                     "collector": _collector(
-                        config_hash="948c84dcc072f108",
+                        config_hash="238c135ed3276ab8",
                         volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                         volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                         env_from=None,
@@ -5428,7 +5433,7 @@ COMPOSE_CASES = [
                         service_extensions=None,
                     ),
                     "collector": _collector(
-                        config_hash="34c20cb09e9eada1",
+                        config_hash="708666af8477ef2f",
                         volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                         volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                         env_from=None,
@@ -5757,7 +5762,7 @@ COMPOSE_CASES = [
                         service_extensions=None,
                     ),
                     "collector": _collector(
-                        config_hash="19745d8484f4478c",
+                        config_hash="d86aa86523e82622",
                         volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                         volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                         env_from=None,

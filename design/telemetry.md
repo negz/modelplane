@@ -688,8 +688,9 @@ differs whenever a request fails over to a provider. A frontend series therefore
 `engine` goes only on
 series an engine produced, because it is read from the engine's own metric prefix and the
 gateway does not know what served a request. Under disaggregated serving an engine series
-carries a `role` of `prefill` or `decode`, because the two do different work and an average
-of them describes neither. GPU series carry `gpu_uuid` and the node, which is all DCGM
+carries a `phase` of `Prefill` or `Decode`, because the two do different work and an average
+of them describes neither, and because both count every request they share. `role`
+is the member's role in its engine, `Standalone`, `Leader` or `Worker`. GPU series carry `gpu_uuid` and the node, which is all DCGM
 knows.
 
 Two labels have closed value sets: `status` on `modelplane_requests_total` is `ok`,
