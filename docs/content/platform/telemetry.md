@@ -244,12 +244,12 @@ export to Prometheus and write recording rules there.
 
 ## Engines
 
-Modelplane already knows vLLM's and SGLang's metric names and renames them for you, so
-neither needs anything from you here. SGLang needs two flags: `--enable-metrics` to publish `/metrics` at all, and
+Modelplane already knows vLLM's and SGLang's metric names and renames them for you.
+vLLM needs v0.9.2 or later, whose engine publishes the names Modelplane reads. SGLang
+needs `--enable-metrics` to publish `/metrics` at all. Before v0.5.12 it also needs
 `--collect-tokens-histogram` for the token histograms behind
-`modelplane_engine_tokens_total` and `modelplane_engine_requests_total`. Without the
-second it publishes those as plain counters and both series are empty. vLLM needs
-nothing.
+`modelplane_engine_tokens_total` and `modelplane_engine_requests_total`. Without it
+those two series are empty.
 
 ```yaml
 apiVersion: modelplane.ai/v1alpha1

@@ -31,11 +31,16 @@ flag the gap, which is the behaviour we want.
 Only Modelplane's own API groups have generated models, so resources from other
 groups (provider ClusterProviderConfigs, core Namespaces, RBAC, Crossplane
 packages) are skipped — they aren't ours to validate here.
+
+An engine in a recipe is also checked against what the built-in MetricMappings
+read: a pinned engine version or a missing flag that leaves the engine's
+modelplane_* series empty fails here rather than on a user's cluster.
 """
 
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -52,6 +57,10 @@ try:
     import models  # noqa: F401
 except ModuleNotFoundError:
     sys.path.insert(0, str(REPO / "schemas" / "python"))
+
+# Importable only once the path above is set.
+from models.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1  # noqa: E402
+from models.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1  # noqa: E402
 
 # API groups we generate models for, mapped to their model package segment.
 MODELPLANE_GROUPS = {
@@ -111,6 +120,55 @@ def model_for(api_version: str, kind: str) -> type[pydantic.BaseModel] | None:
     return getattr(mod, kind)
 
 
+# The built-in MetricMappings in compose-serving-stack rename what an engine
+# publishes, so an engine that publishes nothing, or something else, leaves its
+# modelplane_* series empty with no error. Recipes are what users copy,
+# so each one's engines are held to what the mappings read. The versions and
+# flags below are the ones function/stacks/metrics.py in compose-serving-stack
+# says its engine mappings need, so a change to either changes both.
+_TAG = re.compile(r":v(\d+)\.(\d+)\.(\d+)")
+
+
+def _version(image: str) -> tuple[int, int, int] | None:
+    m = _TAG.search(image)
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def _engines(obj: pydantic.BaseModel) -> list:
+    """The engines a ModelDeployment or ModelReplica runs, or none for any other kind."""
+    if isinstance(obj, mdv1alpha1.ModelDeployment):
+        return obj.spec.template.spec.engines
+    if isinstance(obj, mrv1alpha1.ModelReplica):
+        return obj.spec.engines
+    return []
+
+
+def engine_metrics_problems(obj: pydantic.BaseModel) -> list[str]:
+    """Why an engine in a ModelDeployment or ModelReplica wouldn't publish what the built-in mappings read."""
+    problems: list[str] = []
+    for engine in _engines(obj):
+        for member in engine.members:
+            for c in member.template.spec.containers:
+                if c.name != "engine":
+                    continue
+                argv = " ".join((c.command or []) + (c.args or []))
+                version = _version(c.image)
+                if "lmsysorg/sglang:" in c.image:
+                    if "--enable-metrics" not in argv:
+                        problems.append(f"engine {engine.name}: SGLang serves no /metrics without --enable-metrics")
+                    if version and version < (0, 5, 12) and "--collect-tokens-histogram" not in argv:
+                        problems.append(
+                            f"engine {engine.name}: SGLang before v0.5.12 publishes no token histograms "
+                            "without --collect-tokens-histogram"
+                        )
+                if "vllm/vllm-openai:" in c.image and version and version < (0, 9, 2):
+                    problems.append(
+                        f"engine {engine.name}: vLLM before v0.9.2 runs the V0 engine, whose metric names "
+                        "and latency buckets the built-in mappings don't read"
+                    )
+    return problems
+
+
 def docs_from_file(path: Path) -> Iterator[dict]:
     """Yield each manifest dict from a (possibly multi-document) YAML file."""
     for doc in yaml.safe_load_all(path.read_text()):
@@ -140,10 +198,15 @@ def main() -> int:
                 skipped += 1
                 continue
             try:
-                model.model_validate(doc)
+                obj = model.model_validate(doc)
                 checked += 1
             except pydantic.ValidationError as e:
                 errors.append(f"{rel}: {kind} {doc.get('metadata', {}).get('name', '?')}\n{e}")
+                continue
+            errors.extend(
+                f"{rel}: {kind} {doc.get('metadata', {}).get('name', '?')}: {problem}"
+                for problem in engine_metrics_problems(obj)
+            )
 
     for err in errors:
         print(f"INVALID  {err}", file=sys.stderr)

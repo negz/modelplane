@@ -12,7 +12,7 @@ precisions: ["BF16"]
 size: 8B
 ctx: "8,192"
 servingModes: [Standalone]
-engineImages: [vllm/vllm-openai:v0.7.3]
+engineImages: [vllm/vllm-openai:v0.23.0]
 gpuNote: 1× per node
 ---
 <!-- vale write-good.Passive = NO -->

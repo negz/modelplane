@@ -53,5 +53,8 @@ spec:
                 - --trust-remote-code
                 - --tool-call-parser=poolside_v1
                 - --reasoning-parser=poolside_v1
+            # SGLang serves no /metrics without it, and Modelplane's collector
+            # reads the engine's metrics from there.
+                - --enable-metrics
                 - --host=0.0.0.0
                 - --port=8000

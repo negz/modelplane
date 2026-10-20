@@ -13,6 +13,9 @@
 #   Image tag matters: lmsysorg/sglang v0.5.11-v0.5.13(.post1) -runtime images
 #     are broken (ModuleNotFoundError: distro). v0.5.10.post1-runtime is the
 #     most recent clean tag with Qwen3-Coder support.
+#   --enable-metrics and --collect-tokens-histogram: SGLang serves no /metrics
+#     without the first, and v0.5.10 publishes no token histograms without the
+#     second. Modelplane's collector reads both.
 #   --host 0.0.0.0 --port 8000: SGLang defaults to 127.0.0.1:30000, but
 #     Modelplane's contract is 0.0.0.0:8000 with a /health probe. Args pass
 #     through verbatim - Modelplane injects nothing for a non-vLLM engine.
@@ -57,5 +60,7 @@ spec:
                   --page-size 32
                   --trust-remote-code
                   --tool-call-parser qwen3_coder
+                  --enable-metrics
+                  --collect-tokens-histogram
                   --host 0.0.0.0
                   --port 8000
