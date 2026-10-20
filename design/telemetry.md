@@ -130,7 +130,12 @@ up.
 **The engine** explains what the gateway measured. vLLM and SGLang both publish queue depth,
 running and waiting counts, KV utilization and preemptions as gauges and counters, which
 aggregate cleanly. Their latency histograms come across too, under `modelplane_request_*`,
-though those stay per-engine diagnostics, since their buckets do not merge.
+though those stay per-engine diagnostics, since their buckets do not merge. Each such name
+takes one engine's histogram and no other, because a query sums buckets by boundary and one
+series with different boundaries corrupts the sum for every other. Their token
+histograms can't meet that even within one engine, since vLLM sizes their buckets from
+`--max-model-len`, so only their sums and counts come across, as
+`modelplane_engine_tokens_total` and `modelplane_engine_requests_total`.
 
 **The endpoint picker** publishes `llm_d_epp_*`, the source of
 `modelplane_route_decision_seconds`. That is the time the picker spent choosing a backend,
@@ -618,8 +623,8 @@ separate those from a slow model.
 | `modelplane_request_prefill_seconds` | histogram | engine, where reported |
 | `modelplane_request_decode_seconds` | histogram | engine, where reported |
 | `modelplane_request_kv_transfer_seconds` | histogram | engine, disaggregated only |
-| `modelplane_request_input_tokens` | histogram | engine |
-| `modelplane_request_output_tokens` | histogram | engine |
+| `modelplane_engine_tokens_total{direction}` | counter | engine |
+| `modelplane_engine_requests_total` | counter | engine |
 | `modelplane_requests_running` | gauge | engine |
 | `modelplane_requests_waiting` | gauge | engine |
 | `modelplane_kv_cache_utilization_ratio` | gauge (0 to 1) | engine, mean over replicas |
@@ -688,8 +693,8 @@ of them describes neither. GPU series carry `gpu_uuid` and the node, which is al
 knows.
 
 Two labels have closed value sets: `status` on `modelplane_requests_total` is `ok`,
-`client_error` or `server_error`, and `direction` on `modelplane_tokens_total` is `input` or
-`output`.
+`client_error` or `server_error`, and `direction` on `modelplane_tokens_total` and
+`modelplane_engine_tokens_total` is `input` or `output`.
 
 Cardinality is bounded by construction, and deliberately. Every label above is something
 Modelplane created, so the series count is the number of deployments times the clusters they

@@ -40,6 +40,9 @@ combination is right follows from what the metric measures:
  - `sum by (deployment)`, for anything counted, such as requests, tokens, or queue depth.
  - `avg by (deployment)`, for a ratio.
  - `max by (deployment)`, for a saturation figure you alert on.
+ - `sum by (le)` inside `histogram_quantile`, for a histogram. Each `modelplane_*`
+   histogram comes from one component with one set of buckets, so a quantile across
+   the whole fleet is sound.
 
 To combine:
 
@@ -68,8 +71,8 @@ Some examples of the available metrics:
 | `modelplane_request_queue_seconds` | How long a request waited before the engine started |
 | `modelplane_requests_waiting` | Queue depth per engine |
 | `modelplane_kv_cache_utilization_ratio` | KV-cache occupancy, averaged over replicas |
-| `modelplane_request_input_tokens` | Prompt size, as a histogram |
-| `modelplane_request_output_tokens` | Generated length, as a histogram |
+| `modelplane_engine_tokens_total` | Prompt and generated tokens of the requests the engine finished, by `direction`: `input` or `output` |
+| `modelplane_engine_requests_total` | Requests the engine finished |
 | `modelplane_gpu_memory_used_bytes` | Framebuffer memory in use, per GPU |
 | `modelplane_energy_joules_total` | Energy drawn since the driver last reloaded |
 
@@ -243,8 +246,8 @@ export to Prometheus and write recording rules there.
 
 Modelplane already knows vLLM's and SGLang's metric names and renames them for you, so
 neither needs anything from you here. SGLang needs two flags: `--enable-metrics` to publish `/metrics` at all, and
-`--collect-tokens-histogram` for the prompt and generation histograms behind
-`modelplane_request_input_tokens` and `modelplane_request_output_tokens`. Without the
+`--collect-tokens-histogram` for the token histograms behind
+`modelplane_engine_tokens_total` and `modelplane_engine_requests_total`. Without the
 second it publishes those as plain counters and both series are empty. vLLM needs
 nothing.
 
@@ -285,6 +288,11 @@ engines. SGLang counts a request when it finishes, where vLLM counts it when it'
 scheduled, so an aborted request is missing from SGLang's counts. SGLang's queue time
 histogram uses different buckets from vLLM's, so only vLLM populates
 `modelplane_request_queue_seconds`.
+
+Both engines' token counts are histograms, but their buckets differ between the
+engines, and vLLM's also follow each deployment's `--max-model-len`, so Modelplane
+exports only their sums and counts, as `modelplane_engine_tokens_total` and
+`modelplane_engine_requests_total`, which add up correctly across any mix of engines.
 
 Because the gateway, not the engine, measures the `modelplane_frontend_*` series, they
 work without configuration for an engine Modelplane has never seen.

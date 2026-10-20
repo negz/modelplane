@@ -25,6 +25,13 @@ both. A histogram is renamed only where its bucket boundaries match, which is
 why SGLang's latency histograms are absent here: they resolve to a hundred
 milliseconds where vLLM's resolve to one, and a quantile across the two is
 wrong rather than approximate.
+
+Matching has to hold across the fleet, not just between two engines, because
+a query sums buckets by boundary and a series with different boundaries
+corrupts the sum for everyone (#523). So each modelplane_* histogram has
+exactly one source. The engines' token histograms can't meet that even alone:
+vLLM sizes their buckets from --max-model-len, so two vLLM deployments
+disagree. They leave as counters instead, a sum and a count having no buckets.
 """
 
 from models.ai.modelplane.metricmapping import v1alpha1
@@ -47,8 +54,6 @@ _VLLM = {
     "vllm:request_queue_time_seconds": "modelplane_request_queue_seconds",
     "vllm:request_prefill_time_seconds": "modelplane_request_prefill_seconds",
     "vllm:request_decode_time_seconds": "modelplane_request_decode_seconds",
-    "vllm:request_prompt_tokens": "modelplane_request_input_tokens",
-    "vllm:request_generation_tokens": "modelplane_request_output_tokens",
     "vllm:num_requests_running": "modelplane_requests_running",
     "vllm:num_requests_waiting": "modelplane_requests_waiting",
     "vllm:kv_cache_usage_perc": "modelplane_kv_cache_utilization_ratio",
@@ -64,18 +69,24 @@ _VLLM = {
 # cache_source (device, host, storage). sglang:queue_time_seconds is a
 # per-request histogram like vLLM's queue time, but its buckets differ from
 # vLLM's and between SGLang versions, so it isn't renamed (#523).
-# The two token histograms need --collect-tokens-histogram as well as
-# --enable-metrics; the engine publishes only the _total counters without it.
 _SGLANG = {
     "sglang:num_running_reqs": "modelplane_requests_running",
     "sglang:num_queue_reqs": "modelplane_requests_waiting",
     "sglang:token_usage": "modelplane_kv_cache_utilization_ratio",
-    "sglang:prompt_tokens_histogram": "modelplane_request_input_tokens",
-    "sglang:generation_tokens_histogram": "modelplane_request_output_tokens",
     "sglang:num_retracted_requests_total": "modelplane_requests_preempted_total",
     "sglang:cached_tokens_total": "modelplane_prefix_cache_hits_total",
     "sglang:prompt_tokens_total": "modelplane_prefix_cache_lookups_total",
 }
+
+# Each engine's prompt and generation token histograms, taken as counters: the
+# prompt and generated tokens of the requests it finished, and from the prompt
+# histogram's count, the requests. A prompt's tokens include any the prefix
+# cache served. The histograms themselves are dropped (see the module docstring).
+# SGLang v0.5.10 publishes these histograms only with
+# --collect-tokens-histogram as well as --enable-metrics; from v0.5.12 it
+# always does.
+_VLLM_TOKENS = ("vllm:request_prompt_tokens", "vllm:request_generation_tokens")
+_SGLANG_TOKENS = ("sglang:prompt_tokens_histogram", "sglang:generation_tokens_histogram")
 
 # The endpoint picker. A router's queue is a different measurement from an
 # engine's, so it keeps a name of its own.
@@ -102,22 +113,40 @@ _GPU_UNITS = {
 }
 
 
+def _tokens(prompt: str, generation: str) -> list[dict[str, object]]:
+    """An engine's token histograms as tokens by direction, and requests."""
+    return [
+        {
+            "from": prompt,
+            "part": "Sum",
+            "to": "modelplane_engine_tokens_total",
+            "labels": [{"name": "direction", "value": "input"}],
+        },
+        {
+            "from": generation,
+            "part": "Sum",
+            "to": "modelplane_engine_tokens_total",
+            "labels": [{"name": "direction", "value": "output"}],
+        },
+        {"from": prompt, "part": "Count", "to": "modelplane_engine_requests_total"},
+    ]
+
+
 def _mapping(
     name: str,
     pairs: dict[str, str],
     units: dict[str, str] | None = None,
+    tokens: tuple[str, str] | None = None,
 ) -> v1alpha1.MetricMapping:
     units = units or {}
+    metrics: list[dict[str, object]] = [
+        {"from": src, "to": dst} | ({"fromUnit": units[src]} if src in units else {}) for src, dst in pairs.items()
+    ]
+    if tokens:
+        metrics += _tokens(*tokens)
     return v1alpha1.MetricMapping(
         metadata=metav1.ObjectMeta(name=name),
-        spec=v1alpha1.Spec(
-            metrics=[
-                v1alpha1.Metric.model_validate(
-                    {"from": src, "to": dst} | ({"fromUnit": units[src]} if src in units else {})
-                )
-                for src, dst in pairs.items()
-            ]
-        ),
+        spec=v1alpha1.Spec(metrics=[v1alpha1.Metric.model_validate(m) for m in metrics]),
     )
 
 
@@ -130,8 +159,8 @@ def mappings() -> list[v1alpha1.MetricMapping]:
     """
     return [
         _mapping("modelplane-gateway", _GATEWAY),
-        _mapping("modelplane-vllm", _VLLM),
-        _mapping("modelplane-sglang", _SGLANG),
+        _mapping("modelplane-vllm", _VLLM, tokens=_VLLM_TOKENS),
+        _mapping("modelplane-sglang", _SGLANG, tokens=_SGLANG_TOKENS),
         _mapping("modelplane-picker", _PICKER),
         _mapping("modelplane-gpu", _GPU, _GPU_UNITS),
     ]
