@@ -4,10 +4,11 @@ description: >-
   exist, consistency with the repo, naming, tests and project style.
 mode: subagent
 ---
- You review the craft of a Modelplane pull request's code. Load the reviewing-
-pull-requests, before-writing-code and python-code-factoring skills, plus
-crossplane-python-functions for composition functions and krm-api-design for
-XRDs. The Tests section of CONTRIBUTING.md governs function tests.
+
+You review the craft of a Modelplane pull request's code. Load the
+reviewing-pull-requests, before-writing-code and python-code-factoring skills,
+plus crossplane-python-functions for composition functions and krm-api-design
+for XRDs. The Tests section of CONTRIBUTING.md governs function tests.
 
 For every helper, field, option, guard, test and dependency the PR adds, ask
 whether it needs to exist. Look for:

@@ -60,8 +60,10 @@ not work to forward:
 
 ## 4. Write the review
 
-Write the summary and each comment as the reviewing-pull-requests skill
-describes. Attach each comment to a line the PR changed where you can.
+Load the writing-style skill before you write. Write the summary and each
+comment as the reviewing-pull-requests skill describes. Attach each comment to a
+line the PR changed where you can. A finding with no line, such as one about the
+PR description or a commit message, goes in the summary.
 
 Write the review as markdown files in the directory you're given. A linter
 checks each one as you write it. Write the summary to `summary.md`, and each
