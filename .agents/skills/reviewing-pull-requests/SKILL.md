@@ -84,9 +84,17 @@ fixed line. Mark minor points with `Nit:`.
 > This is documenting a change. Document how it works, not how it differs
 > from how it used to work. (Here and elsewhere.)
 
-Write short comments. Most are one or two sentences. Make one point per
-comment, attached to the line it's about. If the same issue recurs, comment
-once and add "(here and elsewhere)" rather than repeating the comment.
+A comment is one to three sentences: the problem and its evidence, then stop.
+Make one point per comment, attached to the line it's about. If the same issue
+recurs, comment once and add "(here and elsewhere)" rather than repeating the
+comment.
+
+A comment that proposes an alternative may also sketch it, as a short YAML or
+code block with a sentence or two on what it buys. Show only the parts
+that differ, not a full implementation. Proposing an alternative is the only
+reason a comment runs longer. Importance isn't one. The prose of a comment,
+outside any code block, has a hard limit of 600 characters, and the review
+isn't posted if one goes over.
 
 Don't prescribe a fix in detail. Sketch it, or link to an example, and let the
 author work it out. Authors feed comments to their own agents, and a
@@ -221,23 +229,21 @@ The python-code-factoring and before-writing-code skills hold the rest.
 
 ## The Review Summary
 
-The summary opens with a sentence or two saying whether the PR is broadly
-ready, and naming the one or two things that matter most, if any. It doesn't
-list the inline comments again.
+The summary opens with one sentence saying whether the PR is ready, or naming
+what most needs to change. It doesn't list the inline comments again, and it
+doesn't grade the PR. Leave out verdicts like "well tested" or "reads well".
 
 Below that, give a reader who knows Modelplane but not this PR what they need
 to understand it, in a collapsed `<details>` block:
 
-- What problem the PR solves, and how, in a short paragraph.
-- Where it departs from the linked issue or the design docs under `design/`,
-  and whether the departure looks deliberate.
-- For an API change, a complete example of each changed type with the new
-  fields in place.
+- What problem the PR solves, and how, in two or three sentences.
+- Where it departs from the linked issue or the design docs under `design/`.
+- For a change to a user-facing API, an example of each changed type with the
+  new fields in place.
 - Any new pattern, helper, dependency or tool the PR introduces.
-- On a re-review, what changed since the last review, and which earlier
-  comments the changes address.
+- On a re-review, what changed since the last review.
 
-Be brief. Leave out anything the reader can get from the PR title and
-description.
+Leave out any item with nothing to say, and anything the reader can get from
+the PR title and description.
 
 Never approve or request changes. That's a maintainer's call.
