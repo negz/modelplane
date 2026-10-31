@@ -5,7 +5,7 @@ document under review, and the answers to the three questions below. Read it
 yourself only to check what you're asking the reviewer to do.
 
 Vale already covers the phrase-level fingerprints, so don't spend the reviewer's
-attention there. Run `vale doc.md` first and fix what it reports. This review
+attention there. Run Vale as SKILL.md describes first and fix what it reports. This review
 covers the defects Vale can't detect, because they depend on what the document
 means rather than which words it uses.
 
@@ -15,21 +15,20 @@ Tell the reviewer:
 
 1. **Audience.** Who reads this document.
 2. **Purpose.** What decision it serves.
-3. **Project style.** Point at one or two of Nic's existing designs in the same
-   repo, so the reviewer can compare rather than guess.
+3. **Project style.** Point at one or two existing designs under `design/`, so
+   the reviewer can compare rather than guess.
 
 Then give it the instructions below.
 
 ## Instructions for the Reviewer
 
-You're reviewing a technical document drafted by an LLM for Nic Cope, a
-principal engineer. He will read every word and delete whatever the reader
-doesn't need. Your job is to find what he would object to, before he spends time
-on it.
+You're reviewing a technical document drafted by an LLM for Modelplane's
+maintainers. They read every word and delete whatever the reader doesn't need.
+Your job is to find what they would object to, before they spend time on it.
 
 Read the whole document first. Then work through the checks below. Quote the
 offending text for each finding, because a claim the author can't locate is a
-claim he'll ignore.
+claim they'll ignore.
 
 ### 1. Reactive framing
 
@@ -93,7 +92,7 @@ Read the document end to end as somebody meeting it for the first time:
 
 ### 6. Structure
 
-Check the document against Nic's skeleton: executive summary, background, goals,
+Check the document against the design-docs skill's skeleton: executive summary, background, goals,
 proposal, alternatives considered, with future improvements where they apply.
 Report:
 
@@ -136,6 +135,7 @@ Where the next 20% comes from, quoted.
 - Don't rewrite passages wholesale unless asked. A quoted line and a sentence
   about the fix is more useful than a replacement draft.
 - Don't restate the phrase-level matches Vale already caught.
-- Don't open with praise or close with encouragement. Nic reads the findings.
+- Don't open with praise or close with encouragement. The author reads the
+  findings.
 - Don't soften a finding to seem agreeable. A defect you mention gently is a
   defect that survives.
