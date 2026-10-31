@@ -42,6 +42,11 @@ env:
   NIX_IMAGE: nixos/nix@sha256:f159a58f390677f41e8e900a74b6e2f9c7f27b364122ae6acf7a652ce6c551c0
   CADDY_IMAGE: caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
 
+  # opencode 2 has no language server support of its own. This plugin adds it,
+  # so the agent sees Vale's diagnostics on every review file it writes.
+  LSP_PLUGIN: https://github.com/christensenjairus/opencode-v2-lsp-support.git
+  LSP_PLUGIN_SHA: 4a17bc8379e572ab104ec26b55f92ee9b51dce37
+
 jobs:
   review:
     # Review automatically only PRs that org members open, and that aren't
@@ -84,6 +89,13 @@ jobs:
           rm -rf pr/.opencode pr/.agents
           cp -r reviewer/.opencode reviewer/.agents pr/
 
+      - name: Fetch the language server plugin
+        run: |
+          git init -q lsp-plugin
+          git -C lsp-plugin fetch -q --depth 1 "$LSP_PLUGIN" "$LSP_PLUGIN_SHA"
+          git -C lsp-plugin checkout -q FETCH_HEAD
+          rm -rf lsp-plugin/.git
+
       - name: Fetch the PR's context
         env:
           GH_TOKEN: ${{ github.token }}
@@ -114,6 +126,7 @@ jobs:
             admin off
           }
           http://$bridge:8787 {
+            bind $bridge
             handle /v1/messages* {
               reverse_proxy https://api.anthropic.com {
                 header_up Host api.anthropic.com
@@ -136,7 +149,7 @@ jobs:
       # without one. The container is the sandbox.
       - name: Review
         run: |
-          prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /context. Write the review to /out/review.json."
+          prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /context. Write the review to the directory _output/review."
           if [ -n "$LAST" ]; then
             prompt="$prompt You last reviewed this PR at commit $LAST."
           fi
@@ -144,20 +157,36 @@ jobs:
           config=$(jq -nc --arg model "$MODEL" --arg url "http://$BRIDGE:8787/v1" '{
             model: $model,
             provider: {anthropic: {options: {baseURL: $url, apiKey: "unused"}}},
-            autoupdate: false
+            autoupdate: false,
+            plugins: ["/lsp-plugin"],
+            lsp: {vale: {
+              command: ["vale-ls"],
+              extensions: [".md"],
+              initialization: {configPath: "/work/.opencode/vale/.vale.ini", installVale: false, syncOnStartup: false}
+            }}
           }')
 
+          cat > run.sh <<'EOF'
+          set -eu
+          mkdir -p _output/review
+          git config --global --add safe.directory /work
+          vale sync --config .opencode/vale/.vale.ini >&2
+          exec opencode run --auto --format json --agent review "$PROMPT"
+          EOF
+
           docker create --name agent \
+            -e PROMPT="$prompt" \
             -e OPENCODE_CONFIG_CONTENT="$config" \
             -e NIX_CONFIG=$'experimental-features = nix-command flakes\nsandbox = false\naccept-flake-config = true' \
             -w /work \
             "$NIX_IMAGE" \
-            sh -c 'mkdir -p /out && git config --global --add safe.directory /work && nix shell "$0#opencode" "$0#ripgrep" -c opencode run --auto --format json --agent review "$1"' \
-            "$NIXPKGS" "$prompt"
+            nix shell "$NIXPKGS#opencode" "$NIXPKGS#ripgrep" "$NIXPKGS#vale" "$NIXPKGS#vale-ls" -c bash /run.sh
+          docker cp run.sh agent:/run.sh
           docker cp pr/. agent:/work
           docker cp context agent:/context
+          docker cp lsp-plugin agent:/lsp-plugin
           docker start -a agent > transcript.jsonl
-          docker cp agent:/out/review.json review.json
+          docker cp agent:/work/_output/review review
 
       - name: Upload the transcript
         if: always()
@@ -168,16 +197,16 @@ jobs:
           if-no-files-found: ignore
 
       # The review is the agent's output, so treat it as untrusted. docker cp
-      # copies a symlink as a link, so refusing anything but a regular file
-      # keeps the upload from following one to a file on the host.
-      - name: Check the review is a regular file
-        run: test -f review.json && ! test -L review.json
+      # copies a symlink as a link, so refusing any symlink keeps the upload
+      # from following one to a file on the host.
+      - name: Check the review holds no symlinks
+        run: test -d review && ! test -L review && test -z "$(find review -type l)"
 
       - name: Upload the review
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: review
-          path: review.json
+          path: review
 
   post:
     needs: review
@@ -194,6 +223,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: review
+          path: review
 
       # A GitHub App posts reviews, so they come from the reviewer rather than
       # github-actions. Its token can write pull requests in this repo only.
@@ -208,4 +238,4 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-        run: python3 hack/post_review.py --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA" review.json
+        run: python3 hack/post_review.py --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA" review
