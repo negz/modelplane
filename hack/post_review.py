@@ -15,8 +15,10 @@
 
 """Post a review the review agent wrote as a GitHub pull request review.
 
-The agent runs the PR's code, so its output is untrusted. This checks the
-review's shape and size, and always posts a COMMENT review: the reviewer never
+The agent writes the review as a directory of markdown files: summary.md, and
+one file per inline comment under comments/, each starting with front matter
+that gives its path and line. It runs the PR's code, so its output is
+untrusted. This checks the review's shape and size, and always posts a COMMENT review: the reviewer never
 approves or requests changes. GitHub rejects a whole review if one comment
 targets a line outside the diff, so comments on such lines move into the
 summary instead. The summary ends with a marker recording the commit the
@@ -35,7 +37,13 @@ MAX_COMMENTS = 8
 MAX_SUMMARY = 20_000
 MAX_COMMENT = 4_000
 
+# The skill limits a comment's prose, outside any code block, to this many
+# characters. A sketch of an alternative can run longer.
+MAX_PROSE = 600
+
 MARKER = re.compile(r"<!--\s*modelplane-review\b.*?-->", re.DOTALL)
+FRONT_MATTER = re.compile(r"\A---\n(?P<meta>.*?)\n---\n(?P<body>.*)\Z", re.DOTALL)
+CODE_BLOCK = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,\d+)? @@")
 
 
@@ -54,33 +62,38 @@ class Review(typing.NamedTuple):
     comments: list[Comment]
 
 
-def parse(raw: str) -> Review:
-    """The review in raw, or ValueError if it isn't the shape the agent was told
-    to write."""
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("review must be an object")
-    summary = data.get("summary")
-    if not isinstance(summary, str) or not summary.strip():
-        raise ValueError("summary must be a non-empty string")
+def parse_comment(raw: str) -> Comment:
+    """The comment in raw, or ValueError if it isn't a well-formed comment
+    file."""
+    match = FRONT_MATTER.match(raw)
+    if match is None:
+        raise ValueError("comment has no front matter")
+    meta = dict(line.split(":", 1) for line in match["meta"].splitlines() if ":" in line)
+    path, line, body = meta.get("path", "").strip(), meta.get("line", "").strip(), match["body"].strip()
+    if not path or not line.isdigit() or int(line) < 1 or not body:
+        raise ValueError(f"comment needs a path, a line and a body: {match['meta']!r}")
+    if len(body) > MAX_COMMENT:
+        raise ValueError(f"comment on {path}:{line} is longer than {MAX_COMMENT} characters")
+    if len(CODE_BLOCK.sub("", body).strip()) > MAX_PROSE:
+        raise ValueError(f"comment on {path}:{line} has more than {MAX_PROSE} characters of prose")
+    return Comment(path, int(line), body)
+
+
+def parse(review: pathlib.Path) -> Review:
+    """The review in a directory, or ValueError if it isn't the shape the agent
+    was told to write."""
+    files = [p for p in review.rglob("*") if p.is_symlink() or not p.is_dir()]
+    if any(p.is_symlink() for p in files):
+        raise ValueError("review contains a symlink")
+    summary = (review / "summary.md").read_text() if (review / "summary.md").is_file() else ""
+    if not summary.strip():
+        raise ValueError("summary.md is missing or empty")
     if len(summary) > MAX_SUMMARY:
         raise ValueError(f"summary is longer than {MAX_SUMMARY} characters")
-    comments = data.get("comments", [])
-    if not isinstance(comments, list):
-        raise ValueError("comments must be a list")
+    comments = sorted((review / "comments").glob("*.md"))
     if len(comments) > MAX_COMMENTS:
         raise ValueError(f"review has {len(comments)} comments, more than {MAX_COMMENTS}")
-    out = []
-    for c in comments:
-        if not isinstance(c, dict):
-            raise ValueError(f"malformed comment: {c!r}")
-        path, line, body = c.get("path"), c.get("line"), c.get("body")
-        if not isinstance(path, str) or not isinstance(line, int) or line < 1 or not isinstance(body, str):
-            raise ValueError(f"malformed comment: {c!r}")
-        if len(body) > MAX_COMMENT:
-            raise ValueError(f"comment on {path}:{line} is longer than {MAX_COMMENT} characters")
-        out.append(Comment(path, line, body))
-    return Review(summary, out)
+    return Review(summary, [parse_comment(c.read_text()) for c in comments])
 
 
 def commentable(patch: str) -> set[int]:
@@ -127,7 +140,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        review = parse(args.review.read_text())
+        review = parse(args.review)
     except ValueError as e:
         sys.stderr.write(f"invalid review: {e}\n")
         return 1
