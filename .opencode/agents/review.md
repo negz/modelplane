@@ -35,7 +35,9 @@ summary.
 ## 2. Run the reviewers
 
 Dispatch the `review-prose`, `review-craft` and `review-correctness` subagents
-in parallel. Give each the PR number, the diff range to review, the context
+in parallel, as three calls in one message. Run them in the foreground. A
+headless run ends when your turn does, killing any background subagent before
+it reports. Give each the PR number, the diff range to review, the context
 directory if you have one, and the PR description and linked issues as the
 statement of what the PR sets out to do. Don't give them your own assessment of
 the PR, so they form their own.
