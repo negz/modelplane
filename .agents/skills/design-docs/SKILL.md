@@ -1,9 +1,9 @@
 ---
 name: design-docs
-description: Write and review software design documents to the Upbound style - proposals, RFCs, architecture and design docs for any project (Crossplane, Modelplane, internal services). Use when drafting, authoring, or structuring a design doc, and when reviewing, refactoring, tightening, or cleaning up someone else's design doc, especially an AI-written one that reads poorly. Also use when asked whether a design doc is good, or to bring one up to the standard of a gold-standard example.
+description: Write and review Modelplane design documents - proposals and designs under design/. Use when drafting, authoring, or structuring a design doc, and when reviewing, refactoring, tightening, or cleaning up someone else's design doc, especially an AI-written one that reads poorly. Also use when asked whether a design doc is good, or to bring one up to the standard of a gold-standard example.
 ---
 
-# Design docs: the Upbound style
+# Design Docs
 
 A design doc exists to win agreement on a problem and a proposed solution. Its
 readers are peer maintainers who know the project the doc concerns. They often
@@ -23,10 +23,11 @@ frames its problem, argues its solution, and handles its alternatives well. It
 applies both to writing one from scratch and to fixing a poor one.
 
 Use **writing-style** for sentence-level voice and the AI-tell linting pass. A doc
-that fixes its structure can still read AI, so clear the writing-style vale and
+that fixes its structure can still read AI, so clear the writing-style Vale and
 de-slop pass before calling the doc done.
 
-Use **scratch-docs** for where a doc belongs and how to open its PR.
+Modelplane's design docs live under `design/`, and `design/design.md` is a
+good example of the standard below.
 
 ## The Standard
 
