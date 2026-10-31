@@ -1,12 +1,14 @@
 ---
 name: writing-style
-description: Write and edit documents in Nic Cope's voice and style. Use when drafting designs, one-pagers, PRDs, proposals, explorations, blog posts, or any prose document. Also use when tightening, de-slopping, or copy editing prose, whether yours, Nic's, or someone else's. Also use when the user asks to draft, write, author, capture thoughts in writing, or review a document.
+description: Write and review prose in Modelplane's style. Use when drafting or editing designs, docs, code comments, field descriptions, commit messages, PR descriptions or review comments. Also use when reviewing the prose in someone else's change, or when tightening, de-slopping, or copy editing any prose.
 ---
 
 # Writing Style
 
-Write documents that sound like Nic wrote them. He reads every word and deletes
-whatever the reader doesn't need, so aim for a draft that survives that pass.
+Modelplane's prose follows the style of Nic Cope, its lead maintainer. The
+maintainers read every word and delete whatever the reader doesn't need, so aim
+for a draft they'd leave as it is. The quotes below are Nic's corrections to
+agents, kept as evidence for each rule.
 
 Most of this skill covers what goes wrong. An LLM's instinct for a good design
 doc is roughly right about voice and section structure, and badly wrong about
@@ -19,25 +21,35 @@ scratch. Skip it when tightening prose that already exists.
 
 ## When to Use This (vs Other Skills)
 
-Use **this skill** for how a document reads: designs, one-pagers, PRDs,
-proposals, explorations, blog posts.
+Use **this skill** for how prose reads, wherever it appears: designs, docs, code
+comments, XRD field descriptions, commit messages, PR descriptions and review
+comments. CONTRIBUTING.md sets the conventions specific to commits, PRs and
+issues, and "Cut Hard, Twice", "Never Invent Rationale", and "Substantiate or
+Delete" below apply to them unchanged.
 
-Use **scratch-docs** for the mechanics of where a document belongs, how to
-branch, and how to open a PR.
+Use **design-docs** for the structure of a design doc.
 
-Use **git-commits**, **github-pull-requests**, and **github-issues** for those
-artifacts. Each has its own conventions, and "Cut Hard, Twice", "Never Invent
-Rationale", and "Substantiate or Delete" below apply to them unchanged.
+Use **reviewing-pull-requests** for what to raise in a review, and this skill
+for how to word it.
 
-Use **adversarial-review** for reviewing code.
+## Reviewing Someone Else's Prose
+
+The failure modes below are also the checklist for reviewing prose in a PR.
+Raise the defects a reader would trip on, such as a claim the code doesn't
+support, invented rationale, or a comment three times longer than it needs to
+be. Quote the text, say what's wrong, and leave the rewrite to the author.
+
+CI already runs Vale over `docs/`, so don't repeat what it reports there.
+Elsewhere, such as design docs and code comments, raise a pattern of AI-written
+phrasing once, rather than commenting on each instance.
 
 ## Before You Draft
 
 Establish three things, and ask rather than guess:
 
-1. **Audience.** Who reads this? Nic's team, project maintainers, the community,
-   a partner's engineers, his CEO? "High level but deeply technical" produces a
-   different document from "internal, to align on asks".
+1. **Audience.** Who reads this? Maintainers, contributors, users, a partner's
+   engineers? "High level but deeply technical" produces a different document
+   from "internal, to align on asks".
 2. **Purpose.** What decision does it serve, or what does the reader do
    differently afterwards?
 3. **Premise and scope.** What does this document assume, and what falls outside
@@ -66,8 +78,8 @@ the 10-20% still there. Nic's calibration, verbatim:
 > 10-20% that can be cut with zero loss.
 <!-- vale on -->
 
-Do both passes before showing him anything. A draft he has to cut himself costs
-him the time the document should have saved, and he has said plainly that
+Do both passes before anyone reads it. A draft the reader has to cut costs them
+the time the document should have saved, and Nic has said plainly that
 repairing LLM prose is expensive:
 
 > Generally when you write a document it costs me a lot of time spent getting it
@@ -292,8 +304,8 @@ structure.
 - **No decorative structure.** Bold, headings, and bullets sprinkled in to look
   organised are a tell. A pair of paragraphs doesn't need an `###`. Resist
   subheadings in PR descriptions altogether.
-- **Consistent heading hierarchy**, and headings that sound like Nic. "The shape
-  I'm proposing" is not a heading he would write.
+- **Consistent heading hierarchy**, and headings that sound like an engineer
+  wrote them. "The shape I'm proposing" is not one.
 - **Ordered lists for sequential content**, prose for reasoning, bullets for
   parallel items. Parallel content gets parallel structure and matched depth.
   Labels in a parallel list run one to three words and stay consistent with each
@@ -318,7 +330,7 @@ Grammar gets its own pass. Run-on sentences are the recurring offender.
 
 ## The Pass Before You Hand It Back
 
-Nic won't spend his reading time on an un-de-slopped draft:
+Nobody should spend reading time on an un-de-slopped draft. Nic, to an agent:
 
 <!-- vale off -->
 > I want you to tackle the prose cuts and AI tells edits before I spend time
@@ -328,22 +340,22 @@ Nic won't spend his reading time on an un-de-slopped draft:
 
 Getting there takes two passes, which catch different things.
 
-**Vale catches the mechanical fingerprints.** Nic runs the
-[`vale-ai-tells`](https://github.com/tbhb/vale-ai-tells) rules over every markdown
-file, both through `vale-ls` in his editor and from the CLI:
+**Vale catches the mechanical fingerprints.** The project lints prose with the
+[`vale-ai-tells`](https://github.com/tbhb/vale-ai-tells) rules. Its 110 rules
+cover em dashes, filler, hedging, puffery, figurative verbs, rhetorical
+scaffolding, and the rest of the phrase-level fingerprints. Some rules from the
+Google developer documentation style run alongside them: `Passive`,
+`Semicolons`, `ExcessiveClaims`, and `Anthropomorphism`. The rest of that style
+stays off, since it bans first person and "we", which this skill relies on.
+
+`.opencode/vale/.vale.ini` holds that config. Sync its styles once, then lint:
 
 ```bash
-vale path/to/doc.md
+vale sync --config .opencode/vale/.vale.ini
+vale --config .opencode/vale/.vale.ini path/to/doc.md
 ```
 
-The config is global, so a bare `vale` works from any directory. Its 110 rules
-cover em dashes, filler, hedging, puffery, figurative verbs, rhetorical
-scaffolding, and the rest of the phrase-level fingerprints.
-
-Some rules from the Google developer documentation style run alongside them:
-`Passive`, `Semicolons`, `ExcessiveClaims`, and `Anthropomorphism`. The rest of
-that style stays off, since it bans first person, bans "we", and wants
-sentence-case headings, each of which contradicts this skill.
+The docs under `docs/` have their own, stricter config, which CI runs.
 
 **Fix what it reports.** Nic compared 16 linter-driven rewrites against the
 originals across two design docs. He preferred the rewrite in 14 and called the
@@ -369,28 +381,22 @@ The exceptions are mechanical rather than matters of taste:
   reads a field name as prose.
 <!-- vale on -->
 
-The config downgrades `FormalRegister` on `implementation` to a warning, so it
-won't reach you at all.
-
-For prose Nic wrote himself, assume he meant it and raise the alert rather than
+For prose a person wrote, assume they meant it, and raise the alert rather than
 acting on it.
-
-Because opencode reports at most 20 diagnostics per edit, and a 5,000 word design
-doc runs to about 50, a clean edit doesn't mean a clean file. Run `vale doc.md`
-directly before handing the document over.
 
 Where a document must quote a banned construction to discuss it, wrap that region
 in `<!-- vale off -->` and `<!-- vale on -->` rather than leaving an alert.
 
-The Edit and Write tools report the same alerts as LSP diagnostics whenever you
-touch a markdown file, so fix those as part of the edit.
+Where your harness reports Vale's alerts as diagnostics on each edit, fix those as
+part of the edit. A harness may cap how many it reports per edit, so a clean edit
+doesn't mean a clean file. Run `vale` directly before handing the document over.
 
 **A subagent catches what Vale can't see.** Vale matches phrases, and it has no
 opinion about whether a section argues with a reviewer, invents a reason, or
 gives four paragraphs to something that deserves one. Dispatch a subagent
 briefed with [references/de-slop-review.md](references/de-slop-review.md), plus
-the audience, the purpose, and one or two of Nic's existing designs for house
-style. Fix what it finds and repeat until a reviewer comes back clean, because
+the audience, the purpose, and one or two existing designs under `design/` for
+the project's style. Fix what it finds and repeat until a reviewer comes back clean, because
 one pass rarely suffices.
 
 Use a subagent rather than reviewing inline. Fresh context is the point, since
@@ -403,22 +409,17 @@ are orthogonal.
 
 ## Do Not
 
-- Don't publish a document, PR, or issue without approval. Draft in chat and let
-  Nic decide when to publish it. Don't act on review feedback he hasn't approved.
-  Commits are the exception, and **git-commits** covers them.
-- Don't credit yourself or add AI attribution. Text published under his name
-  reads as his, so write first person or drop the pronoun, and never refer to
-  him in the third person.
-- Don't lose his edits. He copy edits in parallel, often cutting further than
-  you did. His edits win, and they must survive any later rewrite, so re-read
-  the file before editing.
-- Don't edit when asked to diagnose. "Don't edit, just tell me" and "respond
-  here" mean answer in chat and leave the file alone.
-- Don't summarise material he wrote or already knows.
+- Don't add AI attribution. Text published under a person's name reads as
+  theirs, so write first person or drop the pronoun, and never refer to the
+  author in the third person.
+- Don't lose a person's edits. Where someone copy edits alongside you, their
+  edits win, and any later rewrite keeps them. Re-read the file before
+  editing.
+- Don't summarise material the reader wrote or already knows.
 
 ## Key Principles
 
-1. Cut 30%, then cut another 10-20%, before he reads it.
+1. Cut 30%, then cut another 10-20%, before anyone reads it.
 2. Write for the reader, never against the last draft or the last comment.
 3. Never invent rationale. Ask instead.
 4. Support every claim with a mechanism and a baseline, or delete it.

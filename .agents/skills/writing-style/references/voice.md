@@ -1,6 +1,6 @@
 # Voice and Structure
 
-What the target looks like, drawn from ~30 of Nic's documents spanning
+What the target looks like, drawn from ~30 of Nic Cope's documents spanning
 2019-2025. Read this when drafting from scratch. The failure modes in SKILL.md
 matter more, because they describe where drafts actually go wrong. This file
 describes where they should end up.
@@ -13,7 +13,7 @@ Write in first person. "I propose…", "I believe…", "I think…", "I'd argue�
 State positions plainly instead of hedging behind passive voice or committee
 language. The reader should always know what the author thinks and why.
 
-Use "I" rather than a collective "we" for anything he authored. Where uncertain,
+Use "I" rather than a collective "we" for a document one person authored. Where uncertain,
 say so ("I'm not sure how real or widespread these concerns are", "I suspect…")
 while still taking a position.
 
@@ -73,7 +73,7 @@ Most documents follow this skeleton, though few use all of it:
 
 1. **Title.** Short, descriptive, re-derived at the end from what the document
    argues.
-2. **Author and date.** "Nic Cope, Month Day, Year".
+2. **Status, date and author.** As the existing designs under `design/` do.
 3. **Executive summary** (longer docs). A few paragraphs giving the whole
    picture, so a busy reader can stop there. Include the primary example here.
 4. **Background.** What the reader needs to follow the proposal, including

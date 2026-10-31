@@ -103,8 +103,8 @@ prescriptive comment gets applied verbatim whether or not it's right.
 Don't use GitHub suggestion blocks. Applying one creates a commit without a
 `Signed-off-by` line, which fails DCO.
 
-Write plainly, as a maintainer would. The CONTRIBUTING.md writing style applies
-to review comments too.
+Write plainly, as a maintainer would. The writing-style skill applies to review
+comments as much as to docs.
 
 ## What to Look For
 
