@@ -1,0 +1,211 @@
+name: Review
+
+# An agent reviews pull requests from org members when they're opened or marked
+# ready for review. A maintainer can review any other PR, or re-review one after
+# new pushes, by commenting /review (see commands.yml).
+#
+# pull_request_target runs with secrets even for PRs from forks, which every PR
+# is. So the agent runs the PR's code in a container that holds no credentials:
+# no GitHub token, and no Anthropic key. A proxy outside the container adds the
+# key to the agent's model requests. The agent writes its review to a file, and
+# a separate job with no model in it validates and posts the review.
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+  workflow_call:
+    inputs:
+      pr:
+        description: The number of the PR to review.
+        type: string
+        required: true
+      sha:
+        description: >-
+          The head commit to review. A /review comment pins the commit it
+          approved, so a push after the comment isn't reviewed.
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: review-${{ inputs.pr || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  PR: ${{ inputs.pr || github.event.pull_request.number }}
+  SHA: ${{ inputs.sha || github.event.pull_request.head.sha }}
+
+  # opencode comes from a nixos-unstable commit, since the nixpkgs the flake
+  # pins ships an older major version.
+  NIXPKGS: github:NixOS/nixpkgs/1c89083e451e891152365b799595cf7790a43325
+  MODEL: anthropic/claude-opus-5-5
+  NIX_IMAGE: nixos/nix@sha256:f159a58f390677f41e8e900a74b6e2f9c7f27b364122ae6acf7a652ce6c551c0
+  CADDY_IMAGE: caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
+
+jobs:
+  review:
+    # Review automatically only PRs that org members open, and that aren't
+    # drafts. A /review comment has already checked the commenter can write.
+    if: >-
+      github.repository == 'modelplaneai/modelplane' && (
+        github.event_name == 'issue_comment' || (
+          !github.event.pull_request.draft &&
+          contains(fromJSON('["OWNER", "MEMBER"]'), github.event.pull_request.author_association)
+        )
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      # These are for the host to fetch the PR's context. The agent's container
+      # never sees the token.
+      contents: read
+      pull-requests: read
+      issues: read
+
+    steps:
+      - name: Checkout the reviewer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: reviewer
+          persist-credentials: false
+
+      - name: Checkout the PR
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.SHA }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The agents and skills come from main, so a PR can't change how it's
+      # reviewed.
+      - name: Install the reviewer's agents and skills
+        run: |
+          rm -rf pr/.opencode pr/.agents
+          cp -r reviewer/.opencode reviewer/.agents pr/
+
+      - name: Fetch the PR's context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir context
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json number,title,body,author,baseRefName,headRefOid,commits,closingIssuesReferences,files \
+            > context/pr.json
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" > context/reviews.json
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" > context/review-comments.json
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" > context/issue-comments.json
+
+          # The last commit a bot review covered, from the marker post.py puts
+          # in each review it posts.
+          last=$(jq -rs 'add | map(select(.user.type == "Bot")) | map(.body | capture("<!-- modelplane-review sha=(?<sha>[0-9a-f]{40}) -->").sha) | last // ""' context/reviews.json)
+          echo "LAST=$last" >> "$GITHUB_ENV"
+
+      # The proxy listens only on the Docker bridge, where the agent's
+      # container reaches it, and only forwards to the Messages API.
+      - name: Start the model proxy
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_ANTHROPIC_API_KEY }}
+        run: |
+          bridge=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+          echo "BRIDGE=$bridge" >> "$GITHUB_ENV"
+          cat > Caddyfile <<EOF
+          {
+            admin off
+          }
+          http://$bridge:8787 {
+            handle /v1/messages* {
+              reverse_proxy https://api.anthropic.com {
+                header_up Host api.anthropic.com
+                header_up x-api-key {env.ANTHROPIC_API_KEY}
+                flush_interval -1
+              }
+            }
+            respond 403
+          }
+          EOF
+          docker run -d --name proxy --network host \
+            -e ANTHROPIC_API_KEY \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE"
+
+      # The container gets copies of the PR and its context rather than bind
+      # mounts, so nothing the agent leaves in them, such as a symlink, reaches
+      # the host. It has the default, unprivileged capabilities. Nix's build
+      # sandbox needs namespaces the container can't create, so Nix builds
+      # without one. The container is the sandbox.
+      - name: Review
+        run: |
+          prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /context. Write the review to /out/review.json."
+          if [ -n "$LAST" ]; then
+            prompt="$prompt You last reviewed this PR at commit $LAST."
+          fi
+
+          config=$(jq -nc --arg model "$MODEL" --arg url "http://$BRIDGE:8787/v1" '{
+            model: $model,
+            provider: {anthropic: {options: {baseURL: $url, apiKey: "unused"}}},
+            autoupdate: false
+          }')
+
+          docker create --name agent \
+            -e OPENCODE_CONFIG_CONTENT="$config" \
+            -e NIX_CONFIG=$'experimental-features = nix-command flakes\nsandbox = false\naccept-flake-config = true' \
+            -w /work \
+            "$NIX_IMAGE" \
+            sh -c 'mkdir -p /out && git config --global --add safe.directory /work && nix shell "$0#opencode" "$0#ripgrep" -c opencode run --auto --format json --agent review "$1"' \
+            "$NIXPKGS" "$prompt"
+          docker cp pr/. agent:/work
+          docker cp context agent:/context
+          docker start -a agent > transcript.jsonl
+          docker cp agent:/out/review.json review.json
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: transcript
+          path: transcript.jsonl
+          if-no-files-found: ignore
+
+      # The review is the agent's output, so treat it as untrusted. docker cp
+      # copies a symlink as a link, so refusing anything but a regular file
+      # keeps the upload from following one to a file on the host.
+      - name: Check the review is a regular file
+        run: test -f review.json && ! test -L review.json
+
+      - name: Upload the review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: review
+          path: review.json
+
+  post:
+    needs: review
+    runs-on: ubuntu-24.04
+    permissions: {}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download the review
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: review
+
+      # A GitHub App posts reviews, so they come from the reviewer rather than
+      # github-actions. Its token can write pull requests in this repo only.
+      - name: Mint a token for the reviewer
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_KEY }}
+          permission-pull-requests: write
+
+      - name: Post the review
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: python3 hack/post_review.py --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA" review.json
