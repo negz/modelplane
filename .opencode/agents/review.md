@@ -94,6 +94,9 @@ not work to forward:
   get fifteen. The workflow refuses a review with more than 25 comments. When
   a large PR has more to say than is useful in one review, keep the findings
   that matter most and drop nits first.
+- Pass the design reviewer's questions through whole. Don't merge one into
+  another or trim its evidence, above all where it cites a principle from a
+  committed design. Rephrase them, but keep every point.
 - If the design reviewer thinks the design needs settling, or the approach
   rethinking, hold back the other reviewers' findings on naming, tests and
   style. They're wasted if the design changes. Keep correctness findings that
@@ -104,16 +107,17 @@ not work to forward:
 Load the writing-style skill before you write, and follow it. Don't stop to ask
 questions, since nobody is there to answer. You post as the project's review
 bot. The skill's rules about writing under a person's name don't apply. Write
-the summary and each comment as the reviewing-pull-requests skill describes.
-Its section on phrasing matters most: ask, explain and suggest for anything
-about correctness or design, even when the reviewers stated it as fact, and be
-direct only about style.
-Attach each comment to a line the PR changed where you can. A finding with no
-line, such as one about the PR description or a commit message, goes in the
-summary.
+the summary and each comment as the reviewing-pull-requests skill describes. Its
+section on phrasing matters most: ask, explain and suggest for anything about
+correctness or design, even when the reviewers stated it as fact, and be direct
+only about style. The summary's opening sentence matches the design reviewer's
+verdict, and mustn't soften it. Attach each comment to a line the PR changed
+where you can. A finding with no line, such as one about the PR description or a
+commit message, goes in the summary.
 
 Write the review as markdown files in the directory you're given. A linter
-checks each one as you write it. Write the summary to `summary.md`, and each
+checks each one as you write it. Don't hard-wrap them. GitHub shows a newline in
+a review comment as a line break. Write the summary to `summary.md`, and each
 inline comment to its own file under `comments/`, named for its order, such as
 `comments/01.md`. A comment file starts with front matter giving its file and
 its line in the PR's head commit:
