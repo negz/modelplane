@@ -1,0 +1,73 @@
+name: MicroVM smoke test
+
+# Throwaway: checks a microVM can run the review agent's workload on a hosted
+# runner. Boots the VM in hack/microvm, runs nix flake check and a kind cluster
+# inside it, and checks it can reach a service on the runner.
+on:
+  push:
+    branches: [microwave]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check KVM
+        run: |
+          ls -l /dev/kvm
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -w /dev/kvm
+          nproc; free -g; df -h / /mnt
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Prepare the VM's work directory
+        run: |
+          sudo mkdir -p /mnt/vm/work
+          sudo chown -R "$USER" /mnt/vm
+          git archive --format=tar HEAD | (mkdir /mnt/vm/work/mp && tar -x -C /mnt/vm/work/mp)
+          cat > /mnt/vm/work/job.sh <<'EOF'
+          set -x
+          uname -a; nproc; free -g; df -h /nix/store /var/lib/docker /work
+          cat /proc/cpuinfo | grep -m1 "model name"
+          time curl -sS --max-time 10 http://10.0.2.2:8787/ ; echo "proxy-exit=$?"
+          cd /work/mp
+          git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm smoke
+          time nix flake check --print-build-logs 2>&1 | tail -20; echo "flake-check-exit=${PIPESTATUS[0]}"
+          time kind create cluster --wait 120s; echo "kind-exit=$?"
+          kubectl get nodes
+          EOF
+
+      - name: Start a stand-in for the proxy
+        run: |
+          mkdir -p /tmp/www && echo proxy-reachable > /tmp/www/index.html
+          (cd /tmp/www && python3 -m http.server 8787 --bind 127.0.0.1 >/dev/null 2>&1 &)
+
+      - name: Build the VM
+        run: |
+          time nix build ./hack/microvm#nixosConfigurations.agent.config.microvm.declaredRunner -o runner
+
+      - name: Run the VM
+        working-directory: /mnt/vm
+        run: |
+          time timeout 80m "$GITHUB_WORKSPACE/runner/bin/microvm-run" < /dev/null > console.log 2>&1 || echo "vm-exit=$?"
+          tail -40 console.log
+
+      - name: Job output
+        if: always()
+        run: |
+          cat /mnt/vm/work/job.log || true
+          cat /mnt/vm/work/job.exit || true
