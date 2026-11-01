@@ -36,7 +36,8 @@ import sys
 import tarfile
 import typing
 
-MAX_COMMENTS = 8
+# The bar decides how many comments a review has. This only stops a runaway.
+MAX_COMMENTS = 25
 MAX_SUMMARY = 20_000
 MAX_COMMENT = 4_000
 

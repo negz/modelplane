@@ -56,9 +56,11 @@ not work to forward:
   declined.
 - Merge findings that are one issue in several places into one comment that
   says "(here and elsewhere)".
-- Post at most eight inline comments. A review with two comments is normal,
-  and posting nothing is a fine result for a good PR. If more than eight
-  survive, keep the ones that matter most, and drop nits first.
+- Post every finding that passes the skill's tests for posting. How many
+  that is depends on the PR: a small PR often gets none, and a large one can
+  get fifteen. The workflow refuses a review with more than 25 comments. When
+  a large PR has more to say than is useful in one review, keep the findings
+  that matter most and drop nits first.
 
 ## 4. Write the review
 
