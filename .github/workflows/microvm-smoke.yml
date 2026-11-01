@@ -47,7 +47,7 @@ jobs:
           # Copy the repo off the 9p share, which the VM's root doesn't own.
           time cp -r /work/mp /root/mp && cd /root/mp
           git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm smoke
-          time nix flake check --print-build-logs 2>&1 | tail -20; echo "flake-check-exit=${PIPESTATUS[0]}"
+          time nix flake check --keep-going --print-build-logs 2>&1 | tail -20; echo "flake-check-exit=${PIPESTATUS[0]}"
           time kind create cluster --wait 120s; echo "kind-exit=$?"
           # Reachable only through user networking's view of the runner.
           curl -sS --max-time 5 http://10.0.2.2:22 ; echo "runner-ssh-exit=$?"
