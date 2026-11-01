@@ -127,7 +127,7 @@ def commentable(patch: str) -> set[int]:
     added and context lines of its patch."""
     lines: set[int] = set()
     line = 0
-    for text in patch.splitlines():
+    for text in patch.split("\n"):
         if match := HUNK.match(text):
             line = int(match["start"])
             continue
@@ -142,7 +142,7 @@ def added(patch: str) -> set[int]:
     """The lines of a file's new version that its patch adds."""
     lines: set[int] = set()
     line = 0
-    for text in patch.splitlines():
+    for text in patch.split("\n"):
         if match := HUNK.match(text):
             line = int(match["start"])
             continue
@@ -158,7 +158,7 @@ def changed(diff: str) -> set[int]:
     """The lines of a file's new version that a zero-context git diff of that
     one file changes."""
     out: set[int] = set()
-    for text in diff.splitlines():
+    for text in diff.split("\n"):
         if match := HUNK.match(text):
             start, count = int(match["start"]), int(match["count"] or 1)
             out.update(range(start, start + count))
