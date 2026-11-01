@@ -57,6 +57,11 @@ workflow drops any inline comment on a line that hasn't changed since then. A
 change can still break code it didn't touch, such as a caller of a function
 whose behaviour changed. Put a finding like that in the summary.
 
+The summary of a re-review covers only what changed, too. Don't restate or
+remind the author of earlier findings, whether or not they look addressed:
+the earlier review and its threads already say them. If the changes raise
+nothing new, the summary says so in one sentence.
+
 ## 2. Run the reviewers
 
 Dispatch the `review-prose`, `review-craft` and `review-correctness` subagents
