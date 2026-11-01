@@ -18,8 +18,8 @@
 The agent writes the review as a directory of markdown files: summary.md, and
 one file per inline comment under comments/, each starting with front matter
 that gives its path and line. It runs the PR's code, so its output is
-untrusted. This checks the review's shape and size, and always posts a COMMENT review: the reviewer never
-approves or requests changes. GitHub rejects a whole review if one comment
+untrusted. This checks the review's shape and size, and always posts a COMMENT
+review: the reviewer never approves or requests changes. GitHub rejects a whole review if one comment
 targets a line outside the diff, so comments on such lines move into the
 summary instead. The summary ends with a marker recording the commit the
 review covered, which the next review reads to review only what's new.
@@ -69,7 +69,9 @@ def parse_comment(raw: str) -> Comment:
     if match is None:
         raise ValueError("comment has no front matter")
     meta = dict(line.split(":", 1) for line in match["meta"].splitlines() if ":" in line)
-    path, line, body = meta.get("path", "").strip(), meta.get("line", "").strip(), match["body"].strip()
+    # A marker the agent wrote would set where the next review starts.
+    body = MARKER.sub("", match["body"]).strip()
+    path, line = meta.get("path", "").strip(), meta.get("line", "").strip()
     if not path or not line.isdigit() or int(line) < 1 or not body:
         raise ValueError(f"comment needs a path, a line and a body: {match['meta']!r}")
     if len(body) > MAX_COMMENT:
@@ -82,8 +84,7 @@ def parse_comment(raw: str) -> Comment:
 def parse(review: pathlib.Path) -> Review:
     """The review in a directory, or ValueError if it isn't the shape the agent
     was told to write."""
-    files = [p for p in review.rglob("*") if p.is_symlink() or not p.is_dir()]
-    if any(p.is_symlink() for p in files):
+    if any(p.is_symlink() for p in review.rglob("*")):
         raise ValueError("review contains a symlink")
     summary = (review / "summary.md").read_text() if (review / "summary.md").is_file() else ""
     if not summary.strip():
@@ -93,7 +94,7 @@ def parse(review: pathlib.Path) -> Review:
     comments = sorted((review / "comments").glob("*.md"))
     if len(comments) > MAX_COMMENTS:
         raise ValueError(f"review has {len(comments)} comments, more than {MAX_COMMENTS}")
-    return Review(summary, [parse_comment(c.read_text()) for c in comments])
+    return Review(MARKER.sub("", summary), [parse_comment(c.read_text()) for c in comments])
 
 
 def commentable(patch: str) -> set[int]:
@@ -117,8 +118,7 @@ def place(review: Review, diff: dict[str, set[int]], sha: str) -> tuple[str, lis
     line outside the diff moves into the body."""
     inline = [c for c in review.comments if c.line in diff.get(c.path, set())]
     outside = [c for c in review.comments if c not in inline]
-    # A marker the agent wrote would set where the next review starts.
-    body = MARKER.sub("", review.summary).strip()
+    body = review.summary.strip()
     if outside:
         body += "\n\n" + "\n\n".join(f"`{c.path}` line {c.line}: {c.body}" for c in outside)
     body += f"\n\n<!-- modelplane-review sha={sha} -->"
@@ -127,7 +127,10 @@ def place(review: Review, diff: dict[str, set[int]], sha: str) -> tuple[str, lis
 
 def gh(*args: str, stdin: str | None = None) -> str:
     """Run gh, returning its output."""
-    return subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=True).stdout
+    result = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
 
 
 def main() -> int:
