@@ -38,7 +38,6 @@
             { pkgs, lib, ... }:
             {
               system.stateVersion = "26.05";
-              networking.hostName = "agent";
 
               microvm = {
                 hypervisor = "firecracker";
@@ -81,9 +80,12 @@
                 ];
               };
 
-              networking.useNetworkd = true;
-              networking.useDHCP = false;
-              networking.enableIPv6 = false;
+              networking = {
+                hostName = "agent";
+                useNetworkd = true;
+                useDHCP = false;
+                enableIPv6 = false;
+              };
               systemd.network.networks."10-vm0" = {
                 matchConfig.MACAddress = "02:00:00:00:00:01";
                 address = [ "192.168.100.2/30" ];
