@@ -42,7 +42,7 @@
 
               microvm = {
                 hypervisor = "firecracker";
-                vcpu = 3;
+                vcpu = 4;
                 mem = 12288;
 
                 interfaces = [
