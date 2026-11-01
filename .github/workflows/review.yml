@@ -84,6 +84,8 @@ jobs:
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      last: ${{ steps.context.outputs.last }}
     permissions:
       # These are for the runner to fetch the PR's context. The VM never sees
       # the token.
@@ -118,6 +120,7 @@ jobs:
           done
 
       - name: Fetch the PR's context
+        id: context
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -133,6 +136,17 @@ jobs:
           # in each review it posts.
           last=$(jq -rs 'add | map(select(.user.type == "Bot")) | map(.body | capture("<!-- modelplane-review sha=(?<sha>[0-9a-f]{40}) -->").sha) | last // ""' context/reviews.json)
           echo "LAST=$last" >> "$GITHUB_ENV"
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+
+          # A re-review compares the PR with the version it last reviewed,
+          # which is usually gone from the branch after a force-push. GitHub
+          # still serves it by its hash. Without it there's no telling what
+          # changed, and reviewing the whole PR again would reopen what the
+          # last review covered, so stop.
+          if [ -n "$last" ] && ! git -C pr fetch -q origin "$last"; then
+            echo "::error::Can't fetch $last, the commit the last review covered, so can't tell what changed since."
+            exit 1
+          fi
 
       - name: Allow the runner user to use KVM
         run: |
@@ -242,6 +256,14 @@ jobs:
         with:
           name: review
 
+      # A re-review may only comment on lines that changed since the last
+      # review, which post_review.py works out by diffing the two commits.
+      - name: Fetch the commits a re-review compares
+        if: needs.review.outputs.last != ''
+        env:
+          LAST: ${{ needs.review.outputs.last }}
+        run: git fetch -q --depth 1 origin "$LAST" "$SHA"
+
       # A GitHub App posts reviews, so they come from the reviewer rather than
       # github-actions. Its token can write pull requests in this repo only.
       - name: Mint a token for the reviewer
@@ -256,4 +278,7 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-        run: python3 hack/post_review.py --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA" out.tar
+          LAST: ${{ needs.review.outputs.last }}
+        run: |
+          python3 hack/post_review.py --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA" \
+            ${LAST:+--since "$LAST" --git-dir .git} out.tar
