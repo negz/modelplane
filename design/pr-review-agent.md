@@ -46,8 +46,8 @@ them.
 Each review posts as a GitHub App, as one comment review. It never approves or
 requests changes. The review opens with a sentence on whether the PR looks
 ready, followed by any finding with no line to attach to. It doesn't describe
-the PR, which is the PR description's job. At most eight inline comments
-follow.
+the PR, which is the PR description's job. Inline comments follow, one for each
+finding that passes the tests for posting described below.
 
 The review agent runs three reviewers in parallel, each with fresh context:
 
