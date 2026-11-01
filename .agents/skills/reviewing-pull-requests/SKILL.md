@@ -256,13 +256,20 @@ The python-code-factoring and before-writing-code skills hold the rest.
 
 ## The Review Summary
 
-The summary opens with one sentence saying whether the PR looks ready, or
-naming what most needs another look, hedged where it's about correctness: "I think the new gate may delete running clusters (see the
-comment on `fn.py`)." It doesn't list the inline comments again, and it
-doesn't grade the PR. Leave out verdicts like "well tested" or "reads well".
+The summary opens with one hedged sentence on how close the PR looks to
+mergeable, without repeating any inline comment:
+
+- "This looks ready to me."
+- "This looks close. I have a few questions."
+- "I think a couple of things need another look before this merges."
+- "I think we should step back and talk about the approach."
+
+The design reviewer's verdict weighs most in choosing it. Don't grade the PR
+beyond that: leave out verdicts like "well tested" or "reads well".
 
 After that sentence, the summary contains only findings with no line to attach
-to, such as one about the PR description or a commit message. It doesn't
+to. A design question about the whole PR goes there, as does anything about
+the PR description or the commit messages. It doesn't
 describe what the PR does. Maintainers ask their own agents when they want
 that, and the PR description is the author's job.
 
