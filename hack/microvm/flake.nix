@@ -109,8 +109,9 @@
               users.users.root.password = "";
               services.getty.autologinUser = "root";
 
-              # Unpack the job, run it, write /out back as a tar, then power
-              # off so the runner's firecracker exits.
+              # Unpack the job, run it, write /out back as a tar, then reboot.
+              # Firecracker has no power-off device, so a halted guest leaves
+              # it running. It exits on a guest reboot.
               systemd.services.job = {
                 wantedBy = [ "multi-user.target" ];
                 after = [
@@ -139,11 +140,11 @@
                   set +e
                   mkdir -p /work /out
                   tar -xf /dev/vdd -C /work
-                  bash /work/job.sh > /out/job.log 2>&1
-                  echo $? > /out/job.exit
+                  bash /work/job.sh 2>&1 | tee /out/job.log
+                  echo "''${PIPESTATUS[0]}" > /out/job.exit
                   tar -cf /dev/vde -C /out .
                   sync
-                  ${lib.getExe' pkgs.systemd "systemctl"} poweroff
+                  ${lib.getExe' pkgs.systemd "systemctl"} reboot
                 '';
               };
             }
