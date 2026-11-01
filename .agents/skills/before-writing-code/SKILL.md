@@ -2,8 +2,8 @@
 name: before-writing-code
 description: >-
   Language-agnostic engineering principles, and the trunk the language skills
-  branch from. Load it alongside go-code-factoring or python-code-factoring
-  whenever you write, refactor, restructure or fix code, before the first edit.
+  branch from. Load it alongside python-code-factoring whenever you write,
+  refactor, restructure or fix code, before the first edit.
   Covers how to approach a change in an existing codebase, how much weight an
   existing pattern deserves, writing less code, what a test has to be worth,
   and what belongs in a comment.
