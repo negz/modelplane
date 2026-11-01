@@ -104,8 +104,9 @@ can, including `nix flake check` and a kind cluster.
 
 GitHub's standard x86 runners expose KVM, but GitHub doesn't officially support
 nested virtualization on them. One of the nine runners that ran this workflow
-during testing had no usable `/dev/kvm`. On such a runner the job fails with a
-message asking for a re-run, which usually gets a different runner.
+during testing had no usable `/dev/kvm`. On such a runner the job fails, and a
+second workflow re-runs it, up to twice. A re-run usually gets a different
+runner.
 
 ## Alternatives considered
 
