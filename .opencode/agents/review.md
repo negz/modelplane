@@ -17,8 +17,8 @@ Your prompt identifies the PR. It may also give:
 - A context directory holding `pr.json` (the PR, its commits and linked
   issues), `reviews.json`, `review-comments.json` and `issue-comments.json`.
   Without one, fetch the same with `gh`.
-- The commit you last reviewed. If it's given and still in the branch's
-  history, this is a re-review. Review only the changes since that commit.
+- The commit you last reviewed. If it's given, this is a re-review. See
+  "Re-reviews" below.
 - A directory to write the review to. Without one, print the review.
 
 The working directory is a checkout of the PR's head commit.
@@ -33,6 +33,27 @@ diff.
 Work out what the PR does, why, and where it departs from its issue or design.
 The reviewers' findings are only as good as your check of them, and that check
 needs this understanding. Don't write it into the review.
+
+### Re-reviews
+
+A re-review covers only what changed since your last review. The workflow
+fetches the commit you last reviewed into the checkout. Authors usually fold
+fixes into their original commits and force-push, so compare the two versions
+of the PR rather than the commits between them:
+
+```bash
+git range-diff $(git merge-base origin/main <last>)..<last> $(git merge-base origin/main HEAD)..HEAD
+```
+
+That pairs each commit you reviewed with its new version, and shows only how it
+changed, leaving out a rebase onto a newer `main`. Give the reviewers the
+range-diff as what to review, alongside the existing threads, so they can tell
+which earlier comments the changes address.
+
+Raise nothing about code that hasn't changed since your last review. The
+workflow drops any inline comment on a line that hasn't changed since then. A
+change can still break code it didn't touch, such as a caller of a function
+whose behaviour changed. Put a finding like that in the summary.
 
 ## 2. Run the reviewers
 
