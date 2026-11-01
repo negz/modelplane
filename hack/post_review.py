@@ -50,7 +50,10 @@ MAX_COMMENT = 4_000
 # characters. A sketch of an alternative can run longer.
 MAX_PROSE = 600
 
-MARKER = re.compile(r"<!--\s*modelplane-review\b.*?-->", re.DOTALL)
+# The review's last line is a marker recording the commit it covered, and the
+# next review reads it to scope itself. So the agent can't write one, the
+# review escapes every HTML comment opener in what the agent wrote.
+MARKER_FORMAT = "<!-- modelplane-review sha={sha} -->"
 FRONT_MATTER = re.compile(r"\A---\n(?P<meta>.*?)\n---\n(?P<body>.*)\Z", re.DOTALL)
 CODE_BLOCK = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
@@ -71,6 +74,12 @@ class Review(typing.NamedTuple):
     comments: list[Comment]
 
 
+def unmark(text: str) -> str:
+    """text with every HTML comment opener escaped, so it renders as written
+    and can't pass for the review's marker."""
+    return text.replace("<!--", "&lt;!--")
+
+
 def parse_comment(raw: str) -> Comment:
     """The comment in raw, or ValueError if it isn't a well-formed comment
     file."""
@@ -78,8 +87,7 @@ def parse_comment(raw: str) -> Comment:
     if match is None:
         raise ValueError("comment has no front matter")
     meta = dict(line.split(":", 1) for line in match["meta"].splitlines() if ":" in line)
-    # A marker the agent wrote would set where the next review starts.
-    body = MARKER.sub("", match["body"]).strip()
+    body = unmark(match["body"]).strip()
     path, line = meta.get("path", "").strip(), meta.get("line", "").strip()
     if not path or not line.isdigit() or int(line) < 1 or not body:
         raise ValueError(f"comment needs a path, a line and a body: {match['meta']!r}")
@@ -111,7 +119,7 @@ def parse(output: tarfile.TarFile) -> Review:
     comments = sorted(n for n in files if n.startswith("comments/") and n.endswith(".md"))
     if len(comments) > MAX_COMMENTS:
         raise ValueError(f"review has {len(comments)} comments, more than {MAX_COMMENTS}")
-    return Review(MARKER.sub("", summary), [parse_comment(files[c]) for c in comments])
+    return Review(unmark(summary), [parse_comment(files[c]) for c in comments])
 
 
 def commentable(patch: str) -> set[int]:
@@ -175,7 +183,7 @@ def place(
         body += "\n\n" + "\n\n".join(f"`{c.path}` line {c.line}: {c.body}" for c in outside)
     for c in outside if scope is not None else []:
         sys.stderr.write(f"dropping a comment on {c.path}:{c.line}, which hasn't changed since the last review\n")
-    body += f"\n\n<!-- modelplane-review sha={sha} -->"
+    body += "\n\n" + MARKER_FORMAT.format(sha=sha)
     return body, inline
 
 
