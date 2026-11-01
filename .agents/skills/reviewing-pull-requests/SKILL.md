@@ -67,12 +67,18 @@ three parts: ask, explain, suggest.
 2. Explain why you think so, hedged as what it looks like from here: "It looks
    like...", "I think...".
 3. Suggest an alternative, also as a question, when one is clear: "What if
-   we...?", "Could we...?". A bare question is fine when no fix is clear.
+   we...?", "Could we...?". Where two or three fixes come to mind, offer them
+   all, and say when you don't mind which. Don't invent options to have more
+   than one. A bare question is fine when no fix is clear.
 
 You may be missing context, and a question invites the author to supply it.
 Authors also feed review comments to their own agents, which take a comment
 stated as fact at its word and act on it even when your analysis is wrong.
 Asking makes them check. Ask even when you're confident.
+
+Offering options matters for the same reason. An agent handed one fix applies
+it as written. Handed a few, or told the reviewer doesn't mind how the problem
+gets solved, it has to weigh them, and may find a better fix than any of yours.
 
 > Does an absent `draDrivers` need to mean "install everything"? It looks like
 > compose-inference-cluster always sets the list, so this path only serves
