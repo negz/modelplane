@@ -45,13 +45,17 @@ them. It can only comment inline on lines that changed since the last review,
 so it can't reopen parts of the PR it already reviewed.
 
 Each review posts as a GitHub App, as one comment review. It never approves or
-requests changes. The review opens with a sentence on whether the PR looks
-ready, followed by any finding with no line to attach to. It doesn't describe
+requests changes. The review opens with a hedged sentence on how close the PR
+looks to mergeable, from "This looks ready to me" to "I think we should step
+back and talk about the approach". Any finding with no line to attach to
+follows. It doesn't describe
 the PR, which is the PR description's job. Inline comments follow, one for each
 finding that passes the tests for posting described below.
 
-The review agent runs three reviewers in parallel, each with fresh context:
+The review agent runs four reviewers in parallel, each with fresh context:
 
+- **Design** checks the PR solves its issue and fits the committed design docs,
+  without arguing with them, and reviews any design doc the PR adds.
 - **Prose** checks comments, docstrings, field descriptions and docs against the
   code.
 - **Craft** checks whether each addition needs to exist, and whether it matches
@@ -64,6 +68,13 @@ The review agent then checks each finding against the bar the
 this PR, triggered by a real input, and something the author would want to
 change. The agent merges duplicates and posts what's left. The same skill sets
 the phrasing rules, and lists real findings from this repo for calibration.
+
+The design reviewer is the one most likely to overreach, since judging a design
+needs context a reviewer can't see. Its `reviewing-designs` skill holds the
+questions maintainers ask of a proposal, such as what the user gets, and
+whether the next engine would need a new Modelplane release. It asks them and leaves the answers to maintainers. When it thinks the design
+needs settling, the review holds back findings on code that might change with
+it.
 
 The agents live in `.opencode/agents/`, and the skills they load live in
 `.agents/skills/`. Any maintainer can run the same review locally, from a

@@ -64,8 +64,8 @@ nothing new, the summary says so in one sentence.
 
 ## 2. Run the reviewers
 
-Dispatch the `review-prose`, `review-craft` and `review-correctness` subagents
-in parallel, as three calls in one message. Run them in the foreground. A
+Dispatch the `review-design`, `review-prose`, `review-craft` and
+`review-correctness` subagents in parallel, as four calls in one message. Run them in the foreground. A
 headless run ends when your turn does, killing any background subagent before
 it reports. Give each the PR number, the diff range to review, the context
 directory if you have one, and the PR description and linked issues as the
@@ -89,6 +89,10 @@ not work to forward:
   get fifteen. The workflow refuses a review with more than 25 comments. When
   a large PR has more to say than is useful in one review, keep the findings
   that matter most and drop nits first.
+- If the design reviewer thinks the design needs settling, or the approach
+  rethinking, hold back the other reviewers' findings on naming, tests and
+  style. They're wasted if the design changes. Keep correctness findings that
+  would matter whatever the design becomes.
 
 ## 4. Write the review
 
