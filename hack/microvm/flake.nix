@@ -68,6 +68,7 @@
               ];
               virtualisation.docker.enable = true;
               environment.systemPackages = with pkgs; [
+                curl
                 git
                 kind
                 kubectl
@@ -87,6 +88,8 @@
                 path = with pkgs; [
                   bash
                   coreutils
+                  curl
+                  procps
                   git
                   nix
                   docker
