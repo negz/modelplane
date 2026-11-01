@@ -74,6 +74,31 @@ class Review(typing.NamedTuple):
     comments: list[Comment]
 
 
+# Lines that start a new markdown block, rather than continuing a paragraph.
+BLOCK_START = re.compile(r"^\s*([-*+] |\d+[.)] |>|#|\||<)")
+
+
+def unwrap(text: str) -> str:
+    """text with hard-wrapped paragraphs and list items joined into single lines.
+
+    GitHub renders a newline in a review comment as a line break, so text the
+    agent wrapped at 80 columns would show ragged. Code blocks keep their lines.
+    """
+    out: list[str] = []
+    fenced = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append(line)
+            continue
+        joinable = out and out[-1].strip() and not out[-1].lstrip().startswith("```")
+        if not fenced and joinable and line.strip() and not BLOCK_START.match(line):
+            out[-1] = out[-1].rstrip() + " " + line.strip()
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def unmark(text: str) -> str:
     """text with every HTML comment opener escaped, so it renders as written
     and can't pass for the review's marker."""
@@ -87,7 +112,7 @@ def parse_comment(raw: str) -> Comment:
     if match is None:
         raise ValueError("comment has no front matter")
     meta = dict(line.split(":", 1) for line in match["meta"].splitlines() if ":" in line)
-    body = unmark(match["body"]).strip()
+    body = unwrap(unmark(match["body"])).strip()
     path, line = meta.get("path", "").strip(), meta.get("line", "").strip()
     if not path or not line.isdigit() or int(line) < 1 or not body:
         raise ValueError(f"comment needs a path, a line and a body: {match['meta']!r}")
@@ -119,7 +144,7 @@ def parse(output: tarfile.TarFile) -> Review:
     comments = sorted(n for n in files if n.startswith("comments/") and n.endswith(".md"))
     if len(comments) > MAX_COMMENTS:
         raise ValueError(f"review has {len(comments)} comments, more than {MAX_COMMENTS}")
-    return Review(unmark(summary), [parse_comment(files[c]) for c in comments])
+    return Review(unwrap(unmark(summary)), [parse_comment(files[c]) for c in comments])
 
 
 def commentable(patch: str) -> set[int]:
