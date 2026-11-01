@@ -102,6 +102,11 @@ the same VM, and that code can rewrite them mid-review.
 The VM runs a full Linux kernel, so the agent can run anything our local agents
 can, including `nix flake check` and a kind cluster.
 
+GitHub's standard x86 runners expose KVM, but GitHub doesn't officially support
+nested virtualization on them. One of the nine runners that ran this workflow
+during testing had no usable `/dev/kvm`. On such a runner the job fails with a
+message asking for a re-run, which usually gets a different runner.
+
 ## Alternatives considered
 
 **opencode's GitHub Action.** It handles triggers and posting, but the agent
