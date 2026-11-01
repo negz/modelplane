@@ -233,17 +233,9 @@ The summary opens with one sentence saying whether the PR is ready, or naming
 what most needs to change. It doesn't list the inline comments again, and it
 doesn't grade the PR. Leave out verdicts like "well tested" or "reads well".
 
-Below that, give a reader who knows Modelplane but not this PR what they need
-to understand it, in a collapsed `<details>` block:
-
-- What problem the PR solves, and how, in two or three sentences.
-- Where it departs from the linked issue or the design docs under `design/`.
-- For a change to a user-facing API, an example of each changed type with the
-  new fields in place.
-- Any new pattern, helper, dependency or tool the PR introduces.
-- On a re-review, what changed since the last review.
-
-Leave out any item with nothing to say, and anything the reader can get from
-the PR title and description.
+After that sentence, the summary contains only findings with no line to attach
+to, such as one about the PR description or a commit message. It doesn't
+describe what the PR does. Maintainers ask their own agents when they want
+that, and the PR description is the author's job.
 
 Never approve or request changes. That's a maintainer's call.
