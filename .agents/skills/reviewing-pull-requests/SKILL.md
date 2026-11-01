@@ -59,18 +59,38 @@ what happened to them. Read it before deciding what to post.
 
 ## How to Phrase Feedback
 
-**Ask about anything that looks technically wrong or misguided.** You may be
-missing context, and a question invites the author to supply it. Back the
-question with a suggestion, or a few options, when one is clear. Don't invent a
-suggestion just to have one, because a bare question is fine. Ask about the
-failure you expect. "Should this use X?" is a suggestion in question form, and
-reads worse than either.
+**Frame correctness and design feedback as a question.** That covers bugs,
+architecture, API shape, and docs or comments that say something untrue. Use
+three parts: ask, explain, suggest.
 
-> Won't `ready != len(refs)` always be true if `renderFail` is true? Or are
-> there cases where we need both?
+1. Ask about the problem you think you see, not about your fix.
+2. Explain why you think so, hedged as what it looks like from here: "It looks
+   like...", "I think...".
+3. Suggest an alternative, also as a question, when one is clear: "What if
+   we...?", "Could we...?". A bare question is fine when no fix is clear.
 
-> Won't returning here delete a running cluster? Crossplane garbage collects
-> composed resources that drop out of the desired state.
+You may be missing context, and a question invites the author to supply it.
+Authors also feed review comments to their own agents, which take a comment
+stated as fact at its word and act on it even when your analysis is wrong.
+Asking makes them check. Ask even when you're confident.
+
+> Does an absent `draDrivers` need to mean "install everything"? It looks like
+> compose-inference-cluster always sets the list, so this path only serves
+> ServingStacks created before the field existed, and Modelplane has none to
+> migrate. What if we required the field, or defaulted it to `[]`? That would
+> remove the `None` branch in `join`, the `ExistingStandardUnfiltered` case and
+> the comments in both functions that explain it.
+
+> Won't returning here delete a running cluster? I think Crossplane garbage
+> collects composed resources that drop out of the desired state. Could the
+> gate keep composing what already exists?
+
+> Is the list below still right for AMD pools? It says an existing cluster
+> provides its own exporter and needs NVIDIA's dcgm-exporter chart, but this
+> paragraph says the serving stack installs the AMD exporter. Should it say
+> that only applies to NVIDIA pools?
+
+Phrase a correctness finding in the review summary this way too.
 
 **Be direct about style, readability and maintainability.** "Please use the
 established pattern here, because..." is fine, as long as the comment gives the
@@ -84,7 +104,8 @@ fixed line. Mark minor points with `Nit:`.
 > This is documenting a change. Document how it works, not how it differs
 > from how it used to work. (Here and elsewhere.)
 
-A comment is one to three sentences: the problem and its evidence, then stop.
+Write short comments. Most run two to four sentences, ending with the
+suggestion.
 Make one point per comment, attached to the line it's about. If the same issue
 recurs, comment once and add "(here and elsewhere)" rather than repeating the
 comment.
@@ -229,8 +250,9 @@ The python-code-factoring and before-writing-code skills hold the rest.
 
 ## The Review Summary
 
-The summary opens with one sentence saying whether the PR is ready, or naming
-what most needs to change. It doesn't list the inline comments again, and it
+The summary opens with one sentence saying whether the PR looks ready, or
+naming what most needs another look, hedged where it's about correctness: "I think the new gate may delete running clusters (see the
+comment on `fn.py`)." It doesn't list the inline comments again, and it
 doesn't grade the PR. Leave out verdicts like "well tested" or "reads well".
 
 After that sentence, the summary contains only findings with no line to attach
