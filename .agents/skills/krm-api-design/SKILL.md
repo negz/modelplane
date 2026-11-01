@@ -1,6 +1,6 @@
 ---
 name: krm-api-design
-description: Design Kubernetes Resource Model (KRM) APIs - CRDs and XRDs. Use when designing, reviewing, or evolving custom resource schemas, composite resource definitions, OpenAPI v3 schemas for Kubernetes, or when the user mentions CRD design, XRD design, API schema design, or asks how to structure fields in a Kubernetes API.
+description: Design and review Modelplane's Kubernetes Resource Model (KRM) APIs - the XRDs under apis/. Use when designing, reviewing, or changing an XRD schema, or when asked how to structure fields in a Kubernetes API.
 ---
 
 # KRM API Design
@@ -8,9 +8,10 @@ description: Design Kubernetes Resource Model (KRM) APIs - CRDs and XRDs. Use wh
 Read `before-writing-code` first for how to approach a change at all. This skill
 covers the schema.
 
-Help users design Kubernetes Resource Model APIs that are future-proof, clear to
-consume, and follow established conventions. This applies to CRDs and Crossplane
-XRDs equally -- an XRD schema is a thin wrapper on a CRD schema.
+Modelplane's APIs are Crossplane XRDs under `apis/`, written as YAML OpenAPI v3
+schemas. An XRD schema is a thin wrapper on a CRD schema. The [Kubernetes API
+conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+apply to both. Cite them rather than stating a preference.
 
 The goal is a great user experience for API consumers. Think about what it's like
 to write YAML against this API, read it back six months later, and evolve it
@@ -39,20 +40,15 @@ A thing of `kind: Foo` is a **custom resource**. A **CRD** is the *definition*
 that allows it to exist. They're different objects and conflating them in code,
 docs or review comments confuses readers who are still learning the model.
 
-## What Counts as a Breaking Change
+## Breaking Changes
 
-Adding an optional field is not breaking. Changing a field's type or its JSON
-casing is. Say so explicitly when a change breaks something, and weigh whether
-you can avoid it: keep the old casing, add an alias, or deprecate rather than
-remove.
+Adding an optional field is not breaking. Changing a field's type, its casing,
+or making it required is. Modelplane is pre-1.0 and nobody needs migrating, so
+a breaking change that makes the API more correct is fine. It doesn't need an
+alias, a deprecation or a migration path.
 
-Being allowed to break an API is not a reason to need to. Below v1.0 a workable
-compromise is to hold compatibility within a patch release, allow deprecations
-on a patch, and accept trivial behaviour changes.
-
-Optional fields are pointers, marked `+optional`, with `,omitempty` on the JSON
-tag. Required fields are none of those. The Kubernetes API conventions are the
-source to cite: see `go-code-factoring/references/sources.md`.
+Still, design each field so it never needs breaking, using the rules below.
+Freedom to break the API today doesn't make a break free later.
 
 ## The Core Rules
 
@@ -108,31 +104,30 @@ saved yourself and your users from a painful migration.
 
 ### Leave Room for Variants
 
-This is the most valuable pattern for future-proofing an API. When there's any
-chance a field or group of fields could have variants, use a **discriminator
-field** paired with **variant subobjects**.
+This is the most valuable pattern for future-proofing an API, and the one
+Modelplane's maintainers raise most. Whenever you add something specific to one
+cloud, engine, backend or vendor, ask whether there will be alternatives. There
+usually will be. Put the specific fields under a **variant subobject** named for
+the variant, and add a required **discriminator field** that says which
+subobject applies:
 
 ```yaml
-# An AcmeDatabase that started PostgreSQL-only but now supports MySQL too.
-apiVersion: platform.org/v1beta1
-kind: AcmeDatabase
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: us-west
 spec:
-  engine: PostgreSQL
-  postgresql:
-    version: "17.1"
-    maxConnections: 100
+  cluster:
+    source: GKE
+    gke:
+      project: my-project
+      region: us-west1
 ```
 
-The discriminator (`engine`) toggles which subobject is active. When MySQL
-support arrives, it's a purely additive change:
-
-```yaml
-spec:
-  engine: MySQL
-  mysql:
-    version: "8.0"
-    innodbBufferPoolSize: "4Gi"
-```
+Adding EKS is then purely additive, as `source: EKS` with an `eks` object.
+Don't infer the variant from which subobject the user happened to set, and don't
+add cloud-specific fields to a shared object. An AWS-only field in a generic
+`pools` block is the defect this pattern prevents.
 
 This pattern appears throughout well-designed Kubernetes APIs:
 
@@ -149,24 +144,23 @@ acceptable when nothing more descriptive fits, but reach for a domain-specific
 name first.
 
 **The discriminator should be a required enum.** The variant subobjects should be
-optional, with CEL validation rules enforcing that the correct one is set:
+optional, with CEL validation rules requiring the matching one, as
+`apis/inferenceclusters/definition.yaml` does:
 
 ```yaml
-properties:
-  engine:
-    type: string
-    enum: [PostgreSQL, MySQL]
-  postgresql:
-    type: object
-    # ... postgresql-specific fields
-  mysql:
-    type: object
-    # ... mysql-specific fields
 x-kubernetes-validations:
-  - rule: "self.engine == 'PostgreSQL' && has(self.postgresql)"
-    message: "postgresql is required when engine is PostgreSQL"
-  - rule: "self.engine == 'MySQL' && has(self.mysql)"
-    message: "mysql is required when engine is MySQL"
+- rule: "self.source != 'GKE' || has(self.gke)"
+  message: spec.cluster.gke is required when spec.cluster.source is GKE.
+- rule: "self.source != 'EKS' || has(self.eks)"
+  message: spec.cluster.eks is required when spec.cluster.source is EKS.
+properties:
+  source:
+    type: string
+    enum: [GKE, EKS]
+  gke:
+    type: object
+  eks:
+    type: object
 ```
 
 Worst case, you never need a second variant and some fields are slightly more
