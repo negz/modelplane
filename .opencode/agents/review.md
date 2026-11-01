@@ -30,9 +30,9 @@ change builds on, and every existing review comment and thread. Work out the
 base with `git merge-base` against the PR's base branch, then read the whole
 diff.
 
-Note what the PR does, why, where it departs from its issue or design, what API
-it changes, and what new patterns or dependencies it introduces. That's the
-summary.
+Work out what the PR does, why, and where it departs from its issue or design.
+The reviewers' findings are only as good as your check of them, and that check
+needs this understanding. Don't write it into the review.
 
 ## 2. Run the reviewers
 
@@ -56,8 +56,9 @@ not work to forward:
   declined.
 - Merge findings that are one issue in several places into one comment that
   says "(here and elsewhere)".
-- Post at most eight inline comments. If more survive, keep the ones that
-  matter most. Posting nothing is a fine result for a good PR.
+- Post at most eight inline comments. A review with two comments is normal,
+  and posting nothing is a fine result for a good PR. If more than eight
+  survive, keep the ones that matter most, and drop nits first.
 
 ## 4. Write the review
 
