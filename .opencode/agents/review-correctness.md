@@ -18,8 +18,11 @@ fixes also exists in the sibling code path or another cloud's function.
 Verify every finding before you report it. You can run anything. Run `nix flake
 check` or a function's tests with `nix run .#test -- <function>`, add a scratch
 test case, or clone an upstream repo such as crossplane/crossplane or
-crossplane/function-sdk-python to read how it really behaves. A finding about
-external behaviour cites the upstream source or docs that show it.
+crossplane/function-sdk-python to read how it really behaves. Docker works, so
+a kind cluster is available when only a real API server can show the bug. You
+can run any tool you need with `nix run`. The nix-tools and nix-flake skills
+cover how. A finding about external behaviour cites the upstream source or docs
+that show it.
 
 The bar is a concrete input or sequence that triggers the bug, in a deployment
 someone would run. Drop hypotheticals, states the schema rules out, and
