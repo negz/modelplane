@@ -76,26 +76,29 @@ opencode run --agent review "Review PR #556 in modelplaneai/modelplane."
 
 Every PR comes from a fork, and the workflow runs on `pull_request_target`
 because only that trigger gives a fork's PR access to secrets. The agent runs
-the PR's code with a full shell and network, and these keep every secret out of
-the agent's container:
+the PR's code with a full shell and network, but never holds a secret:
 
-- The agent runs in an unprivileged container. The container gets neither a
-  GitHub token nor the Anthropic key. A proxy outside it adds the key to the
-  agent's model requests.
-- The proxy forwards only requests to create a message. The key belongs to a
-  workspace used for nothing else.
-- The agent writes its review to files. A second job, with no model in it,
-  validates the files and posts them with a token scoped to PR reviews.
+- The agent runs in a [Firecracker](https://firecracker-microvm.github.io/)
+  microVM on the runner, which GitHub's x86 runners support through KVM. The VM
+  gets neither a GitHub token nor the Anthropic key. A proxy on the runner adds
+  the key to the agent's model requests, and forwards only requests to create a
+  message. The key belongs to a workspace used for nothing else.
+- The VM doesn't share files with the runner. Its job arrives as a tar on a
+  read-only disk, and it writes the review as a tar to another disk.
+- A firewall on the runner allows the VM's connections to the proxy and the
+  internet. It drops connections to the runner itself, its private network and
+  the cloud metadata service.
+- A second job, with no model in it, validates the review and posts it with a
+  token scoped to PR reviews. It reads the tar without extracting it.
 
 The worst a malicious PR can do is spend API budget and post a misleading
 review. A spend limit on the key bounds the first, and a maintainer reads the
 second. That includes a PR steering its own review. The agent's config,
 instructions and skills come from `main`, but the agent runs the PR's code in
-the same container, and that code can rewrite them mid-review.
+the same VM, and that code can rewrite them mid-review.
 
-The container can run `nix flake check` and unit tests, but not kind. Docker
-can't run inside an unprivileged container. Reviewers rarely use kind on someone
-else's PR, and the label-gated E2E workflow already covers what it would test.
+The VM runs a full Linux kernel, so the agent can run anything our local agents
+can, including `nix flake check` and a kind cluster.
 
 ## Alternatives considered
 
@@ -105,13 +108,13 @@ setup also exchanges tokens through opencode's own GitHub App. Running `opencode
 run` directly costs a short script and keeps posting outside the agent's reach.
 
 **A read-only agent with no sandbox.** Denying the agent a shell would make the
-container unnecessary, but it would review worse than our local agents. Those
+VM unnecessary, but it would review worse than our local agents. Those
 run tests and read upstream source to verify findings, and unverified findings
 are the main source of noise.
 
 **An agent that checks non-member PRs are safe before review.** It has to read
 the PR to judge it, so a PR can prompt-inject it into approving. With no secrets
-in the container, non-member code doesn't need one, and `/review` limits what we
+in the VM, non-member code doesn't need one, and `/review` limits what we
 spend on it.
 
 **Copilot.** It's free and already set up, but there's no way to give it our

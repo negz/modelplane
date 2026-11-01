@@ -1,0 +1,220 @@
+# Copyright 2026 The Modelplane Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Firecracker microVM the review workflow runs the review agent in. It's a
+# flake of its own so the project's flake doesn't depend on microvm.nix.
+#
+# The VM shares nothing with the runner. Its job arrives as a tar on a
+# read-only disk: the PR's checkout, the PR's context and the agent's prompt.
+# It writes the review and the agent's transcript as a tar to a second disk,
+# which the runner reads without mounting. Its only network is a tap device the
+# runner firewalls, which reaches the internet and the model proxy at
+# 192.168.100.1.
+{
+  description = "The microVM the review agent runs in";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    # opencode comes from unstable, since 26.05 ships an older major version.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/1c89083e451e891152365b799595cf7790a43325";
+    microvm = {
+      url = "github:microvm-nix/microvm.nix/b7bd556974fa8a171b5b639200e81d52244dfde4";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      nixpkgs-unstable,
+      microvm,
+      ...
+    }:
+    {
+      nixosConfigurations.agent = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          microvm.nixosModules.microvm
+          (
+            { pkgs, lib, ... }:
+            let
+              unstable = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+
+              # opencode 2 has no language server support of its own. This
+              # plugin adds it, so the agent sees Vale's diagnostics on every
+              # review file it writes.
+              lspPlugin = pkgs.fetchFromGitHub {
+                owner = "christensenjairus";
+                repo = "opencode-v2-lsp-support";
+                rev = "4a17bc8379e572ab104ec26b55f92ee9b51dce37";
+                hash = "sha256-vSlq1GVtqEdqYBVZU3+UyCH5Ke4nQwY1Y9VWcoUWiu8=";
+              };
+
+              opencodeConfig = builtins.toJSON {
+                model = "anthropic/claude-opus-5-5";
+                autoupdate = false;
+                provider.anthropic.options = {
+                  baseURL = "http://192.168.100.1:8787/v1";
+                  # The proxy replaces this with the real key.
+                  apiKey = "unused";
+                };
+                plugins = [ "${lspPlugin}" ];
+                lsp.vale = {
+                  command = [ "vale-ls" ];
+                  extensions = [ ".md" ];
+                  initialization = {
+                    configPath = "/work/pr/.opencode/vale/.vale.ini";
+                    installVale = false;
+                    syncOnStartup = false;
+                  };
+                };
+              };
+            in
+            {
+              system.stateVersion = "26.05";
+
+              microvm = {
+                hypervisor = "firecracker";
+                # Firecracker needs one or an even number of vCPUs with SMT.
+                vcpu = 4;
+                mem = 12288;
+
+                interfaces = [
+                  {
+                    type = "tap";
+                    id = "vm0";
+                    mac = "02:00:00:00:00:01";
+                  }
+                ];
+
+                # Firecracker attaches the store disk first, then these in
+                # order, so they're vdb through vdf. The runner creates them
+                # in the working directory it starts the VM from.
+                writableStoreOverlay = "/nix/.rw-store";
+                volumes = [
+                  {
+                    image = "store.img";
+                    mountPoint = "/nix/.rw-store";
+                    size = 40960;
+                  }
+                  {
+                    image = "docker.img";
+                    mountPoint = "/var/lib/docker";
+                    size = 20480;
+                  }
+                  {
+                    image = "work.img";
+                    mountPoint = "/work";
+                    size = 20480;
+                  }
+                  {
+                    image = "in.tar";
+                    mountPoint = null;
+                    autoCreate = false;
+                    readOnly = true;
+                  }
+                  {
+                    image = "out.tar";
+                    mountPoint = null;
+                    autoCreate = false;
+                  }
+                ];
+              };
+
+              networking = {
+                hostName = "agent";
+                useNetworkd = true;
+                useDHCP = false;
+                enableIPv6 = false;
+              };
+              systemd.network.networks."10-vm0" = {
+                matchConfig.MACAddress = "02:00:00:00:00:01";
+                address = [ "192.168.100.2/30" ];
+                routes = [ { Gateway = "192.168.100.1"; } ];
+                dns = [
+                  "1.1.1.1"
+                  "8.8.8.8"
+                ];
+              };
+
+              nix.settings.experimental-features = [
+                "nix-command"
+                "flakes"
+              ];
+              virtualisation.docker.enable = true;
+
+              users.users.root.password = "";
+              services.getty.autologinUser = "root";
+
+              # Unpack the job, run the agent, write its output back as a tar,
+              # then reboot. Firecracker has no power-off device, so a halted
+              # guest leaves it running. It exits on a guest reboot.
+              systemd.services.review = {
+                wantedBy = [ "multi-user.target" ];
+                after = [
+                  "network-online.target"
+                  "docker.service"
+                ];
+                wants = [ "network-online.target" ];
+                path = [
+                  unstable.opencode
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.curl
+                  pkgs.docker
+                  pkgs.findutils
+                  pkgs.git
+                  pkgs.gnugrep
+                  pkgs.gnutar
+                  pkgs.jq
+                  pkgs.kind
+                  pkgs.kubectl
+                  pkgs.nix
+                  pkgs.procps
+                  pkgs.ripgrep
+                  pkgs.vale
+                  pkgs.vale-ls
+                ];
+                environment = {
+                  HOME = "/root";
+                  TMPDIR = "/work/tmp";
+                  OPENCODE_CONFIG_CONTENT = opencodeConfig;
+                };
+                serviceConfig = {
+                  Type = "oneshot";
+                  StandardOutput = "journal+console";
+                  StandardError = "journal+console";
+                };
+                script = ''
+                  set +e
+                  mkdir -p /work/tmp /work/out
+                  tar -xf /dev/vde -C /work
+                  cd /work/pr
+                  git config --global --add safe.directory /work/pr
+                  mkdir -p _output/review
+                  vale sync --config .opencode/vale/.vale.ini
+                  opencode run --auto --format json --agent review "$(cat /work/prompt)" > /work/out/transcript.jsonl
+                  echo $? > /work/out/exit
+                  cp -r _output/review /work/out/review
+                  tar -cf /dev/vdf -C /work/out .
+                  sync
+                  ${lib.getExe' pkgs.systemd "systemctl"} reboot
+                '';
+              };
+            }
+          )
+        ];
+      };
+    };
+}

@@ -15,14 +15,16 @@
 
 """Post a review the review agent wrote as a GitHub pull request review.
 
-The agent writes the review as a directory of markdown files: summary.md, and
-one file per inline comment under comments/, each starting with front matter
-that gives its path and line. It runs the PR's code, so its output is
-untrusted. This checks the review's shape and size, and always posts a COMMENT
-review: the reviewer never approves or requests changes. GitHub rejects a whole review if one comment
-targets a line outside the diff, so comments on such lines move into the
-summary instead. The summary ends with a marker recording the commit the
-review covered, which the next review reads to review only what's new.
+The agent runs in a VM that writes its output as a tar: the review under
+review/, as summary.md and one file per inline comment under review/comments/,
+each starting with front matter that gives its path and line. The agent runs
+the PR's code, so its output is untrusted. This reads the tar's members in
+memory, without extracting it, checks the review's shape and size, and always
+posts a COMMENT review: the reviewer never approves or requests changes. GitHub
+rejects a whole review if one comment targets a line outside the diff, so
+comments on such lines move into the summary instead. The summary ends with a
+marker recording the commit the review covered, which the next review reads to
+review only what's new.
 """
 
 import argparse
@@ -31,6 +33,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tarfile
 import typing
 
 MAX_COMMENTS = 8
@@ -81,20 +84,28 @@ def parse_comment(raw: str) -> Comment:
     return Comment(path, int(line), body)
 
 
-def parse(review: pathlib.Path) -> Review:
-    """The review in a directory, or ValueError if it isn't the shape the agent
-    was told to write."""
-    if any(p.is_symlink() for p in review.rglob("*")):
-        raise ValueError("review contains a symlink")
-    summary = (review / "summary.md").read_text() if (review / "summary.md").is_file() else ""
+def parse(output: tarfile.TarFile) -> Review:
+    """The review in the VM's output, or ValueError if it isn't the shape the
+    agent was told to write."""
+    files: dict[str, str] = {}
+    for member in output.getmembers():
+        name = member.name.removeprefix("./")
+        if not member.isfile() or not name.startswith("review/"):
+            continue
+        if member.size > MAX_SUMMARY:
+            raise ValueError(f"{name} is larger than {MAX_SUMMARY} bytes")
+        f = output.extractfile(member)
+        if f is not None:
+            files[name.removeprefix("review/")] = f.read().decode()
+    summary = files.get("summary.md", "")
     if not summary.strip():
         raise ValueError("summary.md is missing or empty")
     if len(summary) > MAX_SUMMARY:
         raise ValueError(f"summary is longer than {MAX_SUMMARY} characters")
-    comments = sorted((review / "comments").glob("*.md"))
+    comments = sorted(n for n in files if n.startswith("comments/") and n.endswith(".md"))
     if len(comments) > MAX_COMMENTS:
         raise ValueError(f"review has {len(comments)} comments, more than {MAX_COMMENTS}")
-    return Review(MARKER.sub("", summary), [parse_comment(c.read_text()) for c in comments])
+    return Review(MARKER.sub("", summary), [parse_comment(files[c]) for c in comments])
 
 
 def commentable(patch: str) -> set[int]:
@@ -139,12 +150,13 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", required=True)
     parser.add_argument("--sha", required=True)
-    parser.add_argument("review", type=pathlib.Path)
+    parser.add_argument("output", type=pathlib.Path, help="the tar the review VM wrote")
     args = parser.parse_args()
 
     try:
-        review = parse(args.review)
-    except ValueError as e:
+        with tarfile.open(args.output) as output:
+            review = parse(output)
+    except (ValueError, tarfile.TarError, UnicodeDecodeError) as e:
         sys.stderr.write(f"invalid review: {e}\n")
         return 1
 
