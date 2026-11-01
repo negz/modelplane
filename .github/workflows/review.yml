@@ -55,6 +55,7 @@ jobs:
       member: ${{ steps.member.outputs.member }}
     steps:
       - name: Mint a token to read org membership
+        if: github.event.repository.owner.type == 'Organization'
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
@@ -68,8 +69,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
         run: |
-          if gh api --silent "orgs/$GITHUB_REPOSITORY_OWNER/members/$AUTHOR"; then
+          # A repo a person owns, such as a maintainer's fork used to try the
+          # reviewer, has no members. There the owner counts as one.
+          if [ "$OWNER_TYPE" = User ]; then
+            if [ "$AUTHOR" = "$GITHUB_REPOSITORY_OWNER" ]; then member=true; else member=false; fi
+            echo "member=$member" >> "$GITHUB_OUTPUT"
+          elif gh api --silent "orgs/$GITHUB_REPOSITORY_OWNER/members/$AUTHOR"; then
             echo "member=true" >> "$GITHUB_OUTPUT"
           else
             echo "member=false" >> "$GITHUB_OUTPUT"
