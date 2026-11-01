@@ -153,7 +153,13 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          test -w /dev/kvm
+          # GitHub's x86 runners expose KVM in practice, but don't guarantee
+          # it, and a runner without it can't start the VM.
+          if ! test -w /dev/kvm; then
+            ls -l /dev/kvm || true
+            echo "::error::This runner has no usable /dev/kvm, so it can't run the review VM. Re-run the job to get another runner."
+            exit 1
+          fi
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
