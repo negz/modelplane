@@ -154,18 +154,14 @@ def added(patch: str) -> set[int]:
     return lines
 
 
-def changed(diff: str) -> dict[str, set[int]]:
-    """The lines of each file's new version that a zero-context git diff
-    changes, by file."""
-    out: dict[str, set[int]] = {}
-    path = ""
+def changed(diff: str) -> set[int]:
+    """The lines of a file's new version that a zero-context git diff of that
+    one file changes."""
+    out: set[int] = set()
     for text in diff.splitlines():
-        if text.startswith("+++ "):
-            path = text.removeprefix("+++ ").removeprefix("b/")
-            continue
-        if (match := HUNK.match(text)) and path != "/dev/null":
+        if match := HUNK.match(text):
             start, count = int(match["start"]), int(match["count"] or 1)
-            out.setdefault(path, set()).update(range(start, start + count))
+            out.update(range(start, start + count))
     return out
 
 
@@ -219,14 +215,27 @@ def main() -> int:
 
     scope = None
     if args.since:
-        since = subprocess.run(
-            ["git", f"--git-dir={args.git_dir}", "diff", "-U0", "--no-color", "--no-ext-diff", args.since, args.sha],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        new = changed(since)
-        scope = {f["filename"]: added(f.get("patch", "")) & new.get(f["filename"], set()) for f in compare["files"]}
+        # One diff per file, so git never has to quote a path in a header.
+        scope = {}
+        for f in compare["files"]:
+            since = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={args.git_dir}",
+                    "diff",
+                    "-U0",
+                    "--no-color",
+                    "--no-ext-diff",
+                    args.since,
+                    args.sha,
+                    "--",
+                    f["filename"],
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            scope[f["filename"]] = added(f.get("patch", "")) & changed(since)
 
     body, inline = place(review, diff, args.sha, scope)
     payload = {
