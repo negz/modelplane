@@ -26,7 +26,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    # opencode comes from unstable, since 26.05 ships an older major version.
+    # opencode, Vale and vale-ls come from unstable. 26.05 ships an older major
+    # version of opencode, and a Vale that ignores the relative StylesPath in
+    # the repo's Vale config.
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/1c89083e451e891152365b799595cf7790a43325";
     microvm = {
       url = "github:microvm-nix/microvm.nix/b7bd556974fa8a171b5b639200e81d52244dfde4";
@@ -183,8 +185,8 @@
                   pkgs.nix
                   pkgs.procps
                   pkgs.ripgrep
-                  pkgs.vale
-                  pkgs.vale-ls
+                  unstable.vale
+                  unstable.vale-ls
                 ];
                 environment = {
                   HOME = "/root";
