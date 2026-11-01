@@ -76,9 +76,12 @@ jobs:
           probe imds http://169.254.169.254/
           probe azure-wireserver http://168.63.129.16/
           probe internet https://cache.nixos.org/nix-cache-info
+          ip -4 addr; ip route; resolvectl status 2>&1 | head -20
+          # Without the internet the rest only waits on timeouts.
+          curl -sS -o /dev/null --max-time 10 https://cache.nixos.org/nix-cache-info || exit 1
           time cp -r /work/mp /root/mp && cd /root/mp
           git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm smoke
-          time nix flake check --keep-going 2>&1 | tail -5; echo "flake-check-exit=${PIPESTATUS[0]}"
+          time nix flake check --keep-going --option connect-timeout 10 2>&1 | tail -5; echo "flake-check-exit=${PIPESTATUS[0]}"
           time kind create cluster --wait 120s; echo "kind-exit=$?"
           kubectl get nodes
           df -h /nix/store /var/lib/docker
@@ -92,8 +95,7 @@ jobs:
       - name: Run the VM
         working-directory: /mnt/vm
         run: |
-          time timeout 80m "$GITHUB_WORKSPACE/runner/bin/microvm-run" < /dev/null > console.log 2>&1 || echo "vm-exit=$?"
-          tail -30 console.log
+          time timeout 30m "$GITHUB_WORKSPACE/runner/bin/microvm-run" < /dev/null 2>&1 | tee console.log || echo "vm-exit=$?"
 
       # The output disk is a tar the VM wrote. Read it as a stream rather than
       # mounting or extracting it, so nothing in it touches the runner's
