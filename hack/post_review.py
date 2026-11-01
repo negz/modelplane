@@ -25,6 +25,11 @@ rejects a whole review if one comment targets a line outside the diff, so
 comments on such lines move into the summary instead. The summary ends with a
 marker recording the commit the review covered, which the next review reads to
 review only what's new.
+
+A re-review passes --since, the commit the last review covered. Its inline
+comments may then only target lines the PR adds that also changed since that
+commit, so a re-review can't reopen the parts of the PR it already reviewed.
+Comments on other lines are dropped rather than moved into the summary.
 """
 
 import argparse
@@ -48,7 +53,7 @@ MAX_PROSE = 600
 MARKER = re.compile(r"<!--\s*modelplane-review\b.*?-->", re.DOTALL)
 FRONT_MATTER = re.compile(r"\A---\n(?P<meta>.*?)\n---\n(?P<body>.*)\Z", re.DOTALL)
 CODE_BLOCK = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,\d+)? @@")
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
 
 
 class Comment(typing.NamedTuple):
@@ -125,14 +130,51 @@ def commentable(patch: str) -> set[int]:
     return lines
 
 
-def place(review: Review, diff: dict[str, set[int]], sha: str) -> tuple[str, list[Comment]]:
-    """The review body and the comments GitHub accepts inline. A comment on a
-    line outside the diff moves into the body."""
-    inline = [c for c in review.comments if c.line in diff.get(c.path, set())]
+def added(patch: str) -> set[int]:
+    """The lines of a file's new version that its patch adds."""
+    lines: set[int] = set()
+    line = 0
+    for text in patch.splitlines():
+        if match := HUNK.match(text):
+            line = int(match["start"])
+            continue
+        if text.startswith("-") or text.startswith("\\"):
+            continue
+        if text.startswith("+"):
+            lines.add(line)
+        line += 1
+    return lines
+
+
+def changed(diff: str) -> dict[str, set[int]]:
+    """The lines of each file's new version that a zero-context git diff
+    changes, by file."""
+    out: dict[str, set[int]] = {}
+    path = ""
+    for text in diff.splitlines():
+        if text.startswith("+++ "):
+            path = text.removeprefix("+++ ").removeprefix("b/")
+            continue
+        if (match := HUNK.match(text)) and path != "/dev/null":
+            start, count = int(match["start"]), int(match["count"] or 1)
+            out.setdefault(path, set()).update(range(start, start + count))
+    return out
+
+
+def place(
+    review: Review, diff: dict[str, set[int]], sha: str, scope: dict[str, set[int]] | None = None
+) -> tuple[str, list[Comment]]:
+    """The review body and the comments GitHub accepts inline. Without a scope,
+    a comment on a line outside the diff moves into the body. With one, only
+    comments on lines in the scope are posted, and the rest are dropped."""
+    allowed = diff if scope is None else scope
+    inline = [c for c in review.comments if c.line in allowed.get(c.path, set())]
     outside = [c for c in review.comments if c not in inline]
     body = review.summary.strip()
-    if outside:
+    if outside and scope is None:
         body += "\n\n" + "\n\n".join(f"`{c.path}` line {c.line}: {c.body}" for c in outside)
+    for c in outside if scope is not None else []:
+        sys.stderr.write(f"dropping a comment on {c.path}:{c.line}, which hasn't changed since the last review\n")
     body += f"\n\n<!-- modelplane-review sha={sha} -->"
     return body, inline
 
@@ -151,6 +193,8 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--since", help="the commit the last review covered, for a re-review")
+    parser.add_argument("--git-dir", type=pathlib.Path, help="a repository holding --sha and --since")
     parser.add_argument("output", type=pathlib.Path, help="the tar the review VM wrote")
     args = parser.parse_args()
 
@@ -165,7 +209,18 @@ def main() -> int:
     compare = json.loads(gh("api", f"repos/{args.repo}/compare/{base}...{args.sha}"))
     diff = {f["filename"]: commentable(f.get("patch", "")) for f in compare["files"]}
 
-    body, inline = place(review, diff, args.sha)
+    scope = None
+    if args.since:
+        since = subprocess.run(
+            ["git", f"--git-dir={args.git_dir}", "diff", "-U0", "--no-color", "--no-ext-diff", args.since, args.sha],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        new = changed(since)
+        scope = {f["filename"]: added(f.get("patch", "")) & new.get(f["filename"], set()) for f in compare["files"]}
+
+    body, inline = place(review, diff, args.sha, scope)
     payload = {
         "commit_id": args.sha,
         "event": "COMMENT",

@@ -40,8 +40,9 @@ confident claims about external tools that turn out to be false.
 An agent reviews a PR when an org member opens it or marks it ready for review.
 To review anyone else's PR, or to re-review after new pushes, a maintainer
 comments `/review`. A re-review covers only what `git range-diff` shows changed
-since the last review. It also reads the existing threads, so it doesn't repeat
-them.
+since the last review, and reads the existing threads so it doesn't repeat
+them. It can only comment inline on lines that changed since the last review,
+so it can't reopen parts of the PR it already reviewed.
 
 Each review posts as a GitHub App, as one comment review. It never approves or
 requests changes. The review opens with a sentence on whether the PR looks
