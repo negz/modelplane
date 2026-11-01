@@ -41,9 +41,12 @@ jobs:
   # Review automatically only PRs that org members open. The event's
   # author_association reports a private member as a CONTRIBUTOR, so ask the
   # org instead.
+  #
+  # Every job needs the reviewer's GitHub App, so a repo without one, such as
+  # a contributor's fork, never runs them.
   author:
     if: >-
-      github.repository == 'modelplaneai/modelplane' &&
+      vars.REVIEW_APP_ID != '' &&
       github.event_name == 'pull_request_target' &&
       !github.event.pull_request.draft
     runs-on: ubuntu-24.04
@@ -78,7 +81,7 @@ jobs:
     needs: author
     if: >-
       !cancelled() &&
-      github.repository == 'modelplaneai/modelplane' && (
+      vars.REVIEW_APP_ID != '' && (
         github.event_name == 'issue_comment' ||
         needs.author.outputs.member == 'true'
       )
