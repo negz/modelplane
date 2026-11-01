@@ -39,8 +39,9 @@ confident claims about external tools that turn out to be false.
 
 An agent reviews a PR when an org member opens it or marks it ready for review.
 To review anyone else's PR, or to re-review after new pushes, a maintainer
-comments `/review`. A re-review covers only the commits since the last one, and
-reads the existing threads so it doesn't repeat them.
+comments `/review`. A re-review covers only what `git range-diff` shows changed
+since the last review. It also reads the existing threads, so it doesn't repeat
+them.
 
 Each review posts as a GitHub App, as one comment review. It never approves or
 requests changes. The review opens with a sentence on whether the PR looks
@@ -56,16 +57,18 @@ The review agent runs three reviewers in parallel, each with fresh context:
 - **Correctness** looks for bugs, and verifies each by tracing code, running
   tests or reading upstream source.
 
-The review agent then checks each finding against the bar the `reviewing-pull-
-requests` skill sets. A finding has to be true, introduced by this PR, triggered
-by a real input, and something the author would want to change. The agent merges
-duplicates and posts what's left. The same skill sets the phrasing rules, and
-lists real findings from this repo for calibration.
+The review agent then checks each finding against the bar the
+`reviewing-pull-requests` skill sets. A finding has to be true, introduced by
+this PR, triggered by a real input, and something the author would want to
+change. The agent merges duplicates and posts what's left. The same skill sets
+the phrasing rules, and lists real findings from this repo for calibration.
 
 The agents live in `.opencode/agents/`, and the skills they load live in
-`.agents/skills/`. Any maintainer can run the same review locally:
+`.agents/skills/`. Any maintainer can run the same review locally, from a
+checkout of the PR's head commit:
 
 ```bash
+gh pr checkout 556
 opencode run --agent review "Review PR #556 in modelplaneai/modelplane."
 ```
 
@@ -79,15 +82,16 @@ the agent's container:
 - The agent runs in an unprivileged container. The container gets neither a
   GitHub token nor the Anthropic key. A proxy outside it adds the key to the
   agent's model requests.
-- The agent writes its review to a file. A second job, with no model in it,
-  validates the file and posts it with a token scoped to PR reviews.
-- The agents and skills come from `main`, so a PR can't change how it's
-  reviewed.
-- A `/review` pins the head commit when the comment arrives.
+- The proxy forwards only requests to create a message. The key belongs to a
+  workspace used for nothing else.
+- The agent writes its review to files. A second job, with no model in it,
+  validates the files and posts them with a token scoped to PR reviews.
 
 The worst a malicious PR can do is spend API budget and post a misleading
 review. A spend limit on the key bounds the first, and a maintainer reads the
-second.
+second. That includes a PR steering its own review. The agent's config,
+instructions and skills come from `main`, but the agent runs the PR's code in
+the same container, and that code can rewrite them mid-review.
 
 The container can run `nix flake check` and unit tests, but not kind. Docker
 can't run inside an unprivileged container. Reviewers rarely use kind on someone
