@@ -97,8 +97,8 @@ jobs:
     outputs:
       last: ${{ steps.context.outputs.last }}
     permissions:
-      # These are for the runner to fetch the PR's context. The VM never sees
-      # the token.
+      # The runner uses these to fetch the PR's context, and the agent to read
+      # issues and other PRs with gh. All are read-only.
       contents: read
       pull-requests: read
       issues: read
@@ -229,17 +229,24 @@ jobs:
       - name: Build the VM
         run: nix build ./reviewer/hack/review-vm#nixosConfigurations.agent.config.microvm.declaredRunner -o vm
 
+      # The VM gets the job's token, so the agent can read issues and other
+      # PRs with gh. The job grants it read access to contents, pull requests
+      # and issues only, all public in this repo, and it expires with the job.
       - name: Prepare the VM's disks
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /work/context. Write the review to the directory _output/review."
           if [ -n "$LAST" ]; then
             prompt="$prompt You last reviewed this PR at commit $LAST."
           fi
           printf '%s' "$prompt" > prompt
+          printf '%s' "$GH_TOKEN" > gh-token
 
           sudo mkdir -p /mnt/vm
           sudo chown "$USER" /mnt/vm
-          tar -cf /mnt/vm/in.tar pr context prompt
+          tar -cf /mnt/vm/in.tar pr context prompt gh-token
+          rm gh-token
           truncate -s 1G /mnt/vm/out.tar
 
       - name: Review

@@ -71,10 +71,10 @@ the phrasing rules, and lists real findings from this repo for calibration.
 
 The design reviewer is the one most likely to overreach, since judging a design
 needs context a reviewer can't see. Its `reviewing-designs` skill holds the
-questions maintainers ask of a proposal, such as what the user gets, and
-whether the next engine would need a new Modelplane release. It asks them and leaves the answers to maintainers. When it thinks the design
-needs settling, the review holds back findings on code that might change with
-it.
+questions maintainers ask of a proposal, such as what the user gets, and whether
+the next engine would need a new Modelplane release. It asks them and leaves the
+answers to maintainers. When it thinks the design needs settling, the review
+holds back findings on code that might change with it.
 
 The agents live in `.opencode/agents/`, and the skills they load live in
 `.agents/skills/`. Any maintainer can run the same review locally, from a
@@ -89,13 +89,17 @@ opencode run --agent review "Review PR #556 in modelplaneai/modelplane."
 
 Every PR comes from a fork, and the workflow runs on `pull_request_target`
 because only that trigger gives a fork's PR access to secrets. The agent runs
-the PR's code with a full shell and network, but never holds a secret:
+the PR's code with a full shell and network, so it never holds a credential
+that could do harm:
 
 - The agent runs in a [Firecracker](https://firecracker-microvm.github.io/)
   microVM on the runner, which GitHub's x86 runners support through KVM. The VM
-  gets neither a GitHub token nor the Anthropic key. A proxy on the runner adds
+  doesn't get the Anthropic key. A proxy on the runner adds
   the key to the agent's model requests, and forwards only requests to create a
   message. The key belongs to a workspace used for nothing else.
+- The VM gets the job's GitHub token, so the agent can read linked issues and
+  related PRs with `gh`. The token can't write, it reads only public data, and
+  it expires when the job ends.
 - The VM doesn't share files with the runner. Its job arrives as a tar on a
   read-only disk, and it writes the review as a tar to another disk.
 - A firewall on the runner allows the VM's connections to the proxy and the

@@ -193,6 +193,7 @@
                   pkgs.curl
                   pkgs.docker
                   pkgs.findutils
+                  pkgs.gh
                   pkgs.git
                   pkgs.gnugrep
                   pkgs.gnutar
@@ -219,6 +220,11 @@
                   set +e
                   mkdir -p /work/tmp /work/out
                   tar -xf /dev/vde -C /work
+                  # A token that can only read this repo's contents, PRs and
+                  # issues, all of which are public, so the agent can use gh.
+                  GH_TOKEN=$(cat /work/gh-token)
+                  export GH_TOKEN
+                  rm /work/gh-token
                   cd /work/pr
                   git config --global --add safe.directory /work/pr
                   mkdir -p _output/review
