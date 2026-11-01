@@ -96,6 +96,9 @@ Load the writing-style skill before you write, and follow it. Don't stop to ask
 questions, since nobody is there to answer. You post as the project's review
 bot. The skill's rules about writing under a person's name don't apply. Write
 the summary and each comment as the reviewing-pull-requests skill describes.
+Its section on phrasing matters most: ask, explain and suggest for anything
+about correctness or design, even when the reviewers stated it as fact, and be
+direct only about style.
 Attach each comment to a line the PR changed where you can. A finding with no
 line, such as one about the PR description or a commit message, goes in the
 summary.
@@ -112,7 +115,9 @@ path: functions/compose-model-cache/function/fn.py
 line: 42
 ---
 
-Won't returning here delete the cache's PVC?
+Won't returning here delete the cache's PVC? It looks like Crossplane garbage
+collects composed resources that drop out of the desired state. Could the gate
+keep composing the PVC once it exists?
 ```
 
 Fix every error the linter reports on these files. When you've written them
