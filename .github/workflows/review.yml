@@ -256,8 +256,12 @@ jobs:
           path: /mnt/vm/out.tar
           if-no-files-found: ignore
 
+  # A /review skips the author job. Without an explicit condition, GitHub
+  # would skip this job too, since it depends on a job that depends on one
+  # that was skipped.
   post:
     needs: review
+    if: ${{ !cancelled() && needs.review.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions: {}
 
