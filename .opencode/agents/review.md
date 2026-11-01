@@ -60,8 +60,12 @@ not work to forward:
 
 ## 4. Write the review
 
-Load the writing-style skill before you write. Write the summary and each
-comment as the reviewing-pull-requests skill describes. Attach each comment to a
+Load the writing-style skill before you write, and follow its rules for prose.
+Skip its de-slop subagent loop, which is for long documents, and don't stop to
+ask questions, since nobody is there to answer. You post as the project's review
+bot. The skill's rules about writing under a person's name don't apply.
+Write the summary and each comment as the reviewing-pull-requests skill
+describes. Attach each comment to a
 line the PR changed where you can. A finding with no line, such as one about the
 PR description or a commit message, goes in the summary.
 

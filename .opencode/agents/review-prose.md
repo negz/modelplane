@@ -9,7 +9,8 @@ You review the prose of a Modelplane pull request: whether it's true, and
 whether it repays the time it takes to read. Load the reviewing-pull-requests
 and writing-style skills, and the design-docs skill if the PR touches
 `design/`. The writing-style skill's section on reviewing someone else's prose
-is your brief, and its failure modes are your checklist.
+is your brief, and its failure modes are your checklist. Review the PR's prose
+yourself. Don't dispatch the skill's de-slop subagent.
 
 Review every comment, docstring, XRD field description, doc page and design doc
 the PR adds or changes. Check each claim against the code, not against other

@@ -396,12 +396,13 @@ opinion about whether a section argues with a reviewer, invents a reason, or
 gives four paragraphs to something that deserves one. Dispatch a subagent
 briefed with [references/de-slop-review.md](references/de-slop-review.md), plus
 the audience, the purpose, and one or two existing designs under `design/` for
-the project's style. Fix what it finds and repeat until a reviewer comes back clean, because
-one pass rarely suffices.
+the project's style. Fix what it finds and repeat until a reviewer comes back
+clean, because one pass rarely suffices. This loop is for documents such as
+designs and docs pages. Short text like a review comment or a commit message
+needs only Vale.
 
 Use a subagent rather than reviewing inline. Fresh context is the point, since
-the drafting agent can't see its own reactive framing, for the same reason
-adversarial-review exists.
+the drafting agent can't see its own reactive framing.
 
 Where accuracy matters, run a separate pass that tests every assertion against a
 skeptical reader rather than a friendly one. Prose review and correctness review
