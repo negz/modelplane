@@ -63,6 +63,23 @@
                 hash = "sha256-vSlq1GVtqEdqYBVZU3+UyCH5Ke4nQwY1Y9VWcoUWiu8=";
               };
 
+              # Turns the agent's event stream into a line per tool call or
+              # message, for the console.
+              progress = pkgs.writeText "progress.jq" ''
+                def short: gsub("\\s+"; " ") | .[0:200];
+                if .type == "tool_use" then
+                  .part.tool as $t | .part.state.input as $i
+                  | if $t == "shell" then "$ \($i.command | short)"
+                    elif $t == "subagent" then "subagent \($i.agent) finished: \($i.description)"
+                    elif $t == "skill" then "skill \($i.id)"
+                    elif ($i.path // $i.filePath) != null then "\($t) \($i.path // $i.filePath)"
+                    else "\($t) \($i | tojson | short)"
+                    end
+                elif .type == "text" then "> \(.part.text | short)"
+                else empty
+                end
+              '';
+
               opencodeConfig = builtins.toJSON {
                 model = "anthropic/claude-opus-5-5";
                 autoupdate = false;
@@ -206,8 +223,12 @@
                   git config --global --add safe.directory /work/pr
                   mkdir -p _output/review
                   vale sync --config .opencode/vale/.vale.ini
-                  opencode run --auto --format json --agent review "$(cat /work/prompt)" > /work/out/transcript.jsonl
-                  echo $? > /work/out/exit
+                  # The transcript keeps every event. The console, which the
+                  # workflow's log shows, gets a line per tool call or message.
+                  opencode run --auto --format json --agent review "$(cat /work/prompt)" \
+                    | tee /work/out/transcript.jsonl \
+                    | jq -r --unbuffered -f ${progress}
+                  echo "''${PIPESTATUS[0]}" > /work/out/exit
                   cp -r _output/review /work/out/review
                   tar -cf /dev/vdf -C /work/out .
                   sync
