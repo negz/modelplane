@@ -5,8 +5,8 @@ document under review, and the answers to the three questions below. Read it
 yourself only to check what you're asking the reviewer to do.
 
 Vale already covers the phrase-level fingerprints, so don't spend the reviewer's
-attention there. Run Vale as SKILL.md describes first and fix what it reports. This review
-covers the defects Vale can't detect, because they depend on what the document
+attention there. Run Vale as SKILL.md describes first and fix what it reports.
+This review covers the defects Vale can't detect, because they depend on what the document
 means rather than which words it uses.
 
 ## Briefing the Reviewer
