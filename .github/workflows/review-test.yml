@@ -1,0 +1,179 @@
+name: Review test drive
+
+# Throwaway: runs the review job's steps against a past PR and prints the
+# review rather than posting it.
+on:
+  push:
+    branches: [test-drive]
+
+permissions: {}
+
+env:
+  PR: "556"
+  SHA: a7a514ba312e31f2fb5c22c68c6c38b89ae29a48
+  CADDY_IMAGE: caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
+
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Checkout the reviewer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: reviewer
+          persist-credentials: false
+
+      - name: Checkout the PR
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: modelplaneai/modelplane
+          ref: ${{ env.SHA }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Everything opencode reads as config or instructions comes from main, as
+      # does CONTRIBUTING.md, which the skills defer to. That stops a PR
+      # editing its own review instructions. PR code the agent runs can still
+      # rewrite them mid-review, which the design accepts.
+      - name: Install the reviewer's config from main
+        run: |
+          for f in .opencode .agents .claude opencode.json opencode.jsonc AGENTS.md CLAUDE.md CONTRIBUTING.md; do
+            rm -rf "pr/$f"
+            if [ -e "reviewer/$f" ]; then cp -r "reviewer/$f" "pr/$f"; fi
+          done
+
+      - name: Fetch the PR's context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir context
+          gh pr view "$PR" --repo modelplaneai/modelplane \
+            --json number,title,body,author,baseRefName,headRefOid,commits,closingIssuesReferences,files \
+            > context/pr.json
+          echo '[]' > context/reviews.json
+          echo '[]' > context/review-comments.json
+          echo '[]' > context/issue-comments.json
+
+          # The last commit a bot review covered, from the marker post.py puts
+          # in each review it posts.
+          last=$(jq -rs 'add | map(select(.user.type == "Bot")) | map(.body | capture("<!-- modelplane-review sha=(?<sha>[0-9a-f]{40}) -->").sha) | last // ""' context/reviews.json)
+          echo "LAST=$last" >> "$GITHUB_ENV"
+
+      - name: Allow the runner user to use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -w /dev/kvm
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      # The VM reaches the runner only on the proxy's port, and reaches the
+      # internet through NAT. Private, link-local and Azure platform addresses
+      # stay out of reach, including the runner's own.
+      - name: Create the VM's network
+        run: |
+          sudo ip tuntap add vm0 mode tap user "$USER"
+          sudo ip addr add 192.168.100.1/30 dev vm0
+          sudo ip link set vm0 up
+          sudo sysctl -qw net.ipv4.ip_forward=1
+          uplink=$(ip route show default | awk '{print $5; exit}')
+          sudo iptables -t nat -A POSTROUTING -s 192.168.100.0/30 -o "$uplink" -j MASQUERADE
+          sudo iptables -I FORWARD 1 -i vm0 -o "$uplink" -j ACCEPT
+          sudo iptables -I FORWARD 1 -o vm0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 168.63.129.16/32; do
+            sudo iptables -I FORWARD 1 -i vm0 -d "$net" -j DROP
+          done
+          sudo iptables -I INPUT 1 -i vm0 -j DROP
+          sudo iptables -I INPUT 1 -i vm0 -p tcp --dport 8787 -j ACCEPT
+
+      # The proxy forwards only POST /v1/messages, so the agent can't use the
+      # key for anything else the key's workspace holds, such as message
+      # batches.
+      - name: Start the model proxy
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_ANTHROPIC_API_KEY }}
+        run: |
+          cat > Caddyfile <<'EOF'
+          {
+            admin off
+          }
+          http://192.168.100.1:8787 {
+            bind 192.168.100.1
+            @messages {
+              method POST
+              path /v1/messages
+            }
+            handle @messages {
+              reverse_proxy https://api.anthropic.com {
+                header_up Host api.anthropic.com
+                header_up x-api-key {env.ANTHROPIC_API_KEY}
+                flush_interval -1
+              }
+            }
+            respond 403
+          }
+          EOF
+          docker run -d --name proxy --network host \
+            -e ANTHROPIC_API_KEY \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE"
+
+      # The VM comes from main's flake, never the PR's.
+      - name: Build the VM
+        run: nix build ./reviewer/hack/review-vm#nixosConfigurations.agent.config.microvm.declaredRunner -o vm
+
+      - name: Prepare the VM's disks
+        run: |
+          prompt="Review PR #$PR in modelplaneai/modelplane at commit $SHA. The PR's context is in /work/context. Write the review to the directory _output/review."
+          if [ -n "$LAST" ]; then
+            prompt="$prompt You last reviewed this PR at commit $LAST."
+          fi
+          printf '%s' "$prompt" > prompt
+
+          sudo mkdir -p /mnt/vm
+          sudo chown "$USER" /mnt/vm
+          tar -cf /mnt/vm/in.tar pr context prompt
+          truncate -s 1G /mnt/vm/out.tar
+
+      - name: Review
+        working-directory: /mnt/vm
+        run: timeout 50m "$GITHUB_WORKSPACE/vm/bin/microvm-run" < /dev/null
+
+      # The output disk is a tar the VM wrote. Upload it as it is: nothing
+      # extracts or mounts it on a runner.
+      - name: Upload the VM's output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: review
+          path: /mnt/vm/out.tar
+          if-no-files-found: ignore
+
+      - name: Print the review
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import sys, tarfile
+          sys.path.insert(0, "reviewer/hack")
+          import post_review
+          with tarfile.open("/mnt/vm/out.tar") as t:
+              for m in t.getmembers():
+                  print(m.type, m.size, m.name)
+              print("exit:", t.extractfile("./exit").read().decode() if "./exit" in t.getnames() else None)
+              review = post_review.parse(t)
+          print(review.summary)
+          for c in review.comments:
+              print(f"\n## {c.path}:{c.line} ({len(c.body)} chars)\n{c.body}")
+          EOF
+
+      - name: Print the end of the transcript
+        if: always()
+        run: tar -xOf /mnt/vm/out.tar ./transcript.jsonl | tail -c 3000 || true
