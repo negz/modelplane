@@ -36,12 +36,13 @@ for how to word it.
 
 The failure modes below are also the checklist for reviewing prose in a PR.
 Raise the defects a reader would trip on, such as a claim the code doesn't
-support, invented rationale, or a comment three times longer than it needs to
-be. Quote the text, say what's wrong, and leave the rewrite to the author.
+support or invented rationale. A comment three times longer than it needs to be
+is another. Quote the text, say what's wrong, and leave the rewrite to the
+author.
 
 CI already runs Vale over `docs/`, so don't repeat what it reports there.
 Elsewhere, such as design docs and code comments, raise a pattern of AI-written
-phrasing once, rather than commenting on each instance.
+phrasing in one comment.
 
 ## Before You Draft
 
@@ -56,11 +57,11 @@ Establish three things, and ask rather than guess:
    it? State the premise in the document rather than hedging across several
    scenarios.
 
-Almost every framing correction traces back to a document drafted for nobody in
-particular. Naming the reader up front prevents most of them.
+Almost every framing correction traces back to a document drafted without a
+specific reader in mind. Naming the reader up front prevents most of them.
 
 **Public documents argue technical merit alone.** Where the real motivation is
-commercial, find the honest technical reason or write nothing. Never dress a
+commercial, find the honest technical reason or don't write it. Never dress a
 commercial motive as engineering rationale, and never write a circular one.
 "We're building Dynamo support because we said we'd build Dynamo support" is not
 a background section. If you can't find a real reason, say so and ask.
@@ -94,9 +95,9 @@ Delete first:
   link. Link out instead of paraphrasing.
 - Trailing summaries, recaps, and closing questions. An assessment is a
   statement.
-- Background the argument doesn't rest on. Explain only the property that does
-  the work: that Volcano and Kueue can gang schedule LeaderWorkerSet, without
-  explaining how either works.
+- Background the argument doesn't rest on. Explain only the property the
+  argument needs: that Volcano and Kueue can gang schedule LeaderWorkerSet,
+  without explaining how either works.
 
 Accuracy is never a reason to grow. When correcting a claim, keep the fix inside
 the existing footprint. "Give me a more accurate version of my last paragraph
@@ -142,15 +143,15 @@ objection. Patching won't do. A framing error in one sentence usually means the
 section needs redoing, and patching prose in place is how documents become
 incoherent.
 
-Where a reader might reasonably ask "why not do it the other way", answer that in
-Alternatives Considered. An inline rebuttal is the wrong home for it.
+Where a reader might reasonably ask "why not do it the other way", answer that
+in Alternatives Considered. An inline rebuttal is the wrong home for it.
 
 ### Never Invent Rationale
 
-The reason behind a decision comes from the author's intent. A diff shows a rename
-without saying why. A plausible reason invented to fill the
-gap is worse than no reason, because the reader can't tell it apart from a real
-one and it becomes part of the permanent record.
+The reason behind a decision comes from the author's intent. A diff shows a
+rename without saying why. A plausible reason invented to fill the gap is worse
+than no reason, because the reader can't tell it apart from a real one and it
+becomes part of the permanent record.
 
 If you don't know why, ask. Nic has said so outright:
 
@@ -174,8 +175,8 @@ argument attaches to the alternative it truly applies to.
 ### Substantiate or Delete
 
 Assertion is not argument. "Dynamo's KV cache offloading is ahead of vLLM" needs
-the mechanism and the baseline: ahead how, and what does vLLM do? Expect the question
-"why?" about any sentence claiming a causal necessity, and "what's your
+the mechanism and the baseline: ahead how, and what does vLLM do? Expect the
+question "why?" about any sentence claiming a causal necessity, and "what's your
 source for that insight?" about any confident claim. A sentence you can't defend
 is filler, so remove it.
 
@@ -186,7 +187,7 @@ Word choice must not imply a conclusion the facts don't support. Describing a
 cache as LRU to suggest it's worse, when it also supports frecency, is a writing
 defect as much as a factual one. Evaluative adjectives need a definition and
 even application. Don't call one project's feature "experimental and niche"
-while staying silent about its peers.
+without assessing its peers the same way.
 
 Avoid a partisan frame. A comparison of two stacks is not a contest between us
 and them, and rhetorical absolutes rarely survive scrutiny.
@@ -200,36 +201,35 @@ section takes up more space than any other in the doc. Should it?"
 - Sections stay proportional to their importance to the whole document, never to
   how recently they came up. Recency bias is a defect. A commit message follows
   the diff, not the order the work happened in.
-- List entries stay balanced against their siblings. Any number of entries is
+- List entries stay proportional to their siblings. Any number of entries is
   fine. One entry three times the size of the others because it's your current
   focus is not.
 - After trimming one section, trim its neighbours. Cutting one part leaves an
   adjacent part oversized.
-- Real content doesn't belong in parentheses. Something worth a mention is worth
-  a sentence, and something that deserves billing equal to its peers deserves a
-  paragraph.
+- Real content doesn't belong in parentheses. Anything that merits a mention
+  merits a sentence, and something that deserves billing equal to its peers
+  deserves a paragraph.
 - One concept per list entry. Don't bundle rate limiting and authentication
   under "identity", and don't drop an item while reorganising.
 
 ### Write the Design as If It Preceded the Code
 
 A design records direction. It concentrates on APIs and UX with broad-strokes
-mechanics. It doesn't mirror the code, and it isn't a recipe to build it. The bar
-is that it must not actively mislead. Things the design shows that don't exist
-yet are fine, because they aren't done yet.
+mechanics. It doesn't mirror the code, and it isn't a recipe to build it. It
+must not actively mislead, though it may show things not yet built.
 
 So write in the present tense, describing the current position as though it were
 the first and only one:
 
-- No changelog framing. The reader doesn't care how a previous unreleased
-  iteration worked.
+- No changelog framing, since the reader doesn't care how a previous
+  unreleased iteration worked.
 - Discarded thinking belongs in Alternatives Considered, gathered there rather
   than scattered inline.
 - No links to issues or PRs in the same repo. They expose the document's real
   chronology, and a design should read as the first artifact in the repo. Link
   generously outward to upstream issues, specs, talks, and prior art.
-- A superseded document gets a one or two sentence preface saying it remains for
-  historical context, rather than a rewrite.
+- A superseded document isn't rewritten. It gets a one or two sentence preface
+  saying it remains for historical context.
 - Don't link a durable document to a scratch file you'll delete.
 
 At some point a design stops absorbing revisions and gets extended by
@@ -239,8 +239,8 @@ to review.
 A proposal proposes the intended end state, and leaves out the limitations
 currently blocking it. Goals appear positively, as what gets delivered, and at
 project level rather than scoped to a release. Don't confess open unknowns in
-passing. Stay deliberately vague where the mechanism remains unsettled, and state the
-requirement instead.
+passing. Stay deliberately vague where the mechanism remains unsettled, and
+state the requirement instead.
 
 Leave out an Open Questions section. A design takes a position. Opinions belong
 inline beside the thing they concern, rather than in a trailing "positions" or
@@ -256,13 +256,13 @@ scrutiny.
   document, including the executive summary.
 - **Show whole objects.** A full ModelDeployment, and not a `spec:` fragment.
 - **If you can't verify it, say so.** "I couldn't build a credible example here"
-  beats a plausible fabrication.
+  is better than a plausible fabrication.
 - **Calibrate realistically.** Selectors should ask for what a model actually
   needs, and examples should reflect the scale users really run.
 - **Cut examples that don't do any work.** One that only shows an off-the-shelf
-  resource adds nothing a reader lacks. Merge a pair that make the same point. A
-  contrived example damages credibility more than an absent one, so omit rather
-  than force.
+  resource doesn't add anything a reader lacks. Merge a pair that make the same
+  point. A contrived example damages credibility more than an absent one, so
+  omit rather than force.
 - **Annotate lightly.** Brief YAML comments where semantics aren't obvious, and
   `# Omitted for brevity` where you trim.
 - **Cover the awkward case.** Worked examples are how a proposal proves it
@@ -277,8 +277,8 @@ Naming draws more corrections than anything but length, so treat it as work that
 precedes the prose.
 
 - Offer two or three candidates with trade-offs instead of one answer.
-- Prefer terms already established in the domain. Where a category label is
-  contested, name the specific things instead.
+- Prefer terms already established in the domain. Where people contest a
+  category label, say which specific things you mean instead.
 - Don't borrow a loaded term unless you've adopted its semantics. Using DRA's
   "attributes" promises DRA's behaviour.
 - Test a candidate by saying the sentence a reader would say aloud. "Configure
@@ -304,23 +304,26 @@ structure.
 - **No decorative structure.** Bold, headings, and bullets sprinkled in to look
   organised are a tell. A pair of paragraphs doesn't need an `###`. Resist
   subheadings in PR descriptions altogether.
+<!-- vale off -->
 - **Consistent heading hierarchy**, and headings that sound like an engineer
   wrote them. "The shape I'm proposing" is not one.
+<!-- vale on -->
 - **Ordered lists for sequential content**, prose for reasoning, bullets for
   parallel items. Parallel content gets parallel structure and matched depth.
   Labels in a parallel list run one to three words and stay consistent with each
   other.
-- **Tables** where the content really is tabular. Give a table a lead-in sentence
-  saying what it shows, use title case headers, and make column names convey
-  their role. Avoid a hyphen as a placeholder, because it reads as "none".
-- **Real links.** A bare `#34` doesn't resolve in a repo markdown file. Link code
-  through a pinned-commit permalink so GitHub renders it as a snippet. Keep named
-  projects hyperlinked.
+- **Tables** where the content really is tabular. Give a table a lead-in
+  sentence saying what it shows, use title case headers, and make column names
+  convey their role. Avoid a hyphen as a placeholder, because it reads as
+  "none".
+- **Real links.** A bare `#34` doesn't resolve in a repo markdown file. Link
+  code through a pinned-commit permalink so GitHub renders it as a snippet. Keep
+  named projects hyperlinked.
 - **No mathematical shorthand** in prose. Spell out what a Σ means.
-- **Wrapping** depends on the surface. Hard-wrap commit messages and repo
-  markdown at 80. Never hard-wrap GitHub issue or PR bodies, which reflow to the
-  viewport.
-- **Introduce a term before leaning on it.** "The composition function" is a
+- **Wrapping** depends on where the text appears. Hard-wrap commit messages and
+  repo markdown at 80. Never hard-wrap GitHub issue or PR bodies, which reflow
+  to the viewport.
+- **Introduce a term before relying on it.** "The composition function" is a
   defect if the document hasn't said it's built on composition functions. Avoid
   forward references to concepts the reader hasn't met.
 - **Don't make the reader infer.** If CUDA matters to two things, introduce it
@@ -362,45 +365,48 @@ originals across two design docs. He preferred the rewrite in 14 and called the
 other two a tie. He never preferred the original. His summary: the edits drive
 toward more succinct and direct phrasing, and that's the project style.
 
-So comply by default, and override only when you can name the specific reason the
-alert is wrong.
+So comply by default, and override only when you can state the specific reason
+the alert is wrong.
 
-Be suspicious of your own sense of which alerts are noise, because it runs in one
-direction: you will defend phrasing you wrote. Every alert in that comparison that
-an agent had confidently called a false positive turned out to be a real catch.
-The most confident defence was `StackedAnaphora` on "one engine, one member, one
-pod", argued as deliberate repetition mapping onto the API. Nic's verdict was that
-it "reads very AI", and the repetition was the reason.
+Be suspicious of your own sense of which alerts are noise, because it runs in
+one direction: you will defend phrasing you wrote. Every alert in that
+comparison that an agent had confidently called a false positive turned out to
+be a real catch. The most confident defence was `StackedAnaphora` on "one
+engine, one member, one pod", argued as deliberate repetition mapping onto the
+API. Nic's verdict was that it "reads very AI", and the repetition was the
+reason.
 
 The exceptions are mechanical rather than matters of taste:
 
 <!-- vale off -->
 - `UniversalObject` where the quantifier is the semantics. In a matching rule,
   "satisfies every selector" is precise, and cutting "every" makes it wrong.
-- `ColonUsage` firing on a document's metadata block or on YAML, where the parser
-  reads a field name as prose.
+- `ColonUsage` firing on a document's metadata block or on YAML, where the
+  parser reads a field name as prose.
 <!-- vale on -->
 
 For prose a person wrote, assume they meant it, and raise the alert rather than
 acting on it.
 
-Where a document must quote a banned construction to discuss it, wrap that region
-in `<!-- vale off -->` and `<!-- vale on -->` rather than leaving an alert.
+Where a document must quote a banned construction to discuss it, wrap that
+region in `<!-- vale off -->` and `<!-- vale on -->` rather than leaving an
+alert.
 
-Where your harness reports Vale's alerts as diagnostics on each edit, fix those as
-part of the edit. A harness may cap how many it reports per edit, so a clean edit
-doesn't mean a clean file. Run `vale` directly before handing the document over.
+Where your harness reports Vale's alerts as diagnostics on each edit, fix those
+as part of the edit. A harness may cap how many it reports per edit, so a clean
+edit doesn't mean a clean file. Run `vale` directly before handing the document
+over.
 
-**A subagent catches what Vale can't see.** Vale matches phrases, and it has no
-opinion about whether a section argues with a reviewer, invents a reason, or
+**A subagent catches what Vale can't see.** Vale matches phrases. It can't tell
+whether a section argues with a reviewer or invents a reason, or whether it
 gives four paragraphs to something that deserves one. Dispatch a subagent
 briefed with [references/de-slop-review.md](references/de-slop-review.md), plus
 the audience, the purpose, and one or two existing designs under `design/` for
 the project's style. Fix what it finds and repeat until a reviewer comes back
 clean, because one pass rarely suffices.
 
-Use a subagent rather than reviewing inline. Fresh context is the point, since
-the drafting agent can't see its own reactive framing.
+Use a subagent rather than reviewing inline. Fresh context matters because the
+drafting agent can't see its own reactive framing.
 
 Where accuracy matters, run a separate pass that tests every assertion against a
 skeptical reader rather than a friendly one. Prose review and correctness review
@@ -425,7 +431,8 @@ are orthogonal.
 5. Space signals importance, so keep sections and list entries proportional.
 6. A design reads as though it preceded the code.
 7. Examples are real, whole, verified, and doing work.
-8. Name things deliberately: established terms, honest in the edge case, one
-   term per concept.
+8. Name things deliberately, with established terms that don't mislead in the
+   edge case, and one term per concept.
 9. Reasoning belongs in prose. Structure is for structured content.
-10. Run Vale, then a fresh-context subagent, and loop until both come back clean.
+10. Run Vale, then a fresh-context subagent, and loop until both come back
+    clean.

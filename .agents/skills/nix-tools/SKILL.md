@@ -10,7 +10,7 @@ This system has Nix available. You can run virtually any CLI tool without it bei
 
 ## When to Use This
 
-Assume any CLI tool you know about is available. Reach for the right tool:
+Assume any CLI tool you know about is available. Use the right tool:
 
 - **JSON/YAML**: `jq` for JSON, `yq` for YAML - great for Kubernetes manifests
 - **Searching**: `ripgrep` (rg) for content, `fd` for filenames
@@ -58,7 +58,8 @@ If unsure of the exact package name, search nixpkgs:
 nix search nixpkgs <term>
 ```
 
-Note: Search is slow (evaluates all packages). Prefer trying the obvious name first - it usually works.
+Note: search is slow (evaluates all packages). Prefer trying the obvious name
+first - it usually works.
 
 ## Newer Tool Versions
 

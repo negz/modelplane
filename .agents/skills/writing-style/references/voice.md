@@ -13,9 +13,9 @@ Write in first person. "I propose…", "I believe…", "I think…", "I'd argue�
 State positions plainly instead of hedging behind passive voice or committee
 language. The reader should always know what the author thinks and why.
 
-Use "I" rather than a collective "we" for a document one person authored. Where uncertain,
-say so ("I'm not sure how real or widespread these concerns are", "I suspect…")
-while still taking a position.
+Use "I" rather than a collective "we" for a document one person authored. Where
+uncertain, say so ("I'm not sure how real or widespread these concerns are", "I
+suspect…") while still taking a position.
 
 ### Conversational authority
 
@@ -60,7 +60,8 @@ precise anyway, which is what the linter asks for when it flags the word.
 <!-- vale on -->
 
 Frequency isn't the problem, so don't overcorrect into avoiding the word. Nic
-uses it about as often as an LLM does. What differs is the direction it points.
+uses it about as often as an LLM does. The difference is the direction it
+points.
 
 The same test applies to any verb of delivery or provision with a product as its
 subject. Say what the software does, and reserve the release verb for releases.
@@ -99,17 +100,17 @@ going?" into "I see why this matters".
 
 ### Background is a story
 
-Background sections run long relative to their neighbours, because they carry
-the narrative of how we got here and what changed. They link out to
+Background sections run long relative to their neighbours, because they tell
+the story of how we got here and what changed. They link out to
 prior work so the reader can go deeper. A good one has the reader nodding along,
 thinking "yes, I see why this is a problem", before the proposal starts.
 
-Long is not the same as padded. Every paragraph still has to do work, and the
-section still gets both cutting passes. Where the background outgrows the rest of
-the document by a wide margin, that's a finding.
+Long is not the same as padded. Each paragraph still has to do work, and the
+section still gets both cutting passes. Where the background outgrows the rest
+of the document by a wide margin, that's a finding.
 
 Background also needs the case that forced the decision. Where prefill/decode
-disaggregation was the litmus test for a new shape, the background covers it.
+disaggregation was the litmus test for a new design, the background covers it.
 Showing the status quo in YAML often beats describing it.
 
 ### Goals are crisp
@@ -117,8 +118,8 @@ Showing the status quo in YAML often beats describing it.
 Goals sections are short, a few bullets or a brief paragraph. They state what's
 in scope and what isn't. "It's not a goal to…" appears often.
 
-Pitch goals at project level rather than at a release, and state them positively,
-as what gets delivered. Keep build detail out. Goals also frame
+Pitch goals at project level rather than at a release, and state them
+positively, as what gets delivered. Keep build detail out. Goals also frame
 ambition: "My goal with this document is to sketch out…" sets different
 expectations from "The goal of this proposal is to have Upbound Crossplane
 install only the CRDs customers actually use."
@@ -141,22 +142,23 @@ per case, including the pathological one.
 ### Code is for developer experience
 
 Design documents aren't the place to sketch how the code works inside. Leave out
-Go or Python unless the code is itself the design, as with a library API, an SDK,
-or a developer experience where what the user writes is the thing you're designing.
+Go or Python unless the code is itself the design, as with a library API, an
+SDK, or a developer experience where what the user writes is the thing you're
+designing.
 
 Show code where the argument concerns how something would feel to use. Leave it
 out where it would only illustrate the innards of a controller or a reconciler.
 Those belong in the repo.
 
-### Alternatives are honest
+### Alternatives are fair
 
 Give each alternative a fair hearing. Say what it is, what's good about it, then
-why the proposal beats it, without resorting to strawmen. This applies doubly
+why the proposal is better, without resorting to strawmen. This applies doubly
 where the alternative is the current system.
 
-Alternatives earn their place. Not every discarded idea needs an entry, and a
-low-value one is better deleted. Keep entries roughly the same length as each
-other.
+Include an alternative only when it adds something. Not every discarded idea
+needs an entry, and a low-value one is better deleted. Keep entries roughly the
+same length as each other.
 
 ## Rhetorical patterns
 
@@ -168,7 +170,7 @@ next step.
 
 ### Acknowledge trade-offs
 
-Don't pretend the proposal is perfect. Name the downsides:
+Don't pretend the proposal is perfect. State the downsides:
 
 > The (big?) trade-off is that the better the upstream UX gets, the less
 > compelling our proprietary lazy-loading feature is.
@@ -181,12 +183,12 @@ Prefer specific numbers to vague claims:
 > bad for one control plane, but across 10 control planes it's 1.5GB of wasted
 > memory.
 
-Every number has to be real, and traceable to something you measured or read.
-The number above comes from a measured CRD size. A plausible figure invented to
-make a paragraph concrete is the worst kind of fabrication, because its precision
-is what makes the reader trust it. Where you don't have a number, describe the
-effect and say you haven't measured it. Never estimate hardware costs, latencies,
-or utilisation rates to strengthen an argument.
+Numbers have to be real, and traceable to something you measured or read. The
+number above comes from a measured CRD size. A plausible figure invented to make
+a paragraph concrete is the worst kind of fabrication, because its precision is
+what makes the reader trust it. Where you don't have a number, describe the
+effect and say you haven't measured it. Never estimate hardware costs,
+latencies, or utilisation rates to strengthen an argument.
 
 ### Respect what came before
 
@@ -199,9 +201,9 @@ why it's time to move on rather than belittling the past.
 
 ### Address skeptics directly
 
-Anticipate objections and answer them inline. Name the likely objection in the
-reader's voice, take it seriously, then answer it. Vary how you introduce it,
-rather than repeating one formula.
+Anticipate objections and answer them inline. State the likely objection in the
+reader's voice, take it seriously, then answer it. Don't introduce each one with
+the same formula.
 
 Note the boundary with reactive framing in SKILL.md. Answering an objection a
 reader would independently raise is good. Rewriting a section to argue with a
@@ -212,14 +214,15 @@ reviewer who already raised one is not.
 "I'd prefer…", "I lean toward…", "I don't feel very strongly" signal confidence
 in the reasoning without shutting down discussion.
 
-Where constraints forced a choice rather than taste, say that instead. Traefik isn't
-a favourite. It's the only thing meeting the requirements today, and framing it
-as a preference misleads.
+Where constraints forced a choice rather than taste, say that instead. Traefik
+is the only thing meeting the requirements today. Framing it as a favourite
+misleads.
 
 ### Reference prior art
 
-Link to and summarise relevant prior work: upstream issues, old design docs,
-community discussions, conference talks. Show awareness of a problem's history.
+Link to and summarise relevant prior work, such as upstream issues, old design
+docs, community discussions, and conference talks. Show awareness of a problem's
+history.
 
 Link outward, generously. Don't link to issues or PRs in the same repo, for the
 reasons in SKILL.md.
@@ -228,9 +231,9 @@ reasons in SKILL.md.
 
 ### Paragraphs and flow
 
-Write flowing paragraphs rather than bullet-heavy outlines. Use bullets for lists
-of concrete items such as API fields, workstreams, or goals, and prefer prose for
-reasoning and narrative. Paragraphs run three to six sentences.
+Write flowing paragraphs rather than bullet-heavy outlines. Use bullets for
+lists of concrete items such as API fields, workstreams, or goals, and prefer
+prose for reasoning and narrative. Paragraphs run three to six sentences.
 
 ### Headings
 
@@ -239,10 +242,10 @@ Use descriptive headings. "Namespace Composite Resources" beats "Proposal Item
 
 ### Code and YAML examples
 
-Include examples inline where they clarify the proposal. Add brief comments where
-semantics aren't obvious. Keep examples focused, trimming irrelevant fields with
-`# Omitted for brevity`. Show whole objects rather than fragments, and reuse
-tested manifests from the repo.
+Include examples inline where they clarify the proposal. Add brief comments
+where semantics aren't obvious. Keep examples focused, trimming irrelevant
+fields with `# Omitted for brevity`. Show whole objects rather than fragments,
+and reuse tested manifests from the repo.
 
 ### Links
 

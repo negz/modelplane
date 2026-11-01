@@ -8,8 +8,8 @@ compatibility: Requires the up CLI and Docker with buildx.
 
 ## The Function Contract
 
-Functions are embedded Python executed by `function-python`. Each lives in
-`functions/{name}/main.py` and exports one function:
+A function is an embedded Python script that `function-python` executes. You
+write each one in `functions/{name}/main.py`, and it exports one function:
 
 ```python
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -29,10 +29,10 @@ functions/my-function/
 ```
 
 See [references/example.py](references/example.py) for a complete example
-function demonstrating all key patterns: Pydantic models, gating, readiness,
-events, status, deletion ordering.
+function demonstrating all key patterns, including Pydantic models, gating,
+readiness, events, status, deletion ordering.
 
-The `model` symlink is required. Without it, the function crashes at runtime
+Functions need the `model` symlink. Without it, the function crashes at runtime
 with `ModuleNotFoundError: No module named 'function.model'`. Use
 `up function generate` to create new functions, or create the symlink manually.
 
@@ -50,33 +50,33 @@ up project build
 up test run tests/test-myresource
 ```
 
-Build before writing the function — it generates Pydantic models under
+Build before writing the function, because it generates Pydantic models under
 `.up/python/models/` that the function imports.
 
-### How the Build Works (No Docker Buildx)
+### The Build Process (No Docker Buildx)
 
 `up project build` does NOT use Docker or buildx to build function images.
 It pulls the `function-interpreter-python` base image from the registry,
 tars the function directory (following symlinks like `model`), and appends
-it as a layer using `go-containerregistry`. The result is written to the
+it as a layer using `go-containerregistry`. It writes the result to the
 `.uppkg` file, not to the Docker daemon.
 
 This means:
 - `up project build` always picks up code changes (it reads the filesystem
-  directly — no caching)
+  directly, without caching)
 - `docker images` shows stale images from previous `up test run` or
   `up project run` sessions, not the latest build
 - `docker run <image>` inspects the stale Docker cache, not the `.uppkg`
 - `up project push` reads from the `.uppkg`, not Docker
 
-Do NOT use `docker run` to verify build output — it shows stale images.
+Do NOT use `docker run` to verify build output. It shows stale images.
 The build is always fresh.
 
 ### Deploying Changes to a Cluster
 
 Each build produces new digests for changed functions. The Configuration's
 dependency metadata includes these digests. Updating the Configuration tag
-is sufficient — Crossplane sees the new digests and updates the Functions
+is sufficient. Crossplane detects the new digests and updates the Functions
 automatically:
 
 ```bash
@@ -86,8 +86,8 @@ kubectl patch configuration <name> --type=merge \
   -p '{"spec":{"package":"xpkg.upbound.io/<org>/<project>:v0.1.0-dev.N"}}'
 ```
 
-Three commands, no Function deletion needed. Crossplane handles the rest
-via digest comparison in the ConfigurationRevision's dependencies.
+Three commands, and you don't need to delete any Functions. Crossplane handles
+the rest via digest comparison in the ConfigurationRevision's dependencies.
 
 ## Import Paths
 
@@ -106,7 +106,7 @@ from .model.example.acme.platform import v1alpha1
 
 ## Composing Resources
 
-Use Pydantic models for everything with a generated model — they catch field
+Use Pydantic models for everything with a generated model. They catch field
 name mistakes at write time:
 
 ```python
@@ -152,8 +152,8 @@ Set XR readiness via `rsp.desired.composite.ready`:
 rsp.desired.composite.ready = fnv1.READY_TRUE
 ```
 
-Do NOT set the `Ready` condition via `fnv1.Condition` — it's reserved. Do NOT
-use `TARGET_COMPOSITE_AND_CLAIM` — there are no claims in Crossplane v2.
+Do NOT set the `Ready` condition via `fnv1.Condition`, because it's reserved.
+Do NOT use `TARGET_COMPOSITE_AND_CLAIM`, because Crossplane v2 has no claims.
 
 For composed resources, check the appropriate condition (not always `Ready`):
 
@@ -176,7 +176,7 @@ if _has_condition(req, "my-gateway", "Accepted"):
     rsp.desired.resources["my-gateway"].ready = fnv1.READY_TRUE
 ```
 
-Resources without conditions (ProviderConfigs, ConfigMaps) should be marked
+Mark resources without conditions (ProviderConfigs, ConfigMaps) as
 always-ready:
 
 ```python
@@ -188,12 +188,15 @@ rsp.desired.resources["my-providerconfig"].ready = fnv1.READY_TRUE
 `response.normal()` and `response.warning()` emit Kubernetes events visible
 in `kubectl describe`. Use them deliberately:
 
-- **Normal (every reconcile, time-bounded):** "Waiting for: gke-cluster" —
-  expected, self-resolving. Stops when the resource becomes ready.
-- **Normal (transition, once):** "GKE cluster ready, composing KServeStack" —
-  milestone. Detect transitions by comparing current state to observed state.
+- **Normal (every reconcile, time-bounded):** "Waiting for: gke-cluster".
+  Expected, self-resolving. Stops when the resource becomes ready.
+- **Normal (transition, once):** "GKE cluster ready, composing KServeStack".
+  A milestone. Detect transitions by comparing current state to observed state.
+  <!-- vale off -->
 - **Warning (every reconcile, persistent):** "spec.kserve.cluster.gke is
-  required" — user-actionable, won't self-resolve.
+  required".
+  <!-- vale on -->
+  The user can fix it, and it won't self-resolve.
 
 Detect transitions:
 ```python
@@ -209,14 +212,14 @@ else:
     response.normal(rsp, f"Waiting for: {', '.join(not_ready)}")
 ```
 
-Never emit Normal events on every reconcile in the steady state — they
+Never emit Normal events on every reconcile in the steady state. They
 accumulate as Kubernetes Event objects.
 
 ## Gating Resources on Dependencies
 
-Only compose a resource when its dependencies are observed. But once composed,
-always keep emitting it — if a function omits a resource from desired state,
-Crossplane deletes it.
+Only compose a resource once Crossplane observes its dependencies. But once
+composed, always keep emitting it. If a function omits a resource from desired
+state, Crossplane deletes it.
 
 ```python
 pc_observed = "provider-config" in req.observed.resources
@@ -256,16 +259,16 @@ if cluster is None:
     return  # Crossplane will re-call with the resource
 ```
 
-Required resources are dicts, not Pydantic models — they're external resources
-resolved by Crossplane.
+Required resources are dicts, not Pydantic models. They're external resources
+that Crossplane resolves.
 
-The empty `match_labels={}` selector is broken — protobuf serialization loses
+The empty `match_labels={}` selector doesn't work. Protobuf serialization loses
 the empty map, causing the `oneof match` to be unset. Use a real label to match
 on, or use `match_name` for specific resources.
 
 ## Deletion Ordering with Usages
 
-When a composite is deleted, all composed resources get deletion timestamps
+When you delete a composite, all composed resources get deletion timestamps
 simultaneously. Resources with implicit dependencies (ProviderConfigs used by
 Helm releases, clusters used by stacks installed on them) need explicit ordering.
 
@@ -298,10 +301,11 @@ resource.update(rsp.desired.resources["usage-pc-by-release"], {
 Key rules:
 
 - **One Usage per protected-by pair.** The selector resolves to the first
-  matching resource and stops. Two releases need two Usages with distinct labels.
+  matching resource and stops. A pair of releases needs a separate Usage for
+  each, with distinct labels.
 - **Use labels to distinguish resources** of the same kind in the selector.
-- **`replayDeletion: True`** means: when the "by" resource is deleted, delete
-  the Usage, then retry deleting the "of" resource.
+- **`replayDeletion: True`** means that deleting the "by" resource also
+  deletes the Usage, and Crossplane then retries deleting the "of" resource.
 - **Usages don't prevent Terminating state.** A namespace with a
   `deletionTimestamp` blocks new object creation even if a Usage prevents its
   final deletion. Use shared long-lived namespaces instead of per-resource
@@ -316,9 +320,9 @@ controller-managed finalizers). Use `managementPolicies` to skip deletion:
 release.spec.managementPolicies = ["Create", "Observe", "Update"]
 ```
 
-This is appropriate when the underlying infrastructure is being destroyed anyway
-(e.g., KServe on a GKE cluster that's being deprovisioned). The resource is
-orphaned and destroyed with the cluster.
+This is appropriate when the underlying infrastructure is going away anyway
+(e.g., KServe on a GKE cluster that you're deprovisioning). Crossplane orphans
+the resource, and it goes away with the cluster.
 
 ## Cluster-Scoped XRs Composing Namespaced Resources
 
@@ -350,11 +354,12 @@ Common causes:
   with a Usage.
 - **Namespace is terminating:** blocks ProviderConfigUsage creation. Fix by
   using a shared namespace.
-- **Webhook has no endpoints:** the webhook server pod was deleted before the
-  webhook-protected resources. Fix with `managementPolicies`.
+- **Webhook has no endpoints:** something deleted the webhook server pod before
+  the webhook-protected resources. Fix with `managementPolicies`.
 - **Finalizer blocking deletion:** a remote controller hasn't processed the
   deletion yet (e.g., GatewayClass `gateway-exists-finalizer`). Fix with
-  `managementPolicies` or a Usage to ensure the dependent is deleted first.
+  `managementPolicies` or a Usage to ensure Crossplane deletes the dependent
+  first.
 
 Never increase timeouts without first describing the stuck resources. The fix
 is always in the deletion ordering, not the timeout.
