@@ -42,11 +42,13 @@ fixes into their original commits and force-push, so compare the two versions
 of the PR rather than the commits between them:
 
 ```bash
-git range-diff $(git merge-base origin/main <last>)..<last> $(git merge-base origin/main HEAD)..HEAD
+git range-diff $(git merge-base origin/<base> <last>)..<last> $(git merge-base origin/<base> HEAD)..HEAD
 ```
 
-That pairs each commit you reviewed with its new version, and shows only how it
-changed, leaving out a rebase onto a newer `main`. Give the reviewers the
+`<base>` is the PR's base branch, `baseRefName` in `pr.json`. A backport PR
+targets a release branch rather than `main`. The range-diff pairs each commit
+you reviewed with its new version and shows how it changed. A rebase onto a
+newer base drops out. Give the reviewers the
 range-diff as what to review, alongside the existing threads, so they can tell
 which earlier comments the changes address.
 
