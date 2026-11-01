@@ -20,8 +20,8 @@ on:
         required: true
       sha:
         description: >-
-          The head commit to review. A /review comment pins the commit it
-          approved, so a push after the comment isn't reviewed.
+          The head commit to review. A /review comment pins the PR's head
+          commit when its job starts.
         type: string
         required: true
 
@@ -48,15 +48,49 @@ env:
   LSP_PLUGIN_SHA: 4a17bc8379e572ab104ec26b55f92ee9b51dce37
 
 jobs:
-  review:
-    # Review automatically only PRs that org members open, and that aren't
-    # drafts. A /review comment has already checked the commenter can write.
+  # Review automatically only PRs that org members open. The event's
+  # author_association reports a private member as a CONTRIBUTOR, so ask the
+  # org instead.
+  author:
     if: >-
+      github.repository == 'modelplaneai/modelplane' &&
+      github.event_name == 'pull_request_target' &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      member: ${{ steps.member.outputs.member }}
+    steps:
+      - name: Mint a token to read org membership
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-members: read
+
+      - name: Check the author is an org member
+        id: member
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if gh api --silent "orgs/$GITHUB_REPOSITORY_OWNER/members/$AUTHOR"; then
+            echo "member=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "member=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    # A /review comment skips the author job, having already checked that the
+    # commenter can write.
+    needs: author
+    if: >-
+      !cancelled() &&
       github.repository == 'modelplaneai/modelplane' && (
-        github.event_name == 'issue_comment' || (
-          !github.event.pull_request.draft &&
-          contains(fromJSON('["OWNER", "MEMBER"]'), github.event.pull_request.author_association)
-        )
+        github.event_name == 'issue_comment' ||
+        needs.author.outputs.member == 'true'
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -82,12 +116,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The agents and skills come from main, so a PR can't change how it's
-      # reviewed.
-      - name: Install the reviewer's agents and skills
+      # Everything opencode reads as config or instructions comes from main, as
+      # does CONTRIBUTING.md, which the skills defer to. That stops a PR
+      # editing its own review instructions. PR code the agent runs can still
+      # rewrite them mid-review, which the design accepts.
+      - name: Install the reviewer's config from main
         run: |
-          rm -rf pr/.opencode pr/.agents
-          cp -r reviewer/.opencode reviewer/.agents pr/
+          for f in .opencode .agents .claude opencode.json opencode.jsonc AGENTS.md CLAUDE.md CONTRIBUTING.md; do
+            rm -rf "pr/$f"
+            if [ -e "reviewer/$f" ]; then cp -r "reviewer/$f" "pr/$f"; fi
+          done
 
       - name: Fetch the language server plugin
         run: |
@@ -114,7 +152,9 @@ jobs:
           echo "LAST=$last" >> "$GITHUB_ENV"
 
       # The proxy listens only on the Docker bridge, where the agent's
-      # container reaches it, and only forwards to the Messages API.
+      # container reaches it. It forwards only POST /v1/messages, so the agent
+      # can't use the key for anything else the key's workspace holds, such as
+      # message batches.
       - name: Start the model proxy
         env:
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_ANTHROPIC_API_KEY }}
@@ -127,7 +167,11 @@ jobs:
           }
           http://$bridge:8787 {
             bind $bridge
-            handle /v1/messages* {
+            @messages {
+              method POST
+              path /v1/messages
+            }
+            handle @messages {
               reverse_proxy https://api.anthropic.com {
                 header_up Host api.anthropic.com
                 header_up x-api-key {env.ANTHROPIC_API_KEY}
