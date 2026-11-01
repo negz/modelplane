@@ -43,7 +43,10 @@ jobs:
     permissions:
       pull-requests: write
     runs-on: ubuntu-24.04
-    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')
+    if: >-
+      vars.REVIEW_APP_ID != '' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/review')
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     steps:
