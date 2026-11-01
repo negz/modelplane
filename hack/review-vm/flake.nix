@@ -206,8 +206,12 @@
                   git config --global --add safe.directory /work/pr
                   mkdir -p _output/review
                   vale sync --config .opencode/vale/.vale.ini
-                  opencode run --auto --format json --agent review "$(cat /work/prompt)" > /work/out/transcript.jsonl
-                  echo $? > /work/out/exit
+                  # The transcript keeps every event. The console, which the
+                  # workflow's log shows, gets a line per tool call.
+                  opencode run --auto --format json --agent review "$(cat /work/prompt)" \
+                    | tee /work/out/transcript.jsonl \
+                    | jq -r --unbuffered 'select(.type == "tool_use") | "\(.part.tool) \(.part.state.title // "")"'
+                  echo "''${PIPESTATUS[0]}" > /work/out/exit
                   cp -r _output/review /work/out/review
                   tar -cf /dev/vdf -C /work/out .
                   sync
