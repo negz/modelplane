@@ -44,7 +44,7 @@ nix build               # Build the default package
 nix build .#<name>      # Build a specific package
 ```
 
-Build results are symlinked to `./result`.
+`nix build` symlinks build results to `./result`.
 
 ### Running Checks
 
@@ -52,10 +52,10 @@ Build results are symlinked to `./result`.
 nix flake check         # Run ALL checks (tests, lints, etc.)
 ```
 
-Individual checks can't be run in isolation via `nix flake check`. If the project
-exposes the same functionality as apps (e.g., `nix run .#test`), prefer that for
-faster feedback during development. Reserve `nix flake check` for full CI-style
-validation.
+You can't run individual checks in isolation via `nix flake check`. If the
+project exposes the same functionality as apps (e.g., `nix run .#test`), prefer
+that for faster feedback during development. Reserve `nix flake check` for full
+CI-style validation.
 
 ### Running Dev Commands
 
@@ -106,4 +106,4 @@ If a command fails:
 - **Apps are not sandboxed**: unlike builds and checks, apps have full system
   access. They're wrappers around normal development commands.
 - **`nix flake check` runs everything**: it evaluates all checks for the current
-  system. There's no built-in way to run a single check in isolation.
+  system. There's no built-in way to run one check in isolation.

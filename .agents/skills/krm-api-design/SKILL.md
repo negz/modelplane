@@ -14,23 +14,23 @@ conventions](https://github.com/kubernetes/community/blob/master/contributors/de
 apply to both. Cite them rather than stating a preference.
 
 The goal is a great user experience for API consumers. Think about what it's like
-to write YAML against this API, read it back six months later, and evolve it
-without breaking anyone.
+to write YAML against this API and read it back six months later, and about
+changing it without breaking anyone.
 
 ## Design for Evolution, Not Versioning
 
-The most important principle: **design APIs that never need a new version.**
+Above all, **design APIs that never need a new version.**
 
-API designers see version strings like `v1alpha1` and assume the path to
-evolution is introducing `v1alpha2` or `v1beta1`. This is a trap. CRD versions
+API designers see version strings like `v1alpha1` and wrongly assume the path
+to evolution is introducing `v1alpha2` or `v1beta1`. CRD versions
 are two views into the same stored data. All versions must be round-trippable
 to the storage version and back without data loss. This means:
 
 - You can rename or move a field across versions.
 - You **cannot** add a new required field that doesn't exist in older versions.
-- You **cannot** drop a field that was required by an older version.
+- You **cannot** drop a field that an older version required.
 
-Introducing a new version buys you surprisingly little. The better path is
+Introducing a new version gets you surprisingly little. The better path is
 designing an API that can evolve with purely additive, backward-compatible
 changes. Kubernetes evolved Deployment v1 for 7+ years without needing v2.
 
@@ -54,16 +54,16 @@ Freedom to break the API today doesn't make a break free later.
 
 ### Use Required Fields Sparingly
 
-Assume any required field can never be removed. Ask: does the user genuinely
+Assume you can never remove a required field. Ask: does the user really
 need to express an opinion about this, or can the system pick a sensible default?
 
 If a sensible default exists, make the field optional with an explicit default
-value. Explicit defaults are important -- they make the full desired state
+value. Explicit defaults are important, because they make the full desired state
 visible rather than hiding it behind "unspecified means default behavior".
 
 ### Prefer Enums Over Booleans
 
-This is the single most common API design mistake. A boolean seems simple today
+This is the most common API design mistake. A boolean seems simple today
 but almost always evolves into a set of options.
 
 ```yaml
@@ -99,8 +99,8 @@ spec:
     - us-east-1
 ```
 
-Worst case, 99% of users use a single-element array forever. Best case, you've
-saved yourself and your users from a painful migration.
+Worst case, 99% of users use a single-element array forever. If you do need
+more, you've saved yourself and your users from a painful migration.
 
 ### Leave Room for Variants
 
@@ -143,8 +143,8 @@ This pattern appears throughout well-designed Kubernetes APIs:
 acceptable when nothing more descriptive fits, but reach for a domain-specific
 name first.
 
-**The discriminator should be a required enum.** The variant subobjects should be
-optional, with CEL validation rules requiring the matching one, as
+**The discriminator should be a required enum.** Make the variant subobjects
+optional, and add CEL validation rules that require the matching one, as
 `apis/inferenceclusters/definition.yaml` does:
 
 ```yaml
@@ -164,20 +164,20 @@ properties:
 ```
 
 Worst case, you never need a second variant and some fields are slightly more
-nested than necessary. Best case, you've saved yourself a breaking change.
+nested than necessary. If you do, you've saved yourself a breaking change.
 
 ## Conditions
 
 Conditions are the standard way to communicate status. Get them right.
 
-- **Set conditions on first reconcile, even if status is Unknown.** This tells
-  other components the controller exists and is making progress.
+- **Set conditions on first reconcile, even if status is Unknown.** This lets
+  other components know the controller exists and is making progress.
 - **Provide a summary condition.** Use `Ready` for long-running resources,
   `Succeeded` for bounded-execution resources. Simple consumers query just this.
 - **Name conditions as adjectives or past-tense verbs.** `Ready`, `Available`,
-  `Succeeded`, `Failed` -- not present-tense verbs like `Deploying`.
-- **Choose polarity that's clearest for humans.** Neither positive nor negative
-  polarity is universally better. `MemoryExhausted` may be clearer than
+  `Succeeded`, `Failed`, rather than present-tense verbs like `Deploying`.
+- **Choose polarity that's clearest for humans.** Which polarity is better
+  depends on the condition. `MemoryExhausted` may be clearer than
   `SufficientMemory`. Avoid double negatives like `Failed=False`.
 - **Reason is a one-word CamelCase identifier.** `BackendNotFound`, not
   `"the backend could not be found"`. Message is the human-readable sentence.
@@ -211,7 +211,7 @@ Define `additionalPrinterColumns` so `kubectl get` is immediately useful.
 
 ### Bounds and Validation
 
-Every field needs bounds. This isn't optional -- unbounded fields are a DoS
+Every field needs bounds. This isn't optional. Unbounded fields are a DoS
 vector and signal an unfinished API.
 
 - All strings: `maxLength` (and `minLength` if appropriate).
@@ -240,43 +240,45 @@ vector and signal an unfinished API.
   edge cases and add permission checks.
 - For references that could be by-name or by-selector, provide both
   `resourceRef` and `resourceSelector` fields. Document that the ref takes
-  precedence when both are set.
+  precedence when the user sets both.
 
 ## Spec and Status
 
-- **Spec is desired state. Status is observed state.** They have separate update
-  paths via the `/status` subresource.
+- **Spec holds desired state. Status holds observed state.** They have separate
+  update paths via the `/status` subresource.
 - **No extra top-level fields** beyond `spec`, `status`, and standard metadata.
   If a resource doesn't need status (its state can't vary from intent), you can
   omit status or rename spec to something domain-appropriate (e.g. `data`).
 - **Spec fields are declarative.** They describe what the user wants, not what
   actions to take.
-- **Don't carry "READ-ONLY" into a status field description.** Every status
-  field is read-only from the user's side, so the note only raises the question
-  of why this one said it.
+- **Don't put "READ-ONLY" in a status field description.** Users can't write
+  to status fields. The note only raises the question of why this one said it.
 
 ## CRD Metadata
 
 - Put every resource in a **category** so `kubectl get <category>` works across
-  all your resources. Choose a meaningful group-level category.
+  all your resources. Choose a descriptive group-level category.
 - Provide **short names** for resources users interact with frequently. Keep
   them lowercase, short, and intuitive.
 - Write a **resource-level description** that explains what the resource is in
   one sentence, optionally followed by a link to documentation.
 - Write clear **field-level descriptions** that explain semantics, constraints,
-  and interactions with other fields -- not just what the field is called.
+  and interactions with other fields, rather than just restating the field's
+  name.
 
 ## Key Principles
 
-1. Design for evolution, not versioning -- you get less from a new version than you think
-2. Prefer enums over booleans -- the third option always arrives
+1. Design for evolution, not versioning. You get less from a new version than
+   you think
+2. Prefer enums over booleans. The third option always arrives
 3. Use the discriminator + subobject pattern to leave room for variants
 4. Choose descriptive discriminator names: `mode`, `strategy`, `engine` over `type`
 5. Start with arrays when multiple values are plausible
-6. Use required fields sparingly -- assume they're permanent
+6. Use required fields sparingly, and assume they're permanent
 7. Put bounds on everything: strings, numbers, arrays, maps
 8. Declare list merge semantics explicitly on every list
-9. Set conditions on first reconcile; provide a summary condition
-10. Make `kubectl get` useful with printer columns that surface conditions and key fields
+9. Set conditions on first reconcile, and provide a summary condition
+10. Make `kubectl get` useful with printer columns that show conditions and key
+    fields
 11. A thing of `kind: Foo` is a custom resource. The CRD is its definition
 12. Being free to break an API is no substitute for not needing to

@@ -6,8 +6,8 @@ yourself only to check what you're asking the reviewer to do.
 
 Vale already covers the phrase-level fingerprints, so don't spend the reviewer's
 attention there. Run Vale as SKILL.md describes first and fix what it reports.
-This review covers the defects Vale can't detect, because they depend on what the document
-means rather than which words it uses.
+This review covers the defects Vale can't detect, because they depend on what
+the document means rather than which words it uses.
 
 ## Briefing the Reviewer
 
@@ -73,8 +73,8 @@ does. Flag:
 
 ### 4. Proportion
 
-Space is how a reader judges what matters, so measure it. Report any section or list
-entry noticeably larger than its siblings, and say whether its importance
+Space is how a reader judges what matters, so measure it. Report any section or
+list entry noticeably larger than its siblings, and say whether its importance
 justifies that. Watch for a topic inflated because it came up late in drafting.
 Check that real content isn't hidden in parentheses, and that no list entry
 bundles several concepts.
@@ -86,15 +86,15 @@ Read the document end to end as somebody meeting it for the first time:
 - Does an opening paragraph make a promise that the section never delivers on?
 - Does the document use a term before introducing it?
 - Do two passages say the same thing in different places?
-- Is there a paragraph left over from an earlier framing that no longer holds?
+- Is there a paragraph left over from an earlier framing that no longer applies?
 - Does the ordering respect what the reader knows so far?
 - Are there run-on sentences?
 
 ### 6. Structure
 
-Check the document against the design-docs skill's skeleton: executive summary, background, goals,
-proposal, alternatives considered, with future improvements where they apply.
-Report:
+Check the document against the design-docs skill's skeleton: executive summary,
+background, goals, proposal, alternatives considered, with future improvements
+where they apply. Report:
 
 - An Open Questions or Risks section, when a design should take a position.
 - A trailing positions, recommendations, or summary section. Opinions belong
@@ -137,5 +137,5 @@ Where the next 20% comes from, quoted.
 - Don't restate the phrase-level matches Vale already caught.
 - Don't open with praise or close with encouragement. The author reads the
   findings.
-- Don't soften a finding to seem agreeable. A defect you mention gently is a
-  defect that survives.
+- Don't soften a finding to seem agreeable. A defect you mention gently goes
+  unfixed.

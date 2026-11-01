@@ -8,8 +8,8 @@ Identifiers are as they appeared, minus anything environment-specific.
 
 ## Reading through a typed model
 
-The rule reaches reads, not just writes. A chain of `.get()` calls has the same
-defect as building a dict: nothing checks the keys.
+The rule applies to reads, not just writes. A chain of `.get()` calls has the
+same defect as building a dict: nothing checks the keys.
 
 ```python
 # Before.
@@ -62,7 +62,7 @@ if engine not in _COMPAT.get(backend, []):
 gpu_pools = env.status.capacity.gpuPools
 ```
 
-`capacity` existed only to carry the defensive chain. Once the guards go, so
+`capacity` existed only to hold the defensive chain. Once the guards go, so
 does the variable.
 
 ## Locals that only shorten an expression
@@ -95,7 +95,7 @@ for p in all_placements:
 ```
 
 `p_gpu_count` names nothing the expression doesn't already say, so four lines
-become one. `p_labels` and `p_deployment` survive, because they carry a magic
+become one. `p_labels` and `p_deployment` survive, because they hold a magic
 string and a comparison that reads better named.
 
 ## Inlining a value used once
