@@ -397,9 +397,7 @@ gives four paragraphs to something that deserves one. Dispatch a subagent
 briefed with [references/de-slop-review.md](references/de-slop-review.md), plus
 the audience, the purpose, and one or two existing designs under `design/` for
 the project's style. Fix what it finds and repeat until a reviewer comes back
-clean, because one pass rarely suffices. This loop is for documents such as
-designs and docs pages. Short text like a review comment or a commit message
-needs only Vale.
+clean, because one pass rarely suffices.
 
 Use a subagent rather than reviewing inline. Fresh context is the point, since
 the drafting agent can't see its own reactive framing.
