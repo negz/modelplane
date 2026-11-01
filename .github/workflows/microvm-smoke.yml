@@ -1,8 +1,9 @@
 name: MicroVM smoke test
 
-# Throwaway: checks a microVM can run the review agent's workload on a hosted
-# runner. Boots the VM in hack/microvm, runs nix flake check and a kind cluster
-# inside it, and checks it can reach a service on the runner.
+# Throwaway: checks a Firecracker microVM can run the review agent's workload
+# on a hosted runner. Boots the VM in hack/microvm, runs nix flake check and a
+# kind cluster inside it, and checks what it can and can't reach on the
+# network.
 on:
   push:
     branches: [microwave]
@@ -21,57 +22,86 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check KVM
+      - name: Allow the runner user to use KVM
         run: |
-          ls -l /dev/kvm
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
           test -w /dev/kvm
-          nproc; free -g; df -h / /mnt
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
-      - name: Prepare the VM's work directory
+      # The VM reaches the runner only on the proxy's port, and reaches the
+      # internet through NAT. Private, link-local and Azure platform addresses
+      # stay out of reach, including the runner's own.
+      - name: Create the VM's network
         run: |
-          sudo mkdir -p /mnt/vm/work
-          sudo chown -R "$USER" /mnt/vm
-          git archive --format=tar HEAD | (mkdir /mnt/vm/work/mp && tar -x -C /mnt/vm/work/mp)
-          cat > /mnt/vm/work/job.sh <<'EOF'
-          set -x
-          uname -a; nproc; free -g; df -h /nix/store /var/lib/docker /work
-          cat /proc/cpuinfo | grep -m1 "model name"
-          time curl -sS --max-time 10 http://10.0.2.2:8787/ ; echo "proxy-exit=$?"
-          # Copy the repo off the 9p share, which the VM's root doesn't own.
-          time cp -r /work/mp /root/mp && cd /root/mp
-          git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm smoke
-          time nix flake check --keep-going --print-build-logs 2>&1 | tail -20; echo "flake-check-exit=${PIPESTATUS[0]}"
-          time kind create cluster --wait 120s; echo "kind-exit=$?"
-          # Reachable only through user networking's view of the runner.
-          curl -sS --max-time 5 http://10.0.2.2:22 ; echo "runner-ssh-exit=$?"
-          df -h /nix/store /var/lib/docker
-          kubectl get nodes
-          EOF
+          sudo ip tuntap add vm0 mode tap user "$USER"
+          sudo ip addr add 192.168.100.1/30 dev vm0
+          sudo ip link set vm0 up
+          sudo sysctl -qw net.ipv4.ip_forward=1
+          uplink=$(ip route show default | awk '{print $5; exit}')
+          sudo iptables -t nat -A POSTROUTING -s 192.168.100.0/30 -o "$uplink" -j MASQUERADE
+          sudo iptables -I FORWARD 1 -i vm0 -o "$uplink" -j ACCEPT
+          sudo iptables -I FORWARD 1 -o vm0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 168.63.129.16/32; do
+            sudo iptables -I FORWARD 1 -i vm0 -d "$net" -j DROP
+          done
+          sudo iptables -I INPUT 1 -i vm0 -j DROP
+          sudo iptables -I INPUT 1 -i vm0 -p tcp --dport 8787 -j ACCEPT
+          ip -4 addr show "$uplink" | awk '/inet /{print $2}' | cut -d/ -f1 > /tmp/runner-ip
 
       - name: Start a stand-in for the proxy
         run: |
           mkdir -p /tmp/www && echo proxy-reachable > /tmp/www/index.html
-          (cd /tmp/www && python3 -m http.server 8787 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          (cd /tmp/www && python3 -m http.server 8787 --bind 192.168.100.1 >/dev/null 2>&1 &)
+
+      - name: Prepare the VM's disks
+        run: |
+          sudo mkdir -p /mnt/vm
+          sudo chown "$USER" /mnt/vm
+          mkdir -p job/mp
+          git archive --format=tar HEAD | tar -x -C job/mp
+          cat > job/job.sh <<EOF
+          RUNNER_IP=$(cat /tmp/runner-ip)
+          EOF
+          cat >> job/job.sh <<'EOF'
+          set -x
+          uname -a; nproc; free -g
+          probe() { if curl -sS -o /dev/null --max-time 5 "$2"; then echo "$1: reachable"; else echo "$1: blocked"; fi; }
+          probe proxy http://192.168.100.1:8787/
+          probe runner-ssh-via-tap http://192.168.100.1:22/
+          probe runner-ssh-via-uplink "http://$RUNNER_IP:22/"
+          probe imds http://169.254.169.254/
+          probe azure-wireserver http://168.63.129.16/
+          probe internet https://cache.nixos.org/nix-cache-info
+          time cp -r /work/mp /root/mp && cd /root/mp
+          git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm smoke
+          time nix flake check --keep-going 2>&1 | tail -5; echo "flake-check-exit=${PIPESTATUS[0]}"
+          time kind create cluster --wait 120s; echo "kind-exit=$?"
+          kubectl get nodes
+          df -h /nix/store /var/lib/docker
+          EOF
+          tar -cf /mnt/vm/in.tar -C job .
+          truncate -s 1G /mnt/vm/out.tar
 
       - name: Build the VM
-        run: |
-          time nix build ./hack/microvm#nixosConfigurations.agent.config.microvm.declaredRunner -o runner
+        run: nix build ./hack/microvm#nixosConfigurations.agent.config.microvm.declaredRunner -o runner
 
       - name: Run the VM
         working-directory: /mnt/vm
         run: |
           time timeout 80m "$GITHUB_WORKSPACE/runner/bin/microvm-run" < /dev/null > console.log 2>&1 || echo "vm-exit=$?"
-          tail -40 console.log
+          tail -30 console.log
 
+      # The output disk is a tar the VM wrote. Read it as a stream rather than
+      # mounting or extracting it, so nothing in it touches the runner's
+      # filesystem.
       - name: Job output
         if: always()
+        working-directory: /mnt/vm
         run: |
-          cat /mnt/vm/work/job.log || true
-          cat /mnt/vm/work/job.exit || true
+          tar -tvf out.tar || true
+          tar -xOf out.tar ./job.log || true
+          echo "job-exit=$(tar -xOf out.tar ./job.exit 2>/dev/null)"

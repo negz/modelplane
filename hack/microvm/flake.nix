@@ -26,6 +26,10 @@
   outputs =
     { nixpkgs, microvm, ... }:
     {
+      # The VM shares nothing with the runner. Its job arrives as a tar on a
+      # read-only disk, and it writes its results as a tar to a second disk,
+      # which the runner reads without mounting. Its only network is a tap
+      # device the runner firewalls.
       nixosConfigurations.agent = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -37,20 +41,20 @@
               networking.hostName = "agent";
 
               microvm = {
-                hypervisor = "qemu";
+                hypervisor = "firecracker";
                 vcpu = 3;
                 mem = 12288;
 
-                # User networking gives the VM outbound access through the
-                # host, where the host's loopback is 10.0.2.2.
                 interfaces = [
                   {
-                    type = "user";
-                    id = "usernet";
+                    type = "tap";
+                    id = "vm0";
                     mac = "02:00:00:00:00:01";
                   }
                 ];
 
+                # Firecracker attaches the store disk first, then these in
+                # order, so they're vdb through vde.
                 writableStoreOverlay = "/nix/.rw-store";
                 volumes = [
                   {
@@ -63,16 +67,30 @@
                     mountPoint = "/var/lib/docker";
                     size = 20480;
                   }
-                ];
-
-                # The work directory: the job's input in, its output out.
-                shares = [
                   {
-                    proto = "9p";
-                    tag = "work";
-                    source = "/mnt/vm/work";
-                    mountPoint = "/work";
+                    image = "/mnt/vm/in.tar";
+                    mountPoint = null;
+                    autoCreate = false;
+                    readOnly = true;
                   }
+                  {
+                    image = "/mnt/vm/out.tar";
+                    mountPoint = null;
+                    autoCreate = false;
+                  }
+                ];
+              };
+
+              networking.useNetworkd = true;
+              networking.useDHCP = false;
+              networking.enableIPv6 = false;
+              systemd.network.networks."10-vm0" = {
+                matchConfig.MACAddress = "02:00:00:00:00:01";
+                address = [ "192.168.100.2/30" ];
+                routes = [ { Gateway = "192.168.100.1"; } ];
+                dns = [
+                  "1.1.1.1"
+                  "8.8.8.8"
                 ];
               };
 
@@ -91,7 +109,8 @@
               users.users.root.password = "";
               services.getty.autologinUser = "root";
 
-              # Run the job, then power off so the runner's qemu exits.
+              # Unpack the job, run it, write /out back as a tar, then power
+              # off so the runner's firecracker exits.
               systemd.services.job = {
                 wantedBy = [ "multi-user.target" ];
                 after = [
@@ -104,6 +123,7 @@
                   coreutils
                   curl
                   procps
+                  gnutar
                   git
                   nix
                   docker
@@ -117,8 +137,12 @@
                 };
                 script = ''
                   set +e
-                  bash /work/job.sh > /work/job.log 2>&1
-                  echo $? > /work/job.exit
+                  mkdir -p /work /out
+                  tar -xf /dev/vdd -C /work
+                  bash /work/job.sh > /out/job.log 2>&1
+                  echo $? > /out/job.exit
+                  tar -cf /dev/vde -C /out .
+                  sync
                   ${lib.getExe' pkgs.systemd "systemctl"} poweroff
                 '';
               };
