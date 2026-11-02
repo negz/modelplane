@@ -80,7 +80,18 @@ jobs:
             rm -rf "pr/$f"
             if [ -e "reviewer/$f" ]; then cp -r "reviewer/$f" "pr/$f"; fi
           done
-          git -C pr fetch -q origin "eval/$PR-base:refs/remotes/origin/eval/$PR-base"
+
+      # Leave the agent only the PR's history and its base. Every other ref,
+      # such as today's main, shows work that came after the PR.
+      - name: Hide later history
+        working-directory: pr
+        run: |
+          base=$(jq -r .base "../eval/hack/eval/cases/$PR.json")
+          git remote remove origin
+          git for-each-ref --format='delete %(refname)' | git update-ref --stdin
+          git update-ref "refs/remotes/origin/eval/$PR-base" "$base"
+          git reflog expire --expire=now --all
+          git gc -q --prune=now
 
       - name: Write the PR's context
         run: |
@@ -158,7 +169,9 @@ jobs:
           prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /work/context. Write the review to the directory _output/review."
           printf '%s' "$prompt" > prompt
           printf '%s' "$GH_TOKEN" > gh-token
-          printf '%s\n' "modelplaneai/modelplane.*\\b$PR\\b" "\\b$PR\\b.*modelplaneai/modelplane" "^search" > block
+          # The upstream repo's issues and PRs show how this PR's review went,
+          # and what came after it.
+          printf '%s\n' 'modelplaneai/modelplane' '(^| )search( |$)' > block
           sudo mkdir -p /mnt/vm
           sudo chown "$USER" /mnt/vm
           tar -cf /mnt/vm/in.tar pr context prompt gh-token block
