@@ -72,9 +72,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Unlike review.yml, keep the PR's own CONTRIBUTING.md. Today's would tell
+      # the agent about work that came after the PR.
       - name: Install the reviewer's config
         run: |
-          for f in .opencode .agents .claude .vale .vale.ini opencode.json opencode.jsonc AGENTS.md CLAUDE.md CONTRIBUTING.md; do
+          for f in .opencode .agents .claude .vale .vale.ini opencode.json opencode.jsonc AGENTS.md CLAUDE.md; do
             rm -rf "pr/$f"
             if [ -e "reviewer/$f" ]; then cp -r "reviewer/$f" "pr/$f"; fi
           done
