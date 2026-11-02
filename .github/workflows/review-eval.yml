@@ -144,8 +144,10 @@ jobs:
             -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "$CADDY_IMAGE"
 
+      # Every arm runs in the same VM, built from this branch, which blocks gh
+      # requests about the upstream PR the case replays.
       - name: Build the VM
-        run: nix build ./reviewer/hack/review-vm#nixosConfigurations.agent.config.microvm.declaredRunner -o vm
+        run: nix build ./eval/hack/review-vm#nixosConfigurations.agent.config.microvm.declaredRunner -o vm
 
       - name: Prepare the VM's disks
         env:
@@ -154,9 +156,10 @@ jobs:
           prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /work/context. Write the review to the directory _output/review."
           printf '%s' "$prompt" > prompt
           printf '%s' "$GH_TOKEN" > gh-token
+          printf '%s\n' "modelplaneai/modelplane.*\\b$PR\\b" "\\b$PR\\b.*modelplaneai/modelplane" "^search" > block
           sudo mkdir -p /mnt/vm
           sudo chown "$USER" /mnt/vm
-          tar -cf /mnt/vm/in.tar pr context prompt gh-token
+          tar -cf /mnt/vm/in.tar pr context prompt gh-token block
           rm gh-token
           truncate -s 1G /mnt/vm/out.tar
 

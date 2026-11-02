@@ -176,7 +176,20 @@
                   pkgs.curl
                   pkgs.docker
                   pkgs.findutils
-                  pkgs.gh
+                  # An eval run blocks gh requests matching the patterns in
+                  # /work/block, so the agent can't read how the PR it
+                  # replays was reviewed.
+                  (pkgs.writeShellScriptBin "gh" ''
+                    if [ -f /work/block ]; then
+                      while read -r pat; do
+                        if printf '%s' "$*" | grep -Eq -- "$pat"; then
+                          echo "gh: not available in this environment" >&2
+                          exit 1
+                        fi
+                      done < /work/block
+                    fi
+                    exec ${pkgs.gh}/bin/gh "$@"
+                  '')
                   pkgs.git
                   pkgs.gnugrep
                   pkgs.gnutar
