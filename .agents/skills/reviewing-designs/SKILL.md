@@ -65,8 +65,8 @@ they matter.
 - Is an override or escape hatch covering for a default that the PR should fix
   instead?
 
-> Could we drop this layer? Layer 2 already checks every class a cluster
-> actually uses.
+> Should we just use an EPP all the time? It'd be vestigial for the single pod
+> case, but presumably simplify the system.
 
 ### Will the API hold up?
 
