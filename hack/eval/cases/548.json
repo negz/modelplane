@@ -1,0 +1,64 @@
+{
+  "pr": 548,
+  "base": "a128d50da53af5bc194f62f29814c04ff309197b",
+  "head": "03ebf1c099101ce23bee3bbbc091754d9607b1cd",
+  "reviewed_at": "2026-10-21T07:28:19Z",
+  "context": {
+    "number": 548,
+    "title": "Count the requests the fleet gateway has open to each model",
+    "body": "### Description of your changes\n\nTowards #476.\n\nNothing in the `modelplane_*` surface showed what callers are waiting on. When callers disconnect and the engine isn't told, it keeps decoding. On one deployment the engine held 29 requests while the gateway had 2 open, and new requests queued behind output nobody read. Both engine gauges were there, and nothing showed the gap. The direction is in https://github.com/modelplaneai/modelplane/issues/476#issuecomment-6305724060.\n\nEnvoy counts the requests it has open upstream in `envoy_cluster_upstream_rq_active`, per cluster it builds, and the collector already scraped it from every gateway pod and dropped it. It's now `modelplane_frontend_requests_active`, kept only where it counts what callers are waiting on:\n\n- On the fleet's `inference-gateway`. Each inference cluster's `cluster-gateway` counts the same requests again, so its copy is dropped, and a sum counts each request once.\n- For the cluster of a `ModelService`'s route. Envoy's own clusters, and routes such as Grafana's and the OTLP receiver's, are dropped.\n\nEnvoy names that cluster `httproute/<namespace>/<service>/rule/0`, after compose-model-route's AIGatewayRoute. The series carries `namespace`, the same label an engine's series carry, and `service`. The work is done by `metric_relabel_configs` on the gateway job, at scrape time, because both drops are on labels a `MetricMapping` can't select on.\n\nEnvoy's count drops when a caller leaves, as the 2 against 29 shows. So comparing it with an engine's running and waiting requests catches the case this is for. The telemetry docs show the query.\n\nRun through the collector with a real `/stats/prometheus` from an Envoy Gateway v1.8.4 fleet gateway, the version Modelplane pins, served once as the fleet gateway and once as a cluster gateway. Only the fleet gateway's three model routes came out, each with `namespace` and `service` and no Envoy labels.\n\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\n- [x] Added or updated tests covering any composition function changes.\n- [x] Signed off every commit with `git commit -s`.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n",
+    "author": {
+      "id": "U_kgDOEDtJfQ",
+      "is_bot": false,
+      "login": "dennis-upbound",
+      "name": "Dennis Ramdass"
+    },
+    "baseRefName": "eval/548-base",
+    "headRefOid": "03ebf1c099101ce23bee3bbbc091754d9607b1cd",
+    "commits": [
+      {
+        "oid": "03ebf1c099101ce23bee3bbbc091754d9607b1cd",
+        "messageHeadline": "Count the requests the fleet gateway has open to each model",
+        "messageBody": "Nothing in the modelplane_* surface showed what callers were waiting on.\nAn engine whose callers disconnected without it being told kept\ndecoding: on one deployment the engine held 29 requests while the\ngateway had 2 open, and new requests queued behind output nobody read.\nBoth engine gauges were there; nothing showed the gap.\n\nEnvoy counts the requests it has open upstream in\nenvoy_cluster_upstream_rq_active, per cluster it built, and the\ncollector already scraped it from every gateway and dropped it. It's\nnow modelplane_frontend_requests_active, kept only where it means what\ncallers are waiting on: on the fleet's inference-gateway, not each\ninference cluster's cluster-gateway, which counts the same requests\nagain, and only for the cluster of a ModelService's route, not Envoy's\nown clusters or routes such as Grafana's. Envoy names that cluster\nhttproute/<namespace>/<service>/rule/0, so the series carries namespace,\nthe same one an engine's series carry, and service. Relabeling at\nscrape time does this, because both drops are on labels a\nMetricMapping can't select on.\n\nThe telemetry docs show how to compare it with an engine's running and\nwaiting requests. Envoy's count drops when a caller leaves, which the\n2 against 29 shows, so the comparison catches the case it's for.\n\nTowards #476.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "design/telemetry.md",
+        "additions": 1,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/platform/telemetry.md",
+        "additions": 17,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/collector.py",
+        "additions": 56,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/stacks/metrics.py",
+        "additions": 9,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_collector.py",
+        "additions": 124,
+        "deletions": 3
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_fn.py",
+        "additions": 55,
+        "deletions": 5
+      }
+    ]
+  }
+}

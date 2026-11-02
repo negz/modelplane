@@ -1,0 +1,39 @@
+{
+  "pr": 509,
+  "base": "cdd1ebae727816f6b2c7d5f59fea87cd3bb7351e",
+  "head": "5fe6a536be9d2807d3f19e982f5511870aa6e0ec",
+  "reviewed_at": "2026-10-07T22:51:22Z",
+  "context": {
+    "number": 509,
+    "title": "Docs: Add design for CPU inference class support",
+    "body": "### Description of your changes\r\n\r\nModelplane, today, focuses strongly on GPU as the only hosting hardware for models. With GPUs being hard to come by, and slow to provision, these are impractical for quickly testing the deployment of a new Modelplane system. Instead, I offer that Modelplane supports CPU models through the `dra-driver-cpu` device classes, which we've already tested internally at Upbound to work with Modelplane.\r\n\r\nThis design outlines a plan for achieving parity with existing GPU inference classes using CPU-only nodes.\r\n\r\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\r\n\r\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\r\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\r\n- [x] Added or updated tests covering any composition function changes.\r\n- [x] Signed off every commit with `git commit -s`.\r\n",
+    "author": {
+      "id": "MDQ6VXNlcjE4NDE2ODI=",
+      "is_bot": false,
+      "login": "RedbackThomson",
+      "name": "Nicholas Thomson"
+    },
+    "baseRefName": "eval/509-base",
+    "headRefOid": "5fe6a536be9d2807d3f19e982f5511870aa6e0ec",
+    "commits": [
+      {
+        "oid": "5fe6a536be9d2807d3f19e982f5511870aa6e0ec",
+        "messageHeadline": "Docs: Add design for CPU models",
+        "messageBody": "Signed-off-by: Nicholas Thomson <RedbackThomson@users.noreply.github.com>",
+        "authors": [
+          {
+            "name": "Nicholas Thomson"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "design/cpu-inference.md",
+        "additions": 288,
+        "deletions": 0
+      }
+    ]
+  }
+}

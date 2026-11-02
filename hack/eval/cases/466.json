@@ -1,0 +1,49 @@
+{
+  "pr": 466,
+  "base": "b3b3f2f2b2e8a1e938b82a8686c92543bdf79920",
+  "head": "02062ba8deef400fc1aaf8a55b2b9791ecb6cb47",
+  "reviewed_at": "2026-09-29T18:43:27Z",
+  "context": {
+    "number": 466,
+    "title": "Place cached replicas only on clusters with cache storage",
+    "body": "### Description of your changes\n\n#176 had compose-model-cache stage only onto clusters with an RWX StorageClass, and #189 then bounded placement by the cache's `clusterSelector` alone, missing that. #370 added a source, Vultr, that never has a class.\n\nA ModelDeployment that references a ModelCache placed its replicas on any cluster the cache's selector matched. compose-model-cache stages only onto the matching clusters that report cache storage in `status.cache`. Vultr reports none, nor does an Existing cluster with no `cache.storageClassName`. So a replica could land where its PVC never appears and hang on the mount, the failure #186 describes.\n\nOnly clusters with cache storage are now candidates for a deployment that references a cache. A replica already on one without is re-placed, as a replica is when the cache's selector stops matching its cluster, which also fixes any replica the bug already stranded. With no candidate left, `ReplicasScheduled` reports `NoCacheStorage` rather than `InsufficientCapacity`.\n\nThe ModelCache docs said narrowing the selector leaves running replicas where they are. The code re-places them, which is right, since compose-model-cache deletes the cache's PVC on a cluster it no longer stages to, so this corrects the docs.\n\nA cluster that names a missing or non-RWX StorageClass still counts as having cache storage, and its PVC never binds. I haven't reproduced any of this on a real cluster, since that needs a second cluster that can't host the cache.\n\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\n- [x] Added or updated tests covering any composition function changes.\n- [x] Signed off every commit with `git commit -s`.\n",
+    "author": {
+      "id": "MDQ6VXNlcjEwNDkzNDk=",
+      "is_bot": false,
+      "login": "negz",
+      "name": "Nic Cope"
+    },
+    "baseRefName": "eval/466-base",
+    "headRefOid": "02062ba8deef400fc1aaf8a55b2b9791ecb6cb47",
+    "commits": [
+      {
+        "oid": "02062ba8deef400fc1aaf8a55b2b9791ecb6cb47",
+        "messageHeadline": "Place cached replicas only on clusters with cache storage",
+        "messageBody": "A ModelDeployment that references a ModelCache placed its replicas on any\ncluster the cache's clusterSelector matched, but compose-model-cache only\nstages the cache onto matching clusters that report cache storage, an RWX\nStorageClass in status.cache. Vultr clusters, and Existing clusters that\nname no RWX StorageClass, report none, so a replica could land where its PVC\nnever appears and hang on the volume mount (#186).\n\nThis makes only clusters with cache storage candidates for a deployment that\nreferences a cache. A replica already on one without is re-placed, as a\nreplica is when the cache's selector stops matching its cluster, and a\ndeployment left with no candidate says so in ReplicasScheduled rather than\nblaming capacity.\n\nIt also corrects the ModelCache docs, which said narrowing the selector\nleaves running replicas where they are. They're re-placed, which is right,\nsince compose-model-cache deletes the cache's PVC on a cluster it no longer\nstages to.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "docs/content/models/model-cache.md",
+        "additions": 5,
+        "deletions": 5
+      },
+      {
+        "path": "functions/compose-model-deployment/function/fn.py",
+        "additions": 25,
+        "deletions": 5
+      },
+      {
+        "path": "functions/compose-model-deployment/tests/test_fn.py",
+        "additions": 172,
+        "deletions": 2
+      }
+    ]
+  }
+}

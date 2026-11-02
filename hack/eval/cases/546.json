@@ -1,0 +1,271 @@
+{
+  "pr": 546,
+  "base": "a128d50da53af5bc194f62f29814c04ff309197b",
+  "head": "a85f1b4760c3e0731384db966d0d12ea6bce8912",
+  "reviewed_at": "2026-10-21T02:25:09Z",
+  "context": {
+    "number": 546,
+    "title": "Fix wrong and empty built-in engine metrics",
+    "body": "### Description of your changes\n\nFixes #523.\nFixes #524.\nFixes #525.\nFixes #547.\nTowards #476.\n\nThe built-in engine metrics were wrong or missing for configurations Modelplane ships, and nothing reported it. vLLM's and SGLang's token histograms shared `modelplane_request_input_tokens` and `modelplane_request_output_tokens` with different buckets, so a quantile over either was wrong. Three recipes ran engines whose metrics the mappings can't read, so their series were empty. And a prefill/decode deployment counted every request on both engines, with no label to tell the two apart. Separately, vLLM's KV offload and speculative decoding metrics, and DCGM's PCIe and SM fields, had no mappings at all, so operators running those features wrote the same `MetricMapping` by hand.\n\nThe token histograms now leave the cluster only as their sums and counts, `modelplane_engine_tokens_total{direction}` and `modelplane_engine_requests_total`. A shared bucket layout isn't possible even for one engine, because vLLM sizes its buckets from `--max-model-len`. The direction is discussed in https://github.com/modelplaneai/modelplane/issues/523#issuecomment-6298855801. Prefill and decode engines' series carry a `phase` label, and the telemetry docs show how to count each request once. The design gave these series a label called `role`. It's `phase` here because `role` already holds the member's role. The recipes get the vLLM version and SGLang flags the mappings need, and the docs manifest validator now fails a recipe that doesn't have them.\n\nThe #547 metrics are mapped. vLLM publishes them only while the feature runs, so the scrapes of the pinned versions can't show them. Their cases list them, checked against vLLM's source, and every one was read through a collector into Prometheus from a vLLM v0.30.0 deployment running both features. DCGM's PCIe fields are a sampled rate. The gpu-operator's metrics CSV types them as counters and GKE's managed exporter as gauges, so the one metric arrived under two names, with and without `_total`, depending on the cloud. The collector now makes them gauges before renaming them. GKE's managed exporter doesn't publish SM occupancy, so that series is empty on GKE.\n\nvLLM's finished requests are mapped too, as the design's `modelplane_responses_total{reason}`, from `vllm:request_success_total` with `finished_reason` renamed to `reason`. A request whose client disconnected should end as `abort`, so `abort` staying at 0 while clients give up shows the disconnect isn't reaching the engine.\n\nA new test checks every mapping against what the component versions Modelplane pins really publish. A bump that drops a name or changes a histogram's buckets then fails CI. Against `main`'s mappings it fails with #523. Each version's fixture lists every name it publishes and each histogram's bucket boundaries, written by `hack/scrape_fixture.py` from the `/metrics` of a pod that had served requests. SGLang only publishes its retraction counter after a retraction, which a lightly loaded pod doesn't hit, so that one name is checked against SGLang's source. The SGLang cases list it.\n\nTwo things change for existing users. The buckets of `modelplane_request_input_tokens` and `modelplane_request_output_tokens` are gone, so a dashboard reading them moves to the new counters. The `phase` label is a new pod label, so a prefill/decode deployment's engine pods roll when this is installed.\n\nVerified on GKE (L4) with a control plane built from this branch:\n\n- The llama recipe serves on vLLM v0.23.0.\n- The engine counters match vLLM's and SGLang's own totals.\n- On vLLM prefill/decode, 15 requests summed to 30 without the `phase` filter and 15 with it.\n\n<details>\n<summary>Every metric the built-in mappings export after this change</summary>\n\nThe collector exports these and nothing else: it drops any series no mapping renamed. `modelplane_request_input_tokens` and `modelplane_request_output_tokens` are gone.\n\nEvery series carries `cluster`, and `job` and `instance` for what it was scraped from. Engine series also carry `deployment`, `replica`, `namespace`, `engine` and `role`, plus `phase` on a prefill/decode deployment. Picker series carry the same apart from `engine`, with `role=\"picker\"`. Gateway series carry the model instead of a deployment, as `gen_ai_original_model` and `gen_ai_request_model`. GPU series carry `node`.\n\n| Metric | Type | Source |\n|---|---|---|\n| `modelplane_frontend_request_duration_seconds` | histogram | Gateway: `gen_ai_server_request_duration_seconds` |\n| `modelplane_frontend_ttft_seconds` | histogram | Gateway: `gen_ai_server_time_to_first_token_seconds` |\n| `modelplane_frontend_tpot_seconds` | histogram | Gateway: `gen_ai_server_time_per_output_token_seconds` |\n| `modelplane_request_ttft_seconds` | histogram | vLLM: `vllm:time_to_first_token_seconds` |\n| `modelplane_request_duration_seconds` | histogram | vLLM: `vllm:e2e_request_latency_seconds` |\n| `modelplane_request_queue_seconds` | histogram | vLLM: `vllm:request_queue_time_seconds` |\n| `modelplane_request_prefill_seconds` | histogram | vLLM: `vllm:request_prefill_time_seconds` |\n| `modelplane_request_decode_seconds` | histogram | vLLM: `vllm:request_decode_time_seconds` |\n| `modelplane_requests_running` | gauge | vLLM: `vllm:num_requests_running`<br>SGLang: `sglang:num_running_reqs` |\n| `modelplane_requests_waiting` | gauge | vLLM: `vllm:num_requests_waiting`<br>SGLang: `sglang:num_queue_reqs` |\n| `modelplane_kv_cache_utilization_ratio` | gauge | vLLM: `vllm:kv_cache_usage_perc`<br>SGLang: `sglang:token_usage` |\n| `modelplane_requests_preempted_total` | counter | vLLM: `vllm:num_preemptions_total`<br>SGLang: `sglang:num_retracted_requests_total` |\n| `modelplane_prefix_cache_hits_total` | counter | vLLM: `vllm:prefix_cache_hits_total`<br>SGLang: `sglang:cached_tokens_total` |\n| `modelplane_prefix_cache_lookups_total` | counter | vLLM: `vllm:prefix_cache_queries_total`<br>SGLang: `sglang:prompt_tokens_total` |\n| `modelplane_external_prefix_cache_hits_total` (new) | counter | vLLM: `vllm:external_prefix_cache_hits_total` |\n| `modelplane_external_prefix_cache_lookups_total` (new) | counter | vLLM: `vllm:external_prefix_cache_queries_total` |\n| `modelplane_kv_offload_store_bytes_total` (new) | counter | vLLM: `vllm:kv_offload_store_bytes_total` |\n| `modelplane_kv_offload_load_bytes_total` (new) | counter | vLLM: `vllm:kv_offload_load_bytes_total` |\n| `modelplane_kv_offload_store_seconds_total` (new) | counter | vLLM: `vllm:kv_offload_store_time_total` |\n| `modelplane_kv_offload_load_seconds_total` (new) | counter | vLLM: `vllm:kv_offload_load_time_total` |\n| `modelplane_kv_offload_in_transfer_ratio` (new) | gauge | vLLM: `vllm:kv_offload_cpu_cache_usage_perc` |\n| `modelplane_spec_decode_drafts_total` (new) | counter | vLLM: `vllm:spec_decode_num_drafts_total` |\n| `modelplane_spec_decode_draft_tokens_total` (new) | counter | vLLM: `vllm:spec_decode_num_draft_tokens_total` |\n| `modelplane_spec_decode_accepted_tokens_total` (new) | counter | vLLM: `vllm:spec_decode_num_accepted_tokens_per_pos_total` |\n| `modelplane_engine_tokens_total` (new) | counter | vLLM: sum of `vllm:request_prompt_tokens`, `direction=\"input\"`<br>vLLM: sum of `vllm:request_generation_tokens`, `direction=\"output\"`<br>SGLang: sum of `sglang:prompt_tokens_histogram`, `direction=\"input\"`<br>SGLang: sum of `sglang:generation_tokens_histogram`, `direction=\"output\"` |\n| `modelplane_engine_requests_total` (new) | counter | vLLM: count of `vllm:request_prompt_tokens`<br>SGLang: count of `sglang:prompt_tokens_histogram` |\n| `modelplane_responses_total` (new) | counter | vLLM: `vllm:request_success_total`, `finished_reason` as `reason` |\n| `modelplane_route_decision_seconds` | histogram | Picker: `llm_d_epp_scheduler_e2e_duration_seconds` |\n| `modelplane_gpu_memory_used_bytes` | gauge | DCGM: `DCGM_FI_DEV_FB_USED`, converted from mebibytes |\n| `modelplane_gpu_memory_free_bytes` (new) | gauge | DCGM: `DCGM_FI_DEV_FB_FREE`, converted from mebibytes |\n| `modelplane_gpu_compute_active_ratio` | gauge | DCGM: `DCGM_FI_PROF_GR_ENGINE_ACTIVE` |\n| `modelplane_gpu_tensor_active_ratio` | gauge | DCGM: `DCGM_FI_PROF_PIPE_TENSOR_ACTIVE` |\n| `modelplane_gpu_memory_bandwidth_ratio` | gauge | DCGM: `DCGM_FI_PROF_DRAM_ACTIVE` |\n| `modelplane_gpu_temperature_celsius` | gauge | DCGM: `DCGM_FI_DEV_GPU_TEMP` |\n| `modelplane_gpu_power_watts` | gauge | DCGM: `DCGM_FI_DEV_POWER_USAGE` |\n| `modelplane_energy_joules_total` | counter | DCGM: `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION`, converted from millijoules |\n| `modelplane_gpu_pcie_transmit_bytes_per_second` (new) | gauge | DCGM: `DCGM_FI_PROF_PCIE_TX_BYTES` |\n| `modelplane_gpu_pcie_receive_bytes_per_second` (new) | gauge | DCGM: `DCGM_FI_PROF_PCIE_RX_BYTES` |\n| `modelplane_gpu_sm_active_ratio` (new) | gauge | DCGM: `DCGM_FI_PROF_SM_ACTIVE` |\n| `modelplane_gpu_sm_occupancy_ratio` (new) | gauge | DCGM: `DCGM_FI_PROF_SM_OCCUPANCY` |\n</details>\n\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\n- [x] Added or updated tests covering any composition function changes.\n- [x] Signed off every commit with `git commit -s`.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n",
+    "author": {
+      "id": "U_kgDOEDtJfQ",
+      "is_bot": false,
+      "login": "dennis-upbound",
+      "name": "Dennis Ramdass"
+    },
+    "baseRefName": "eval/546-base",
+    "headRefOid": "a85f1b4760c3e0731384db966d0d12ea6bce8912",
+    "commits": [
+      {
+        "oid": "0005770408f04701dfc185995f2d3434d19158ca",
+        "messageHeadline": "Export the engines' token histograms as counters",
+        "messageBody": "The built-in mappings renamed vLLM's and SGLang's prompt and generation\ntoken histograms onto modelplane_request_input_tokens and\nmodelplane_request_output_tokens. The two engines bucket them\ndifferently, and vLLM sizes its buckets from --max-model-len, so even two\nvLLM deployments disagree. A quantile sums buckets by boundary, so any\nmix of sources under one name gave a wrong answer that looked right: a\np90 of 460 tokens where every prompt was 150.\n\nNo single layout exists to rename them onto, so the histograms no longer\nleave the cluster. Their sums and counts do, which have no buckets:\nmodelplane_engine_tokens_total{direction} and\nmodelplane_engine_requests_total. Those add up correctly across any mix\nof engines and context lengths. The token-length distribution is the\ncost: it isn't in the normalized engine metrics any more.\n\nThe engine_ prefix keeps these apart from the gateway's\nmodelplane_tokens_total in the design, so the two can't be summed\ntogether by accident.\n\nFixes #523.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "62b44bb66282f29e9a1284d33b5eece4bc4f1c10",
+        "messageHeadline": "Hold recipe engines to what the metric mappings read",
+        "messageBody": "Three recipes shipped engines whose metrics the built-in mappings can't\nread, and nothing reported it: the collector drops what it doesn't\nrename, so a modelplane_* series just never appears.\n\nThe llama-3.1-8b recipe pinned vLLM v0.7.3, whose V0 engine publishes\nvllm:gpu_cache_usage_perc and prefix-cache hit-rate gauges instead of the\nnames the mappings read, and latency histograms with fewer buckets than\nevery later version. The laguna and qwen3-coder recipes ran SGLang\nwithout --enable-metrics, so they served no /metrics at all, and\nqwen3-coder's v0.5.10 also needs --collect-tokens-histogram for its token\nhistograms.\n\nThis moves llama-3.1-8b to vLLM v0.23.0, the version most recipes pin,\nand adds the flags to both SGLang recipes. The llama recipe was served on\nv0.23.0 on GKE with one L4. The docs manifest validator now fails a\nrecipe whose SGLang engine lacks those flags or whose vLLM image is older\nthan v0.9.2, so the next one is caught before it ships.\n\nFixes #524.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "3e47b3a469a33a3cd893251f32a198240010d63e",
+        "messageHeadline": "Label prefill and decode engines' series with their phase",
+        "messageBody": "A disaggregated request runs on both a prefill and a decode engine, and\neach counts it: the prefill engine gets the whole request with its token\nlimit set to one. Summed over a deployment, as the telemetry docs say to\nsum anything counted, requests and input tokens came to twice what\ncallers sent. Nothing on a series told the two engines apart except the\nengine's name, which the user picks, because role holds the member's\nrole and is Standalone on both.\n\ncompose-model-replica now copies an engine's phase onto a\nmodelplane.ai/phase pod label, and the collector carries it as phase,\npart of the identity beside role. It's absent on a unified engine. A\nquery counts requests and output tokens on phase!=\"Prefill\" and prefill\nwork on phase!=\"Decode\", and the telemetry docs now say so. Served live\nwith vLLM v0.23.0 on two L4s, 15 requests summed to 30 without the\nfilter and to 15 with it.\n\nThe design already gave disaggregated engine series a label for this,\ncalling it role. It's phase here because role was taken.\n\nSGLang counts a running or waiting request more than once under\n--enable-priority-scheduling and --enable-metrics-for-all-schedulers.\nNo recipe sets either, and a mapping can't select one series out of\nseveral yet, so the docs say so instead.\n\nFixes #525.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "a49c4fc98c7b6d2ac02155e28c71b4bb40c20414",
+        "messageHeadline": "Check the built-in mappings against scrapes of what they read",
+        "messageBody": "The built-in mappings are written against upstream source, and nothing\nchecked them against a running component. #523, #524 and #525 all came\nfrom that gap: a name a pinned version doesn't publish leaves a\nmodelplane_* series empty with no error, and histograms with different\nbuckets under one name give wrong quantiles.\n\nThis records what each pinned component version publishes, read from\npods serving traffic on GKE: the gateway, the picker, GKE's DCGM\nexporter, vLLM v0.11.0 and v0.23.0, and SGLang v0.5.10 and v0.5.12.\nhack/scrape_fixture.py turns a pod's /metrics into a fixture of every\nname it publishes and each histogram's bucket boundaries. A test checks\nthat every name each mapping reads is in its scrapes, and that each\nmodelplane_* histogram has one source with the same buckets in every\nversion. Against the mappings before #523 it fails on\nmodelplane_request_input_tokens and modelplane_request_output_tokens.\n\nSGLang publishes its retraction counter only after the first retraction,\nwhich a lightly loaded pod never does, so that one name is checked\nagainst SGLang's source and listed on its cases. A version bump needs a\nnew scrape and a case.\n\nTowards #476.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "a85f1b4760c3e0731384db966d0d12ea6bce8912",
+        "messageHeadline": "Map vLLM's KV offload and speculative decoding metrics, and more GPU fields",
+        "messageBody": "vLLM's KV offload tier and speculative decoding, and DCGM's PCIe and SM\nfields, had no built-in mappings. The collector exports only what a\nmapping renames, so every operator running these features wrote the\nsame MetricMapping by hand.\n\nThis maps them. The vLLM names are published only while the feature\nruns: an external prefix cache from v0.23.0, the offload tier's\ntransfers from v0.27.1, and speculative decoding when it's configured.\nThe scrapes of the pinned versions can't show those, so their cases list\nthem and they're checked against vLLM's source. All of them, and the\nGPU fields, were read through a collector into Prometheus from a vLLM\nv0.30.0 deployment running both features.\n\nDCGM samples PCIe traffic as a rate, but the gpu-operator's metrics CSV\ntypes it a counter and GKE's managed exporter a gauge, so the one metric\nreached Prometheus under two names, with and without _total, depending\non the cloud. The collector now makes both PCIe fields gauges before\nrenaming them. GKE's managed exporter doesn't publish SM occupancy, so\nthat series is empty on GKE, which the docs say.\n\nFixes #547.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [
+      {
+        "body": "### What happened?\n\nThe built-in mappings rename histograms from different engines, engine versions and deployments onto one `modelplane_*` name, but nothing guarantees those sources share bucket boundaries. When they don't, a fleet quantile over the shared name is wrong while looking plausible.\n\nThe module docstring ([metrics.py#L21-L27](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/metrics.py#L21-L27)) and the MetricMapping XRD both say a histogram is only renamed onto a shared name where its buckets match. That holds when a histogram's buckets are fixed per component, as they are for the gateway and the endpoint picker. It doesn't hold for these:\n\n1. **vLLM and SGLang token counts.** [metrics.py#L50-L51](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/metrics.py#L50-L51) and [#L72-L73](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/metrics.py#L72-L73) both feed `modelplane_request_input_tokens` and `modelplane_request_output_tokens`. vLLM v0.23.0 buckets them 1, 2, 5, 10, 20, 50, 100, 200, 500, \u2026; SGLang v0.5.12.post1 uses 100, 300, 500, 700, 1000, 1500, \u2026\n2. **vLLM token counts across deployments.** vLLM builds both token histograms with [`build_1_2_5_buckets(max_model_len)`](https://github.com/vllm-project/vllm/blob/v0.23.0/vllm/v1/metrics/loggers.py#L689-L701), so the top bucket follows each deployment's `--max-model-len`. The examples use 8192, 16384, 40960 and 131072, which gives top buckets from 5000 to 100000. Two vLLM deployments on the same version are enough to break the quantile.\n3. **SGLang token counts across versions and flags.** The default list changed between [v0.5.10.post1](https://github.com/sgl-project/sglang/blob/v0.5.10.post1/python/sglang/srt/observability/metrics_collector.py#L1120) (\u2026, 12000, 15000, 20000, 22000, \u2026, 66000, 99000, 132000, \u2026) and [v0.5.12.post1](https://github.com/sgl-project/sglang/blob/v0.5.12.post1/python/sglang/srt/observability/metrics_collector.py#L1280) (\u2026, 12500, 15000, 17500, \u2026, 60000, 80000, 100000, 200000, \u2026). The repo pins both. `--prompt-tokens-buckets` and `--generation-tokens-buckets` override it per deployment.\n4. **vLLM latency across versions.** v0.7.3 runs the V0 engine by default. Its TTFT buckets [stop at 10.0](https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/engine/metrics.py#L134-L141) and its e2e and queue buckets [stop at 60.0](https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/engine/metrics.py#L152-L155). [v0.9.2 and later](https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/metrics/loggers.py#L376-L382) extend them to 2560 and 7680. The llama-3.1-8b recipe pins v0.7.3, and the others pin v0.11.0 or later.\n\nRun through the collector, a mismatch shows up two ways. Where one source has a bucket the other lacks, `sum by (le)` stops being monotonic. Where one source's top bucket is lower, its observations above that bucket only count toward `+Inf`, so the fleet histogram puts them above the other source's highest bucket. Both happen in the reproduction below. In each case every engine serves the same 1000 requests:\n\n```\n# Case 1: vLLM v0.23.0 and SGLang v0.5.12.post1, every prompt 150 tokens\nsum by (le) (modelplane_request_input_tokens_bucket)\n  le=100 0   le=200 1000   le=300 1000   le=500 2000   le=700 1000   le=1000 2000\nhistogram_quantile(0.9, sum by (le) (...))                 460    (true: 150)\nby (deployment, le)                          vLLM 190, SGLang 280\n\n# Case 2: vLLM v0.23.0, max_model_len 4096 and 32768, every prompt 3000 tokens\nsum by (le) (modelplane_request_input_tokens_bucket)\n  le=2000 0   le=5000 1000   le=10000 1000   le=20000 1000   le=+Inf 2000\nhistogram_quantile(0.5, sum by (le) (...))                5000    (true: 3000)\nhistogram_quantile(0.9, sum by (le) (...))               20000\n```\n\nIn case 2 the fleet histogram says half the requests had prompts over 20,000 tokens, but the longest prompt was 3000.\n\nGrouping by `deployment` avoids the cross-deployment cases but not the cross-version one during a rolling engine upgrade, and nothing on a series says which engine or version produced it: `engine` holds the engine's name from the ModelReplica, not vLLM or SGLang.\n\n### How can we reproduce it?\n\n1. Render the collector config with `collector.config(...)` from main, `metrics.BUILTIN_MAPPINGS` and a `prometheus` sink. Replace the receiver's scrape configs with static targets labeled with `deployment`, `replica`, `engine` and `namespace`.\n2. Serve a static `/metrics` from each target with the source histograms above, using each engine's real bucket list and 1000 identical observations.\n3. Run `otel/opentelemetry-collector-contrib:0.161.0` with that config, and have Prometheus v3.5.0 scrape its exporter.\n4. Query `histogram_quantile(0.9, sum by (le) (modelplane_request_input_tokens_bucket))`.\n\n### What environment did it happen in?\n\nModelplane version: main at 0ee6ab4d4f (also v0.5.0)\nCollector: otel/opentelemetry-collector-contrib:0.161.0\nEngines: bucket layouts from vLLM v0.7.3, v0.11.0 and v0.23.0, and SGLang v0.5.10.post1 and v0.5.12.post1, the versions the repo pins\nBackend: Prometheus v3.5.0\n",
+        "comments": [
+          {
+            "id": "IC_kwDORordgc8AAAABdz1tXg",
+            "author": {
+              "login": "dennis-upbound"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "Options for this, before anyone builds one. Only `modelplane_request_input_tokens` and `modelplane_request_output_tokens` take histograms from two engines. The latency histograms (`ttft`, `duration`, `queue`, `prefill`, `decode`) come from vLLM alone, so the mismatch there is only between vLLM versions.\n\n1. **Group by deployment.** A quantile over these names has to be `sum by (deployment, le)`, never `sum by (le)`. A deployment's engines are one kind of engine and normally share a `--max-model-len`, which fixes cases 1 and 2. Rolling a deployment to a new engine version still mixes buckets for the length of the roll. The telemetry docs would say this, beside each histogram.\n2. **Give the token histograms per-engine names,** such as `modelplane_vllm_request_input_tokens`. This keeps vLLM and SGLang apart even under `sum by (le)`, but vLLM deployments with different `--max-model-len` still don't share buckets. It also breaks any dashboard that compares engines. Comparing engines is why the names are shared.\n3. **Label the engine image.** The collector's engine scrape job copies `__meta_kubernetes_pod_container_image` into an `image` label. Every engine series then says which engine and version produced it. Grouping by `(deployment, image, le)` then also separates a rolling upgrade's two versions. It's one relabel rule, and adds one label with a few values per deployment.\n\nI'd do 1 and 3. Option 2 costs the cross-engine comparison and doesn't fix the per-deployment case that 1 already handles. @negz, does an `image` label on engine series fit the `modelplane_*` metrics?\n",
+            "createdAt": "2026-10-20T16:12:30Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/modelplaneai/modelplane/issues/523#issuecomment-6295481694",
+            "viewerDidAuthor": false
+          },
+          {
+            "id": "IC_kwDORordgc8AAAABd3DpeQ",
+            "author": {
+              "login": "dennis-upbound"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "Replacing the options in my comment above with a direction, since we want this fixed for v0.6.\n\nThose options left a shared name with more than one bucket layout and asked whoever writes the query to group around it. A fleet dashboard is written once, by someone who hasn't read that rule, and `sum by (le)` gives a wrong number with only a Prometheus info annotation to say so. I ran the repro into Prometheus v3.5 and v3.15, classic and NHCB: no setting gets the right answer, and v3.15's NHCB bucket reconciliation still gives p90 = 460 against a true 150. A central Prometheus doesn't change that either, since the repro already used one.\n\nThe rule I'd adopt: every `modelplane_*` histogram has exactly one bucket layout across the fleet, so the obvious query is the right one.\n\nThat already holds for the gateway and the picker. It holds for the engine latency histograms once nothing runs vLLM older than v0.9.2: their buckets are identical from v0.9.2 to v0.27.1, and only the llama-3.1-8b recipe still pins v0.7.3. It can't hold for the token histograms. vLLM sizes them from `--max-model-len`, so two vLLM deployments disagree, and SGLang's change between releases and with `--prompt-tokens-buckets`. Per-engine names wouldn't help, because vLLM disagrees with itself.\n\nFor v0.6:\n\n1. Export the engine token histograms as counters only. Take each one's sum and count with `part: Sum` and `part: Count`, onto `modelplane_engine_tokens_total{direction}` and `modelplane_engine_requests_total`, and stop exporting the buckets under `modelplane_request_input_tokens` and `modelplane_request_output_tokens`. I ran this through the collector against vLLM and SGLang bucket layouts and against two vLLM context lengths. Totals per deployment and across the fleet were exact, and so was the fleet mean prompt length (1575, the true value), with no bucket series left. The `engine_` prefix keeps these apart from the gateway's `modelplane_tokens_total` in the design, so the two can't be added together by accident.\n2. Move the llama-3.1-8b recipe off v0.7.3. That's #524 as well.\n3. Add a test that fails when two built-in mappings send a histogram to the same target. #544 left `sglang:queue_time_seconds` out by hand for this reason, and the test means the next mapping doesn't depend on someone remembering.\n\nWhat it costs: the normalized engine metrics no longer carry a token-length distribution, including the per-deployment one, which was correct. Two places can supply it later, and neither blocks this. The gateway's `gen_ai_client_token_usage` has fixed buckets and is planned for `modelplane_tokens_total` in #476. `passthrough` on a MetricMapping ([telemetry.md#L225](https://github.com/modelplaneai/modelplane/blob/a128d50da5/design/telemetry.md#L225)) is in the design but not in the XRD yet. Anyone on v0.5.0 using the buckets of `modelplane_request_input_tokens` loses them, so this needs a release note and an update to the metric surface table ([telemetry.md#L621](https://github.com/modelplaneai/modelplane/blob/a128d50da5/design/telemetry.md#L621)).\n\nThe engine counters still double when a prefill/decode deployment's two legs are summed. That's #525, which needs a phase label rather than anything here.\n\nAn `image` label (option 3 above) would still help compare engines and separate a rolling upgrade, but this issue no longer needs it.\n\n@negz does this work for you?\n",
+            "createdAt": "2026-10-20T19:02:17Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/modelplaneai/modelplane/issues/523#issuecomment-6298855801",
+            "viewerDidAuthor": false
+          }
+        ],
+        "number": 523,
+        "title": "Built-in metric mappings merge histograms whose buckets don't match"
+      },
+      {
+        "body": "### What happened?\n\nSome configurations Modelplane ships leave built-in `modelplane_*` metrics empty, with no error. The collector drops everything it didn't rename, so when a source metric isn't emitted, the `modelplane_*` name just never appears at the sink. In each case below Modelplane's own manifests or stacks produce the gap.\n\n**Engine recipes that don't emit the mapped names**\n\n- The llama-3.1-8b recipe pins `vllm/vllm-openai:v0.7.3` ([model-deployment.yaml#L47](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/manifests/recipes/llama-3.1-8b/model-deployment.yaml#L47)). That version runs the V0 engine by default ([envs.py#L503-L504](https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py#L503-L504)), which publishes `vllm:gpu_cache_usage_perc` and prefix-cache hit-rate gauges ([engine/metrics.py#L85-L106](https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/engine/metrics.py#L85-L106)) instead of the names in [metrics.py#L54-L57](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/metrics.py#L54-L57). `modelplane_kv_cache_utilization_ratio`, `modelplane_prefix_cache_hits_total` and `modelplane_prefix_cache_lookups_total` are empty for it. Every other pinned vLLM version, v0.9.2 and later, publishes all of them.\n- Neither SGLang recipe passes `--enable-metrics`: [laguna/model-deployment-sglang.yaml#L46-L57](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/manifests/recipes/laguna/model-deployment-sglang.yaml#L46-L57) (v0.5.12.post1) and [qwen3-coder/model-deployment-fp8.yaml#L46-L61](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/manifests/recipes/qwen3-coder/model-deployment-fp8.yaml#L46-L61) (v0.5.10.post1). SGLang only mounts `/metrics` with that flag ([http_server.py#L302-L304](https://github.com/sgl-project/sglang/blob/v0.5.12.post1/python/sglang/srt/entrypoints/http_server.py#L302-L304)), so every `_SGLANG` name is empty for both. The qwen3-coder recipe also lacks `--collect-tokens-histogram`, which v0.5.10 needs for the token histograms. [telemetry.md#L240-L245](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/content/platform/telemetry.md#L240-L245) tells users SGLang needs both flags and that \"vLLM needs nothing\", which isn't true for v0.7.3.\n\n**Cloud stacks that install no GPU exporter**\n\n- Civo turns the exporter off: [civo.py#L280](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/clouds/civo.py#L280) sets `dcgmExporter.enabled: False` because its ServiceMonitor needs the Prometheus CRDs ([#L268-L272](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/clouds/civo.py#L268-L272)). Every `modelplane_gpu_*` series and `modelplane_energy_joules_total` is empty on Civo.\n\n#519 covers the same GPU gap for `source: Existing` clusters, where Modelplane installs nothing. This is about clusters Modelplane builds.\n\n### How can we reproduce it?\n\n1. Deploy the llama-3.1-8b recipe, or either SGLang recipe, with a TelemetryDestination configured.\n2. Send it some requests.\n3. Query the sink for `modelplane_kv_cache_utilization_ratio` (llama) or `modelplane_requests_running` (SGLang). No series exist for that deployment.\n\nFor GPUs, provision an inference cluster on Civo, deploy any model, and query `modelplane_gpu_memory_used_bytes`.\n\n### What environment did it happen in?\n\nModelplane version: main at 0ee6ab4d4f (also v0.5.0)\nEngines: vLLM v0.7.3, SGLang v0.5.10.post1 and v0.5.12.post1, as pinned in the recipes\nClouds: Civo (from the stack code)\nFound by reading the code and upstream source at the pinned versions, not on a live cluster\n",
+        "comments": [
+          {
+            "id": "IC_kwDORordgc8AAAABd3DrhA",
+            "author": {
+              "login": "dennis-upbound"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "#526 fixed the Civo half: the stack now runs the DCGM exporter. The recipes remain, and I'd fix them for v0.6:\n\n1. Move llama-3.1-8b off vLLM v0.7.3. That also gives it the same latency buckets as every other vLLM deployment (#523).\n2. Add `--enable-metrics` to both SGLang recipes. Add `--collect-tokens-histogram` too while qwen3-coder stays on v0.5.10.post1. v0.5.12 always collects the histograms and accepts the flag as a no-op.\n3. Correct [telemetry.md#L248](https://github.com/modelplaneai/modelplane/blob/a128d50da5/docs/content/platform/telemetry.md#L248). \"vLLM needs nothing\" holds from v0.9.2.\n4. Add a test over `docs/manifests/recipes/` that fails on an SGLang engine without `--enable-metrics`, or on a vLLM image older than v0.9.2. Nothing checks recipes against the mappings today, which is how these shipped. The e2e test only checks two names, from a mock engine.\n",
+            "createdAt": "2026-10-20T19:02:19Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/modelplaneai/modelplane/issues/524#issuecomment-6298856324",
+            "viewerDidAuthor": false
+          }
+        ],
+        "number": 524,
+        "title": "Some shipped recipes and cloud stacks leave built-in metrics empty"
+      },
+      {
+        "body": "### What happened?\n\nIn some configurations an engine reports one request in more than one series under the same `modelplane_*` name. The aggregation the docs recommend, `sum by (deployment)` for anything counted ([telemetry.md#L37-L45](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/content/platform/telemetry.md#L37-L45)), then counts it more than once, and no label lets the query exclude the extra series.\n\n**Prefill/decode serving with vLLM.** The pd-sidecar sends the prefill engine a full copy of the request with the token limit set to 1 ([connector_nixlv2.go#L171-L176](https://github.com/llm-d/llm-d-router/blob/v0.9.0/pkg/sidecar/proxy/connector_nixlv2.go#L171-L176)), then sends the decode engine the request again ([#L299](https://github.com/llm-d/llm-d-router/blob/v0.9.0/pkg/sidecar/proxy/connector_nixlv2.go#L299)). vLLM records every finished request ([loggers.py#L1183-L1208](https://github.com/vllm-project/vllm/blob/v0.23.0/vllm/v1/metrics/loggers.py#L1183-L1208)), so a disaggregated request appears on both engines. Summed by deployment, `modelplane_request_input_tokens` is about twice the real total, and every `_count` (requests, TTFT, latency, queue time) is twice the request count. `modelplane_request_output_tokens` gains one token per request.\n\nA query can't filter one leg out. `role` comes from the member role ([base.py#L289-L290](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-model-replica/function/backends/base.py#L289-L290)), which is `Standalone` on both engines in the kimi-k2 recipe ([model-deployment.yaml#L35-L38](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/manifests/recipes/kimi-k2/model-deployment.yaml#L35-L38)), and the engine's `phase` isn't put on any label. Only `engine`, a name the user picks, tells the two apart. The decider only disaggregates requests with at least 16 uncached tokens ([routing.py#L131-L139](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-model-replica/function/routing.py#L131-L139)), so how far off the totals are depends on the traffic.\n\n[telemetry.md#L20-L21](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/docs/content/platform/telemetry.md#L20-L21) says a prefill/decode pair \"is collected the same way as one pod\", which reads as if no extra handling is needed.\n\n**SGLang with `--enable-priority-scheduling`.** `sglang:num_running_reqs` and `sglang:num_queue_reqs` are published once as a total with `priority=\"\"`, which Prometheus treats as no label, and again once per priority ([scheduler_metrics_mixin.py#L143-L144](https://github.com/sgl-project/sglang/blob/v0.5.12.post1/python/sglang/srt/observability/scheduler_metrics_mixin.py#L143-L144), [metrics_collector.py#L945-L957](https://github.com/sgl-project/sglang/blob/v0.5.12.post1/python/sglang/srt/observability/metrics_collector.py#L945-L957)). v0.5.10.post1 does the same. The docs' own example, `sum by (deployment) (modelplane_requests_running)`, returns twice the real count. Those two gauges map to `modelplane_requests_running` and `modelplane_requests_waiting` ([metrics.py#L69-L70](https://github.com/modelplaneai/modelplane/blob/0ee6ab4d4f/functions/compose-serving-stack/function/stacks/metrics.py#L69-L70)).\n\nWith `--enable-metrics-for-all-schedulers`, every attention-TP rank publishes the same gauges under its own `tp_rank` ([scheduler_metrics_mixin.py#L124-L128](https://github.com/sgl-project/sglang/blob/v0.5.12.post1/python/sglang/srt/observability/scheduler_metrics_mixin.py#L124-L128)), so the sum is TP size times the real count.\n\n### How can we reproduce it?\n\nPrefill/decode:\n\n1. Deploy the kimi-k2 recipe (vLLM, `serving.mode: PrefillDecode`) with a TelemetryDestination configured.\n2. Send N requests with prompts longer than 16 tokens and no shared prefix.\n3. `sum by (deployment) (modelplane_request_input_tokens_count)` increases by about 2N.\n\nSGLang:\n\n1. Deploy an SGLang ModelDeployment with `--enable-metrics --enable-priority-scheduling`.\n2. Keep R requests in flight.\n3. `sum by (deployment) (modelplane_requests_running)` returns 2R.\n\n### What environment did it happen in?\n\nModelplane version: main at 0ee6ab4d4f (also v0.5.0)\nEngines: vLLM v0.23.0; SGLang v0.5.10.post1 and v0.5.12.post1\nRouter: llm-d-router v0.9.0 (EPP and pd-sidecar)\nFound by reading the code and upstream source at the pinned versions, not on a live cluster\n",
+        "comments": [
+          {
+            "id": "IC_kwDORordgc8AAAABd3Dtmw",
+            "author": {
+              "login": "dennis-upbound"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "Proposed direction, for v0.6.\n\nPrefill/decode: label the phase. compose-model-replica already copies the member role onto `modelplane.ai/role` ([base.py#L289](https://github.com/modelplaneai/modelplane/blob/a128d50da5/functions/compose-model-replica/function/backends/base.py#L289)). It could copy the engine's `phase` onto a `modelplane.ai/phase` label the same way. The collector would then carry it as `phase`, in `_IDENTITY` beside `role` ([collector.py#L116](https://github.com/modelplaneai/modelplane/blob/a128d50da5/functions/compose-serving-stack/function/collector.py#L116)). It's one label with two values, and only on disaggregated deployments, which is the \"times two where a deployment is disaggregated\" the design's cardinality section already allows for.\n\nA query can then count each request once. Requests and output tokens come from `phase!=\"Prefill\"`. Prefill work, such as input tokens processed and prefix-cache hits, comes from `phase!=\"Decode\"`. The docs' \"Telemetry workflow\" section ([telemetry.md#L24](https://github.com/modelplaneai/modelplane/blob/a128d50da5/docs/content/platform/telemetry.md#L24), [#L40](https://github.com/modelplaneai/modelplane/blob/a128d50da5/docs/content/platform/telemetry.md#L40)) should say this rather than that a pair is collected like one pod. Once the gateway's counters from #476 land, they count each caller request once without any filter.\n\nSGLang priority scheduling: for v0.6, document that `--enable-priority-scheduling` and `--enable-metrics-for-all-schedulers` multiply `modelplane_requests_running` and `modelplane_requests_waiting`. A real fix means keeping only the total series, which a MetricMapping can't express yet. Neither flag is in any recipe, so the docs note covers what we ship.\n",
+            "createdAt": "2026-10-20T19:02:21Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/modelplaneai/modelplane/issues/525#issuecomment-6298856859",
+            "viewerDidAuthor": false
+          }
+        ],
+        "number": 525,
+        "title": "`sum by (deployment)` counts some requests twice"
+      }
+    ],
+    "files": [
+      {
+        "path": "design/telemetry.md",
+        "additions": 13,
+        "deletions": 7
+      },
+      {
+        "path": "docs/content/platform/telemetry.md",
+        "additions": 73,
+        "deletions": 15
+      },
+      {
+        "path": "docs/content/recipes/llama-3.1-8b.md",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "docs/manifests/recipes/laguna/model-deployment-sglang.yaml",
+        "additions": 3,
+        "deletions": 0
+      },
+      {
+        "path": "docs/manifests/recipes/llama-3.1-8b/model-deployment.yaml",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "docs/manifests/recipes/qwen3-coder/model-deployment-fp8.yaml",
+        "additions": 5,
+        "deletions": 0
+      },
+      {
+        "path": "docs/utils/vale/styles/config/vocabularies/Modelplane/accept.txt",
+        "additions": 2,
+        "deletions": 0
+      },
+      {
+        "path": "docs/utils/validate/validate_manifests.py",
+        "additions": 64,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-model-replica/function/backends/base.py",
+        "additions": 7,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-model-replica/tests/test_backends.py",
+        "additions": 88,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/collector.py",
+        "additions": 16,
+        "deletions": 3
+      },
+      {
+        "path": "functions/compose-serving-stack/function/stacks/metrics.py",
+        "additions": 76,
+        "deletions": 18
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_collector.py",
+        "additions": 103,
+        "deletions": 14
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_fn.py",
+        "additions": 62,
+        "deletions": 10
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_metrics.py",
+        "additions": 197,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/dcgm-gke.json",
+        "additions": 24,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/gateway-v1.1.0.json",
+        "additions": 98,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/picker-v0.9.0.json",
+        "additions": 925,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/sglang-v0.5.10.post1.json",
+        "additions": 313,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/sglang-v0.5.12.post1.json",
+        "additions": 355,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/vllm-v0.11.0.json",
+        "additions": 453,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/testdata/scrapes/vllm-v0.23.0.json",
+        "additions": 466,
+        "deletions": 0
+      },
+      {
+        "path": "hack/scrape_fixture.py",
+        "additions": 69,
+        "deletions": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,173 @@
+name: Review Eval
+
+# Runs the review agent over frozen eval cases (hack/eval/cases) with the
+# reviewer config from a given ref, and uploads each review rather than
+# posting it. The job matches review.yml's review job, except for where the PR
+# and its context come from.
+on:
+  workflow_dispatch:
+    inputs:
+      arm:
+        description: The ref to take the reviewer's config from.
+        type: string
+        required: true
+      label:
+        description: A name for this batch, used in artifact names.
+        type: string
+        required: true
+      cases:
+        description: A JSON list of PR numbers under hack/eval/cases.
+        type: string
+        required: true
+      runs:
+        description: A JSON list of run indexes, such as [1,2].
+        type: string
+        default: "[1]"
+
+permissions: {}
+
+env:
+  CADDY_IMAGE: caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
+
+jobs:
+  review:
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        pr: ${{ fromJSON(inputs.cases) }}
+        run: ${{ fromJSON(inputs.runs) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+
+    steps:
+      - name: Checkout the cases
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: eval
+          persist-credentials: false
+
+      - name: Checkout the reviewer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.arm }}
+          path: reviewer
+          persist-credentials: false
+
+      - name: Read the case
+        run: |
+          case=eval/hack/eval/cases/${{ matrix.pr }}.json
+          echo "SHA=$(jq -r .head "$case")" >> "$GITHUB_ENV"
+          echo "PR=${{ matrix.pr }}" >> "$GITHUB_ENV"
+
+      - name: Checkout the PR
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.SHA }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the reviewer's config
+        run: |
+          for f in .opencode .agents .claude .vale .vale.ini opencode.json opencode.jsonc AGENTS.md CLAUDE.md CONTRIBUTING.md; do
+            rm -rf "pr/$f"
+            if [ -e "reviewer/$f" ]; then cp -r "reviewer/$f" "pr/$f"; fi
+          done
+          git -C pr fetch -q origin "eval/$PR-base:refs/remotes/origin/eval/$PR-base"
+
+      - name: Write the PR's context
+        run: |
+          mkdir context
+          jq .context "eval/hack/eval/cases/$PR.json" > context/pr.json
+          for f in reviews review-comments issue-comments; do echo '[]' > "context/$f.json"; done
+
+      - name: Allow the runner user to use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -w /dev/kvm
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Create the VM's network
+        run: |
+          sudo ip tuntap add vm0 mode tap user "$USER"
+          sudo ip addr add 192.168.100.1/30 dev vm0
+          sudo ip link set vm0 up
+          sudo sysctl -qw net.ipv4.ip_forward=1
+          uplink=$(ip route show default | awk '{print $5; exit}')
+          sudo iptables -t nat -A POSTROUTING -s 192.168.100.0/30 -o "$uplink" -j MASQUERADE
+          sudo iptables -I FORWARD 1 -i vm0 -o "$uplink" -j ACCEPT
+          sudo iptables -I FORWARD 1 -o vm0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 168.63.129.16/32; do
+            sudo iptables -I FORWARD 1 -i vm0 -d "$net" -j DROP
+          done
+          sudo iptables -I INPUT 1 -i vm0 -j DROP
+          sudo iptables -I INPUT 1 -i vm0 -p tcp --dport 8787 -j ACCEPT
+          sudo sysctl -qw net.ipv6.conf.vm0.disable_ipv6=1
+          sudo ip6tables -I INPUT 1 -i vm0 -j DROP
+          sudo ip6tables -I FORWARD 1 -i vm0 -j DROP
+
+      - name: Start the model proxy
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_ANTHROPIC_API_KEY }}
+        run: |
+          cat > Caddyfile <<'EOF'
+          {
+            admin off
+          }
+          http://192.168.100.1:8787 {
+            bind 192.168.100.1
+            @messages {
+              method POST
+              path /v1/messages
+            }
+            handle @messages {
+              reverse_proxy https://api.anthropic.com {
+                header_up Host api.anthropic.com
+                header_up x-api-key {env.ANTHROPIC_API_KEY}
+                flush_interval -1
+              }
+            }
+            respond 403
+          }
+          EOF
+          docker run -d --name proxy --network host \
+            -e ANTHROPIC_API_KEY \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE"
+
+      - name: Build the VM
+        run: nix build ./reviewer/hack/review-vm#nixosConfigurations.agent.config.microvm.declaredRunner -o vm
+
+      - name: Prepare the VM's disks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prompt="Review PR #$PR in $GITHUB_REPOSITORY at commit $SHA. The PR's context is in /work/context. Write the review to the directory _output/review."
+          printf '%s' "$prompt" > prompt
+          printf '%s' "$GH_TOKEN" > gh-token
+          sudo mkdir -p /mnt/vm
+          sudo chown "$USER" /mnt/vm
+          tar -cf /mnt/vm/in.tar pr context prompt gh-token
+          rm gh-token
+          truncate -s 1G /mnt/vm/out.tar
+
+      - name: Review
+        working-directory: /mnt/vm
+        run: timeout 50m "$GITHUB_WORKSPACE/vm/bin/microvm-run" < /dev/null
+
+      - name: Upload the VM's output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.label }}-${{ matrix.pr }}-${{ matrix.run }}
+          path: /mnt/vm/out.tar
+          if-no-files-found: ignore

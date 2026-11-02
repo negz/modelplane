@@ -1,0 +1,39 @@
+{
+  "pr": 432,
+  "base": "960c6451d4e9cb7f92e35e12a08f7e177e0ce655",
+  "head": "3fe0dab334d6b987cbffe70fca3f60bc5f16e4a3",
+  "reviewed_at": "2026-09-22T15:28:18Z",
+  "context": {
+    "number": 432,
+    "title": "Design: multiple accelerator vendors in the serving stack",
+    "body": "<!--\r\nThanks for contributing to Modelplane! Read CONTRIBUTING.md before opening a PR\r\nand follow it, especially the commit, pull request, and writing style\r\nconventions: https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md\r\nPRs that don't follow it will be closed.\r\n-->\r\n\r\n### Description of your changes\r\nThe serving stack we propose in https://github.com/modelplaneai/modelplane/pull/422  is NVIDIA-only by construction: every clouds component list installs the NVIDIA operator or DRA driver, the GPU taint and toleration are `nvidia.com/gpu`, and nothing checks that the devices an `InferenceClass` declares match the stack its cluster gets. \r\nAMD Instinct GPUs are reaching the clouds Modelplane targets, and TPU and Trainium sit behind the same gap: a cluster may carry devices from more than one vendor, and the stack must install each vendors components exactly where that vendor's devices are.\r\n\r\nThe design treats the vendor as data that already exists: a class `devices[].driver` names it (`gpu.amd.com`, `gpu.nvidia.com`), the cluster composition derives the vendor set onto the `ServingStack`, and the component join filters vendor-tagged components to the vendors present. Mismatches fail early in the composition functions, on the class, on the class/cluster pairing, and in the join. The aicr-generated cloud halves are deliberately untouched until a second vendor is installable on a managed cloud.\r\n\r\nDesign only, no implementation. Feedback wanted on the tag semantics (\"part of one vendors device stack\", untagged always installs), the per-cloud vendor table and its mirrors in the two functions that need it, and on deferring the generate.py vendor classification.\r\n\r\n<!--\r\nLead with the problem, then the change and why it's right. Direct reviewers to\r\nthe parts that need judgment. Don't pad or invent rationale. See the Pull\r\nrequests and Writing style sections of CONTRIBUTING.md for what a good\r\ndescription looks like.\r\n\r\nIf this PR fixes an open issue, reference it below, e.g. \"Fixes #95\".\r\n-->\r\n\r\nFixes #\r\n\r\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\r\n\r\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\r\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\r\n- [x] Added or updated tests covering any composition function changes.\r\n- [x] Signed off every commit with `git commit -s`.\r\n",
+    "author": {
+      "id": "MDQ6VXNlcjIxMDgzNDk3",
+      "is_bot": false,
+      "login": "haarchri",
+      "name": "Christopher Haar"
+    },
+    "baseRefName": "eval/432-base",
+    "headRefOid": "3fe0dab334d6b987cbffe70fca3f60bc5f16e4a3",
+    "commits": [
+      {
+        "oid": "3fe0dab334d6b987cbffe70fca3f60bc5f16e4a3",
+        "messageHeadline": "design(serving-stack): multiple accelerator vendors",
+        "messageBody": "Signed-off-by: Christopher Haar <christopher.haar@upbound.io>",
+        "authors": [
+          {
+            "name": "Christopher Haar"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "design/multi-accelerator.md",
+        "additions": 176,
+        "deletions": 0
+      }
+    ]
+  }
+}

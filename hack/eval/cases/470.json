@@ -1,0 +1,234 @@
+{
+  "pr": 470,
+  "base": "a05343880160ee39eec16e1638721efd7fc578db",
+  "head": "7805fd185a1ca4692954a99dae392ddcf320f213",
+  "reviewed_at": "2026-09-28T21:18:39Z",
+  "context": {
+    "number": 470,
+    "title": "Collect metrics from every inference cluster",
+    "body": "### Description of your changes\n\nImplements the metrics half of #363. Today a fleet has no way to get engine, gateway or GPU metrics off its clusters, and the metric names it would get differ per engine anyway.\n\nTwo kinds and a collector.\n\n`MetricMapping` carries OTTL statements the collector renders into its transform processor, plus `passthrough` for keeping a component's own metric names flowing during a migration. `TelemetryDestination` carries the collector's `exporters` and `extensions`, a `secretRef` so credentials stay out of the object, and `collector: External` for a platform that already runs a fleet collector and hands over its endpoint.\n\nBoth hold collector configuration Modelplane passes through unread. That's the point: an operator writes the collector's own language, documented upstream, so any exporter or authenticator it gains works without a Modelplane release.\n\n`compose-serving-stack` renders a collector per `InferenceCluster` from those two: a ConfigMap of the rendered YAML, a Deployment running it, and the RBAC the Prometheus receiver needs for pod discovery. It scrapes three jobs \u2014 engines, the gateway, and the substrate \u2014 and relabels Modelplane's identity off the pod labels, so a `MetricMapping`'s statements never have to carry labels of their own. 33 built-in statements rename vLLM, SGLang, the gateway, the picker and DCGM onto `modelplane_*`; a `MetricMapping`'s statements run after those. The Deployment carries a sha256 of the rendered config, so editing a mapping or a destination restarts the collector, and an unchanged one doesn't.\n\nIt renders the Deployment directly rather than an `OpenTelemetryCollector`. That CRD would put the OpenTelemetry Operator on every GPU cluster to own and upgrade, for a Deployment and a ConfigMap. The receiver does its own service discovery, so there's no target allocator to want either.\n\nThe mapping and destination functions still compose nothing themselves, so both could mark Ready and stop. They don't, because Ready meaning nothing was checked is how a fleet produces no telemetry with every object green. A `MetricMapping` reports how many clusters took its statements and isn't Ready at zero. A `TelemetryDestination` catches an exporter naming an authenticator no extension defines \u2014 the collector refuses to start on that, so otherwise the failure surfaces two layers from its cause.\n\nNeither reads further in. Validating the statements or the exporters would be Modelplane modelling the collector's configuration, which is what these kinds exist to avoid.\n\nThe design is [`design/telemetry.md`](https://github.com/modelplaneai/modelplane/blob/main/design/telemetry.md), merged in #363.\n\nI have:\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix run .#build` and the `python`, `ty-*` and `docs-vale` checks.\n- [x] Added or updated tests.\n- [x] Signed off every commit with `git commit -s`.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n\n",
+    "author": {
+      "id": "U_kgDOEDtJfQ",
+      "is_bot": false,
+      "login": "dennis-upbound",
+      "name": "Dennis Ramdass"
+    },
+    "baseRefName": "eval/470-base",
+    "headRefOid": "7805fd185a1ca4692954a99dae392ddcf320f213",
+    "commits": [
+      {
+        "oid": "f9434a5dc0febf9252df853567b105d9045790e6",
+        "messageHeadline": "Add the MetricMapping and TelemetryDestination kinds",
+        "messageBody": "Modelplane collects from everything it installs and normalizes it onto\none modelplane_* surface, and two things about that are the operator's:\nwhere the telemetry goes, and what to do about a component Modelplane\nships no rules for. These are the two kinds the telemetry design gives\nthem.\n\nBoth hold OpenTelemetry collector configuration that Modelplane passes\nthrough unread. A MetricMapping carries OTTL statements rendered into\nevery inference cluster's transform processor, and passthrough for\nkeeping a component's own metric names flowing during a migration. A\nTelemetryDestination carries the collector's exporters and extensions,\na secretRef so credentials stay out of the object, and collector:\nExternal for a platform that already runs a fleet collector and hands\nover its endpoint.\n\nPassing configuration through unread is the point rather than an\nomission. An operator writes the collector's own language, documented\nupstream, so any exporter or authenticator it gains works without a\nModelplane release, and a field-by-field schema would either restate all\nof it or quietly cap what a destination can be.\n\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "a1443953a3539231da882a15ac03553407a6a68d",
+        "messageHeadline": "Report whether a mapping and a destination actually work",
+        "messageBody": "Neither kind composes anything: compose-serving-stack is what renders\nthem into a collector. So both functions could mark their XR Ready and\nlook no further, which for a data resource is nearly honest. It is also\nhow a fleet ends up producing no telemetry with every object green.\n\nA MetricMapping reaches every inference cluster, so the function\nresolves them and reports the count, and is not Ready when there are\nnone. It also catches a mapping carrying neither statements nor\npassthrough, which changes nothing and otherwise looks exactly like one\nthat works.\n\nA TelemetryDestination gets the one check Modelplane can make without\nmodelling what an exporter is. An exporter's auth block names an\nauthenticator by extension name, and the collector refuses to start when\nno extension defines it, so a typo there stops telemetry with the\nfailure two layers from its cause. The same for a credential Secret that\ndoes not exist, and for a destination carrying no exporters at all.\n\nNeither reads further in. Validating the statements or the exporters\nwould be Modelplane modelling the collector's configuration, which is\nwhat these kinds exist to avoid.\n\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "80a046910b4475f1655696dc417a9f7e304bc671",
+        "messageHeadline": "Regenerate schemas for the telemetry kinds",
+        "messageBody": "x-kubernetes-preserve-unknown-fields generates as dict[str, Any], which\nis what a block passed through unread should be, and the collector enum\ngenerates as a Literal with its default.\n\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "ffaa34014b87541e025fbd0ecf1c5557aa3c3b7c",
+        "messageHeadline": "Add the telemetry guide",
+        "messageBody": "What an operator reads: the metric surface, where to point a\nTelemetryDestination, what to write for an engine Modelplane ships no\nstatements for, and migrating off the per-cluster Prometheus, with the\nrename table and the compatibility rules that keep an existing dashboard\nworking while its panels are rewritten.\n\ndraft: true until the kinds it describes are composing and collecting,\nso it stays out of the published site. The Vale vocabulary comes with\nit; every word it adds is one only this guide uses.\n\nSigned-off-by: Dennis Ramdass <dennis@upbound.io>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      },
+      {
+        "oid": "7805fd185a1ca4692954a99dae392ddcf320f213",
+        "messageHeadline": "Compose the OpenTelemetry collector",
+        "messageBody": "The MetricMapping and TelemetryDestination kinds accept OTTL statements and\nexporter config, but nothing renders a collector from them, so a fleet that\ndeclares both still has no telemetry pipeline.\n\nCompose one collector per InferenceCluster from those kinds: a ConfigMap\ncarrying the rendered YAML, a Deployment running it, and the RBAC the\nPrometheus receiver needs to discover pods. The receiver scrapes engines, the\ngateway and the substrate; the transform processor applies the built-in rename\nstatements plus whatever the MetricMappings add, and the exporters come\nstraight from the TelemetryDestination.\n\nThe Deployment carries a checksum of the rendered config so a mapping or\ndestination change restarts the collector. The checksum is a sha256 of the\nconfig rather than Python's hash(), which is seeded per process and would\nredeploy on every reconcile.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+        "authors": [
+          {
+            "name": "Dennis Ramdass"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "apis/metricmappings/composition.yaml",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "apis/metricmappings/definition.yaml",
+        "additions": 83,
+        "deletions": 0
+      },
+      {
+        "path": "apis/telemetrydestinations/composition.yaml",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "apis/telemetrydestinations/definition.yaml",
+        "additions": 97,
+        "deletions": 0
+      },
+      {
+        "path": "crossplane-project.yaml",
+        "additions": 8,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/guides/telemetry.md",
+        "additions": 246,
+        "deletions": 0
+      },
+      {
+        "path": "docs/utils/vale/styles/config/vocabularies/Modelplane/accept.txt",
+        "additions": 15,
+        "deletions": 0
+      },
+      {
+        "path": "flake.nix",
+        "additions": 2,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/function/__init__.py",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/function/fn.py",
+        "additions": 106,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/function/main.py",
+        "additions": 55,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/pyproject.toml",
+        "additions": 26,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/tests/__init__.py",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-metric-mapping/tests/test_fn.py",
+        "additions": 169,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/collector.py",
+        "additions": 295,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/fn.py",
+        "additions": 75,
+        "deletions": 2
+      },
+      {
+        "path": "functions/compose-serving-stack/function/stacks/__init__.py",
+        "additions": 4,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-serving-stack/function/stacks/metrics.py",
+        "additions": 106,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_collector.py",
+        "additions": 124,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_fn.py",
+        "additions": 14,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-telemetry-destination/function/__init__.py",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-telemetry-destination/function/fn.py",
+        "additions": 128,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-telemetry-destination/function/main.py",
+        "additions": 55,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-telemetry-destination/pyproject.toml",
+        "additions": 26,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-telemetry-destination/tests/__init__.py",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-telemetry-destination/tests/test_fn.py",
+        "additions": 231,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/.lock.json",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/metricmapping/__init__.py",
+        "additions": 0,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/metricmapping/v1alpha1.py",
+        "additions": 124,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/telemetrydestination/__init__.py",
+        "additions": 0,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/telemetrydestination/v1alpha1.py",
+        "additions": 130,
+        "deletions": 0
+      },
+      {
+        "path": "uv.lock",
+        "additions": 40,
+        "deletions": 0
+      }
+    ]
+  }
+}

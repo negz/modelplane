@@ -1,0 +1,209 @@
+{
+  "pr": 600,
+  "base": "4ed3d1a2f2a64423afa8b1713f95ccea8380d60f",
+  "head": "464b328b3091f6f083b4ddd11f663d084cb81e5a",
+  "reviewed_at": "2026-10-30T03:29:04Z",
+  "context": {
+    "number": 600,
+    "title": "Back node pools with CapacityReservations instead of capacityBlock",
+    "body": "### Description of your changes\r\n\r\nTowards #553.\r\n\r\nAn InferenceCluster node pool could only consume an AWS Capacity Block, through an EKS-only `capacityBlock` field that GKE pools ignored. There was no way to back a GKE pool with a Compute Engine reservation.\r\n\r\nThis PR adds `CapacityReservation`, a cluster-scoped resource that references an existing reservation, and replaces `nodePools[].capacityBlock` with `nodePools[].reservationRef`. It covers the v0.6 scope from [this comment](https://github.com/modelplaneai/modelplane/issues/553#issuecomment-6510291862): GKE (any Compute Engine reservation, including calendar mode) and EKS (Capacity Blocks and On-Demand Capacity Reservations).\r\n\r\n```yaml\r\napiVersion: modelplane.ai/v1alpha1\r\nkind: CapacityReservation\r\nmetadata:\r\n  name: l4-reservation\r\nspec:\r\n  provider: GKE\r\n  gke:\r\n    zone: us-central1-a\r\n    name: l4-reservation\r\n---\r\napiVersion: modelplane.ai/v1alpha1\r\nkind: InferenceCluster\r\nmetadata:\r\n  name: gke-reserved\r\nspec:\r\n  cluster:\r\n    source: GKE\r\n    gke:\r\n      region: us-central1\r\n  nodePools:\r\n  - name: l4-pool\r\n    className: gke-l4-1x-g2\r\n    nodeCount: 2\r\n    zones: [us-central1-a]\r\n    reservationRef:\r\n      name: l4-reservation\r\n```\r\n\r\nA pool consumes only its reservation and never falls back to on-demand capacity. On GKE the node pool uses a specific reservation affinity. On EKS the launch template targets the reservation, as `capacityBlock` did. `compose-inference-cluster` rejects a reservation for another cloud, another region, or (on GKE) a zone the pool isn't restricted to. It can't check the machine type or, on EKS, the Availability Zone, because Modelplane doesn't read the reservation from the cloud yet.\r\n\r\nThe first commit fixes a bug I hit while adding those checks. When a node pool's InferenceClass was missing or had no provisioning block for the cluster's cloud, `compose-inference-cluster` returned early without composing the cluster XR, so Crossplane would delete the cluster. Those paths, and the new reservation checks, now return a fatal result, so Crossplane leaves the cluster alone. A missing InferenceClass now shows as `Synced=False` rather than a waiting event.\r\n\r\nRemoving `capacityBlock` is a breaking change. An existing EKS pool that set it will lose its reservation on upgrade and needs a `CapacityReservation` and `reservationRef`.\r\n\r\nI tested GKE and EKS against real clusters. On GKE, with a specific on-demand reservation for one `g2-standard-8` in `us-central1-c`, the GPU node pool came up with `SPECIFIC_RESERVATION` affinity and the reservation reported 1 of 1 in use. On EKS, with an On-Demand Capacity Reservation for one `g6.xlarge` in `us-east-1a`, AWS accepted the launch template and the GPU node launched into the reservation. I didn't test a Capacity Block, which uses the same settings as before, or a GKE calendar-mode reservation. The GKE test also found that a fatal result stops Crossplane fetching required resources. The function now only fails once Crossplane has fetched a class or reservation and found it missing.\r\n\r\nI have:\r\n\r\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\r\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\r\n- [x] Added or updated tests covering any composition function changes.\r\n- [x] Signed off every commit with `git commit -s`.\r\n",
+    "author": {
+      "id": "MDQ6VXNlcjEwNDkzNDk=",
+      "is_bot": false,
+      "login": "negz",
+      "name": "Nic Cope"
+    },
+    "baseRefName": "eval/600-base",
+    "headRefOid": "464b328b3091f6f083b4ddd11f663d084cb81e5a",
+    "commits": [
+      {
+        "oid": "140d0668184f71c31fe7f089666c2d6f501fb401",
+        "messageHeadline": "Fail the reconcile when an InferenceCluster can't compose its cluster",
+        "messageBody": "When a node pool's InferenceClass was missing, or had no provisioning\nblock for the cluster's cloud, compose-inference-cluster returned early\nwith only a warning or normal result. It didn't compose the cluster XR\non that reconcile, and Crossplane deletes a composed resource that's\nmissing from desired state. Deleting an InferenceClass in use would\ntherefore delete the cluster built from it.\n\nThis makes those paths return a fatal result instead. Crossplane applies\nnone of a failed reconcile's desired state, so the existing cluster XR\nis left alone, while the ClusterReady condition still says why.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      },
+      {
+        "oid": "caacc231c38ca2d3bac205e8e5370bac81d7bb52",
+        "messageHeadline": "Back node pools with CapacityReservations instead of capacityBlock",
+        "messageBody": "An InferenceCluster node pool could only consume an AWS Capacity Block,\nthrough an EKS-only capacityBlock field that GKE pools silently ignored.\nThere was no way to back a GKE pool with a Compute Engine reservation.\n\nThis adds CapacityReservation, a cluster-scoped resource that references\nan existing reservation: a Compute Engine reservation on GKE, or a\nCapacity Block or On-Demand Capacity Reservation on EKS. A node pool\nreferences one by name, consumes only that reservation, and never falls\nback to on-demand capacity. compose-inference-cluster fails the\nreconcile if the reservation doesn't match the cluster's cloud, region,\nor (on GKE) the pool's zone.\n\nRemoving capacityBlock is a breaking change.\n\nTowards #553.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      },
+      {
+        "oid": "464b328b3091f6f083b4ddd11f663d084cb81e5a",
+        "messageHeadline": "Regenerate models for CapacityReservation",
+        "messageBody": "Signed-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "apis/capacityreservations/composition.yaml",
+        "additions": 13,
+        "deletions": 0
+      },
+      {
+        "path": "apis/capacityreservations/definition.yaml",
+        "additions": 111,
+        "deletions": 0
+      },
+      {
+        "path": "apis/eksclusters/definition.yaml",
+        "additions": 23,
+        "deletions": 17
+      },
+      {
+        "path": "apis/gkeclusters/definition.yaml",
+        "additions": 24,
+        "deletions": 0
+      },
+      {
+        "path": "apis/inferenceclusters/definition.yaml",
+        "additions": 17,
+        "deletions": 19
+      },
+      {
+        "path": "crossplane-project.yaml",
+        "additions": 4,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/platform/inference-cluster.md",
+        "additions": 26,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/recipes/qwen3-coder.md",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "docs/data/apigroups.yaml",
+        "additions": 1,
+        "deletions": 0
+      },
+      {
+        "path": "docs/manifests/concepts/capacity-reservation-gke.yaml",
+        "additions": 30,
+        "deletions": 0
+      },
+      {
+        "path": "docs/manifests/recipes/qwen3-coder/inference-cluster.yaml",
+        "additions": 16,
+        "deletions": 4
+      },
+      {
+        "path": "docs/manifests/reference/capacityreservations.yaml",
+        "additions": 9,
+        "deletions": 0
+      },
+      {
+        "path": "flake.nix",
+        "additions": 1,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-capacity-reservation/function/__init__.py",
+        "additions": 14,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-capacity-reservation/function/fn.py",
+        "additions": 49,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-capacity-reservation/function/main.py",
+        "additions": 55,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-capacity-reservation/pyproject.toml",
+        "additions": 26,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-capacity-reservation/tests/test_fn.py",
+        "additions": 94,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-eks-cluster/function/fn.py",
+        "additions": 32,
+        "deletions": 28
+      },
+      {
+        "path": "functions/compose-eks-cluster/tests/test_fn.py",
+        "additions": 267,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-gke-cluster/function/fn.py",
+        "additions": 18,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-gke-cluster/tests/test_fn.py",
+        "additions": 180,
+        "deletions": 27
+      },
+      {
+        "path": "functions/compose-inference-cluster/function/fn.py",
+        "additions": 170,
+        "deletions": 119
+      },
+      {
+        "path": "functions/compose-inference-cluster/tests/test_fn.py",
+        "additions": 960,
+        "deletions": 69
+      },
+      {
+        "path": "schemas/.lock.json",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/capacityreservation/__init__.py",
+        "additions": 0,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/capacityreservation/v1alpha1.py",
+        "additions": 145,
+        "deletions": 0
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/inferencecluster/v1alpha1.py",
+        "additions": 10,
+        "deletions": 12
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/infrastructure/ekscluster/v1alpha1.py",
+        "additions": 9,
+        "deletions": 7
+      },
+      {
+        "path": "schemas/python/models/ai/modelplane/infrastructure/gkecluster/v1alpha1.py",
+        "additions": 15,
+        "deletions": 0
+      },
+      {
+        "path": "uv.lock",
+        "additions": 20,
+        "deletions": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "pr": 588,
+  "base": "baad7e3f5c6f3595db898fc964f78df6a4c134a1",
+  "head": "07438e470eda3357382f62f052c2339276a16a6e",
+  "reviewed_at": "2026-10-28T17:58:00Z",
+  "context": {
+    "number": 588,
+    "title": "Add field guide for platform engineers moving to inference",
+    "body": "Add \"From Platform Engineer to Inference Engineer: An Open Field\r\nGuide to Inference Engineering\", a guide for platform engineers\r\nmoving into inference work.\r\n\r\n- [x] Read and followed Modelplane's contribution process.\r\n- [x] ~~Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.~~\r\n- [x] ~~Added or updated tests covering any composition function changes.~~\r\n- [x] Signed off every commit with `git commit -s`.\r\n\r\nSigned-off-by: Annie Talvasto <Annie.talvasto@gmail.com>\r\n",
+    "author": {
+      "id": "MDQ6VXNlcjQ2NDkxNDI1",
+      "is_bot": false,
+      "login": "AnnieTalvasto",
+      "name": "Annie Talvasto"
+    },
+    "baseRefName": "eval/588-base",
+    "headRefOid": "07438e470eda3357382f62f052c2339276a16a6e",
+    "commits": [
+      {
+        "oid": "9743cd13836e979a9e5362fa1212150133e00412",
+        "messageHeadline": "docs: add Platform Engineer to Inference Engineer field guide",
+        "messageBody": "Add \"From Platform Engineer to Inference Engineer: An Open Field\nGuide to Inference Engineering\", a guide for platform engineers\nmoving into inference work, plus its inference stack diagram.\n\nSigned-off-by: Annie Talvasto <46491425+AnnieTalvasto@users.noreply.github.com>",
+        "authors": [
+          {
+            "name": "Annie Talvasto"
+          }
+        ]
+      },
+      {
+        "oid": "ac5ddb88388dffeaf93bf60d1ba2654322e15029",
+        "messageHeadline": "Update prose and formatting Focusing on vale errors and clarity. Signed-off-by: Rae Sharp <resharp20@gmail.com>",
+        "messageBody": "",
+        "authors": [
+          {
+            "name": "Rae Sharp"
+          }
+        ]
+      },
+      {
+        "oid": "8478b0d59cef051824e81c36f4db511a4c99f4bd",
+        "messageHeadline": "Merge pull request #1 from tr0njavolta/inference-guide-edits",
+        "messageBody": "Inference Guide edits",
+        "authors": [
+          {
+            "name": "Annie Talvasto"
+          }
+        ]
+      },
+      {
+        "oid": "a8526f1d7f4db5c9d7778c9c6608b03653441f61",
+        "messageHeadline": "Update image serving and vale error on unrelated doc",
+        "messageBody": "Signed-off-by: Rae Sharp <resharp20@gmail.com>",
+        "authors": [
+          {
+            "name": "Rae Sharp"
+          }
+        ]
+      },
+      {
+        "oid": "8cb9603052a13ef3ff15ebc4a36fac5af02079a4",
+        "messageHeadline": "Merge pull request #2 from tr0njavolta/inference-guide-edits",
+        "messageBody": "Update vale for CI & Image",
+        "authors": [
+          {
+            "name": "Annie Talvasto"
+          }
+        ]
+      },
+      {
+        "oid": "07438e470eda3357382f62f052c2339276a16a6e",
+        "messageHeadline": "Fix wording for sidecar's vllm-port description",
+        "messageBody": "",
+        "authors": [
+          {
+            "name": "Annie Talvasto"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "docs/content/guides/inference_guide.md",
+        "additions": 1243,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/media/inference-stack.png",
+        "additions": 0,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/models/routing.md",
+        "additions": 4,
+        "deletions": 1
+      },
+      {
+        "path": "docs/utils/vale/.vale.ini",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "docs/utils/vale/styles/Modelplane/Spelling.yml",
+        "additions": 1,
+        "deletions": 0
+      },
+      {
+        "path": "docs/utils/vale/styles/config/vocabularies/Modelplane/accept.txt",
+        "additions": 83,
+        "deletions": 24
+      }
+    ]
+  }
+}

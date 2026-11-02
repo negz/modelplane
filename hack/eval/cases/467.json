@@ -1,0 +1,94 @@
+{
+  "pr": 467,
+  "base": "b3b3f2f2b2e8a1e938b82a8686c92543bdf79920",
+  "head": "ade414fc0b9291b49078b38d95a1469cbea1f11c",
+  "reviewed_at": "2026-09-30T18:12:23Z",
+  "context": {
+    "number": 467,
+    "title": "Mark XRs not ready while waiting, and replicas until each object is",
+    "body": "### Description of your changes\n\nBroken by #101, which marked a ModelReplica's non-workload Objects ready as soon as it observed them. #142 then gave the endpoint picker a readiness query that marking ignored.\n\ncompose-model-replica marked every composed Object other than its workloads ready once observed. That included one that failed to create, such as a picker Service the API server rejected for an invalid name, and the picker's Deployment before it was Available, though Envoy AI Gateway fails closed without a picker whatever the pool's `failureMode` says. Either way the replica reported Ready and compose-model-deployment put it into rotation. It now relays each Object's own Ready condition, as its readiness policy decides. Under `SuccessfulCreate` that catches an Object that never applied, but not a later update the API server rejects.\n\nSeparately, Crossplane counts an XR Ready when every composed resource is ready, so an XR with nothing composed is Ready. A ModelReplica waiting for its InferenceCluster, a ModelCache with no cluster to stage onto or waiting for its auth token, a ModelDeployment with no InferenceClusters, an InferenceCluster waiting for its InferenceClasses and a GKECluster waiting for its ProviderConfig all reported `Ready=True` beside a condition or event saying they were waiting. Each now marks itself not ready where it reports the wait.\n\nOn EKS, before the change, a ModelDeployment and a ModelCache that matched no cluster were `Ready=True`, and a replica whose picker Service had failed to create was Ready with a ModelEndpoint. After it, the first two were `Ready=False`, and with the picker's Deployment made unavailable the replica went `Ready=False` with `Unready resources: epp` and its ModelEndpoint was withdrawn, then both came back once the picker did.\n\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\n- [x] Added or updated tests covering any composition function changes.\n- [x] Signed off every commit with `git commit -s`.\n",
+    "author": {
+      "id": "MDQ6VXNlcjEwNDkzNDk=",
+      "is_bot": false,
+      "login": "negz",
+      "name": "Nic Cope"
+    },
+    "baseRefName": "eval/467-base",
+    "headRefOid": "ade414fc0b9291b49078b38d95a1469cbea1f11c",
+    "commits": [
+      {
+        "oid": "d1db5d99ede94a22f61590579095860a8b96c900",
+        "messageHeadline": "Mark a ModelReplica's objects ready only once each reports Ready",
+        "messageBody": "compose-model-replica marked every composed Object other than its workloads\nready as soon as it was observed. That included one that had failed to\ncreate, such as a picker Service rejected for an invalid name, and the\nendpoint picker's Deployment before it was Available, though its Object has\na CEL readiness query for exactly that and Envoy AI Gateway fails closed\nwithout a picker. Either way the replica reported Ready and\ncompose-model-deployment put it into rotation.\n\nThis relays each Object's own Ready condition instead, as its readiness\npolicy decides.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      },
+      {
+        "oid": "ade414fc0b9291b49078b38d95a1469cbea1f11c",
+        "messageHeadline": "Report XRs not ready while they wait with nothing composed",
+        "messageBody": "Crossplane counts an XR ready when every resource composed for it is ready,\nso one with nothing composed, or only resources marked ready, reports Ready.\nA ModelReplica waiting for its InferenceCluster, a ModelCache with no\ncluster to stage onto or waiting for its auth token, a ModelDeployment with\nno InferenceClusters, an InferenceCluster waiting for its InferenceClasses\nand a GKECluster waiting for its ProviderConfig all reported Ready while\nsaying they were waiting.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [],
+    "files": [
+      {
+        "path": "functions/compose-gke-cluster/function/fn.py",
+        "additions": 3,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-gke-cluster/tests/test_fn.py",
+        "additions": 28,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-inference-cluster/function/fn.py",
+        "additions": 3,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-inference-cluster/tests/test_fn.py",
+        "additions": 4,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-model-cache/function/fn.py",
+        "additions": 6,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-model-cache/tests/test_fn.py",
+        "additions": 5,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-model-deployment/function/fn.py",
+        "additions": 6,
+        "deletions": 3
+      },
+      {
+        "path": "functions/compose-model-deployment/tests/test_fn.py",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "path": "functions/compose-model-replica/function/fn.py",
+        "additions": 14,
+        "deletions": 18
+      },
+      {
+        "path": "functions/compose-model-replica/tests/test_fn.py",
+        "additions": 85,
+        "deletions": 26
+      }
+    ]
+  }
+}

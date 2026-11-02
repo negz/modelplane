@@ -1,0 +1,86 @@
+{
+  "pr": 429,
+  "base": "960c6451d4e9cb7f92e35e12a08f7e177e0ce655",
+  "head": "4e3b6039ef5ddeed6c3e9b891362ca79aab01cb5",
+  "reviewed_at": "2026-09-09T10:54:21Z",
+  "context": {
+    "number": 429,
+    "title": "Activate cloud managed resources on demand from InferenceCluster",
+    "body": "### Description of your changes\n\nFixes #427\n\nThe Configuration installs one ManagedResourceActivationPolicy that activates every cloud's managed resource kinds. Crossplane v2.4 scales a safe-start provider's runtime to zero until one of its managed resource definitions is active, but activating every kind up front keeps all cloud providers running on every control plane, even one that only ever provisions one cloud.\n\n`compose-inference-cluster` now composes a policy activating just the kinds the cloud it provisions needs, so a control plane runs a cloud's providers only once it has an InferenceCluster on that cloud. The policy is cluster scoped. A namespaced XR can't compose a cluster-scoped resource, and the cloud cluster XRs (EKSCluster and the rest) are all namespaced, so this cluster-scoped function composes it instead. The base policy drops to provider-helm and provider-kubernetes, which serve every control plane.\n\nA managed resource composed before its definition's CRD exists fails the whole reconcile, because the API server rejects a custom resource whose CRD doesn't exist. So the function holds off composing the cloud cluster XR until the policy it composed reports `Healthy`, which it reads back from the observed policy rather than pulling in the definitions themselves. Each definition embeds a full CRD schema, so requiring all of them risks a large request. `Healthy` means the policy set its definitions Active, not that their CRDs exist yet, so a managed resource composed just before the API server serves its CRD fails its apply and retries. A `TODO` tracks tightening this to an `Established` condition once the policy reports one. Once it has observed the cluster the function keeps composing it regardless, so a later activation blip never drops a provisioned cluster from desired state and deletes it.\n\nActivation is one-way, so dropping the cloud kinds from the base policy doesn't deactivate them on a running control plane. Existing control planes keep their providers running after an upgrade. Only new ones get the lazy start.\n\nI have:\n\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\n- [x] Added or updated tests covering any composition function changes.\n- [x] Signed off every commit with `git commit -s`.\n",
+    "author": {
+      "id": "MDQ6VXNlcjEwNDkzNDk=",
+      "is_bot": false,
+      "login": "negz",
+      "name": "Nic Cope"
+    },
+    "baseRefName": "eval/429-base",
+    "headRefOid": "4e3b6039ef5ddeed6c3e9b891362ca79aab01cb5",
+    "commits": [
+      {
+        "oid": "f6cb52403b50127b57070086d5fabd125b4a0dfc",
+        "messageHeadline": "Activate cloud managed resources on demand from InferenceCluster",
+        "messageBody": "The Configuration ships one ManagedResourceActivationPolicy that activates every\ncloud's managed resource kinds. Crossplane v2.4 scales a safe-start provider's\nruntime to zero until one of its managed resource definitions is active, but\nactivating every kind up front keeps all cloud providers running on every\ncontrol plane, even one that only ever provisions a single cloud.\n\ncompose-inference-cluster now composes a policy activating just the kinds the\ncloud it provisions needs, so a control plane runs a cloud's providers only once\nit has an InferenceCluster on that cloud. The policy is cluster scoped, so it has\nto be composed here: a namespaced XR can't compose a cluster-scoped resource, and\nthe cloud cluster XRs (EKSCluster and the rest) are all namespaced.\n\nA managed resource composed before its definition's CRD exists fails the whole\nreconcile, because the API server rejects a custom resource whose CRD doesn't\nexist. So the function holds off composing the cloud cluster XR until the policy\nit composed reports Healthy, read back from the observed policy so no definition\n(each of which carries a full CRD schema) has to be pulled into the request.\nHealthy means the policy set its definitions Active rather than that their CRDs\nexist, so a managed resource composed in the brief window before a CRD is served\nfails its apply and succeeds on the next reconcile; a TODO tracks tightening this\nto an Established condition once the policy reports one. Once the cluster is\nobserved the function keeps composing it regardless, so a later activation blip\nnever drops a provisioned cluster from desired state and deletes it.\n\nActivation is one-way, so dropping the cloud kinds from the shipped policy\ndoesn't deactivate them on a running control plane; existing control planes keep\ntheir providers running after an upgrade. The shipped policy is now down to\nprovider-helm and provider-kubernetes, which serve every control plane.\n\nFixes #427.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      },
+      {
+        "oid": "4e3b6039ef5ddeed6c3e9b891362ca79aab01cb5",
+        "messageHeadline": "Bump Crossplane to v2.4.0 and drop the e2e scale-to-zero workaround",
+        "messageBody": "The project pinned Crossplane 2.3.4, which activates every managed resource\nkind and runs every provider. Safe-start providers only scale their runtime to\nzero once their definitions are inactive from v2.4.0, so the e2e faked that\nbehaviour: a scale-to-zero DeploymentRuntimeConfig and an ImageConfig that\nforced every cloud provider Deployment to zero replicas, since otherwise the\nBYO scenario would run a dozen idle cloud controllers in kind.\n\nPinning both the local dev control plane and the e2e to v2.4.0 makes that\nnative. The lean control plane's narrowed MRAP already activates only the\nprovider-helm and provider-kubernetes kinds the BYO compositions use, so the\ncloud providers' definitions stay inactive and Crossplane scales their\ncontrollers to zero on its own. The DeploymentRuntimeConfig and ImageConfig go.\n\nTowards #427.\n\nSigned-off-by: Nic Cope <nicc@rk0n.org>",
+        "authors": [
+          {
+            "name": "Nic Cope"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [
+      {
+        "body": "### What problem are you facing?\n\nModelplane installs one `ManagedResourceActivationPolicy` that activates managed resource kinds across every cloud we support: AWS, GCP, Azure, Nebius, Vultr.\n\nhttps://github.com/modelplaneai/modelplane/blob/960c6451d4e9cb7f92e35e12a08f7e177e0ce655/apis/mrap.yaml#L22-L72\n\nActivating a kind runs the provider that serves it. So a control plane that only ever composes an EKSCluster still activates, and runs, the provider pods for GCP, Azure, Nebius and Vultr as well. Trimming them means hand-editing the MRAP.\n\nCrossplane v2.4 makes that avoidable. A provider with the `safe-start` capability scales its runtime to zero until an MRAP activates one of the managed resource definitions it owns (crossplane/crossplane#7586). Our provider families have the capability, but our MRAP activates everything up front, so nobody benefits. Every control plane pays for every cloud.\n\n### How could Modelplane help solve your problem?\n\nActivate on demand, from the compositions. When a composition composes an EKSCluster it could also compose an MRAP activating just the kinds that cluster needs, then compose the managed resources. That activates the relevant definitions, which scales up only the providers that cloud uses. A control plane then runs providers for the clouds it actually uses and nothing else, with no default policy to edit.\n\nThat MRAP would shrink to the always-on serving stack (provider-helm and provider-kubernetes), and everything cloud-specific would move into the composition that needs it.\n\nA few things make this workable, and one limits it:\n\n- Activation is additive. A definition is active if any MRAP activates it, so several EKSClusters can each compose their own without conflict.\n- Activating a definition scales its provider up on its own, without a restart.\n- Scale-down isn't a thing yet. In v2.4 a definition can't go from active back to inactive, and deleting an MRAP deactivates nothing (crossplane/crossplane#7205 would change that). So this is lazy start-up rather than idle-to-zero: a cloud starts costing you the first time you use it, and keeps costing you after.\n- The managed resources need gating on their definitions. Composing one before its definition is active fails the whole reconcile, because the API server rejects a custom resource whose definition doesn't exist. So the function composes the MRAP first and adds the managed resources only once their definitions are active.\n",
+        "comments": [],
+        "number": 427,
+        "title": "Don't run a cloud's providers unless needed"
+      }
+    ],
+    "files": [
+      {
+        "path": "apis/mrap.yaml",
+        "additions": 13,
+        "deletions": 58
+      },
+      {
+        "path": "e2e/README.md",
+        "additions": 18,
+        "deletions": 16
+      },
+      {
+        "path": "e2e/lean-control-plane.yaml",
+        "additions": 8,
+        "deletions": 51
+      },
+      {
+        "path": "e2e/run.sh",
+        "additions": 6,
+        "deletions": 5
+      },
+      {
+        "path": "functions/compose-inference-cluster/function/fn.py",
+        "additions": 123,
+        "deletions": 5
+      },
+      {
+        "path": "functions/compose-inference-cluster/tests/test_fn.py",
+        "additions": 81,
+        "deletions": 0
+      },
+      {
+        "path": "nix/apps.nix",
+        "additions": 1,
+        "deletions": 1
+      }
+    ]
+  }
+}

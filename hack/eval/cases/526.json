@@ -1,0 +1,76 @@
+{
+  "pr": 526,
+  "base": "e44782329738f0aee31de3b43dfd9c507252db57",
+  "head": "8813b16a565483a009bd3eb3020058d59656fcab",
+  "reviewed_at": "2026-10-16T16:15:45Z",
+  "context": {
+    "number": 526,
+    "title": "Enable the DCGM exporter on Civo, document it for existing clusters",
+    "body": "<!--\r\nThanks for contributing to Modelplane! Read CONTRIBUTING.md before opening a PR\r\nand follow it, especially the commit, pull request, and writing style\r\nconventions: https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md\r\nPRs that don't follow it will be closed.\r\n-->\r\n\r\n### Description of your changes\r\n\r\nOn a Civo cluster Modelplane provisions, every `modelplane_gpu_*` series and `modelplane_energy_joules_total` was empty. The hand-written Civo stack disabled the GPU Operator's DCGM exporter - not catched as other handwritten installing the GPU Operator as pre-req.\r\nThe telemetry collector discovers a GPU exporter by pod label, so with no exporter DaemonSet there was nothing to scrape.\r\n\r\nThis enables the exporter on Civo with the same `dcgm`/`dcgmExporter` values the generated clouds pin, so one review moves both halves; the metrics CSV covers every field `metrics.py` maps. The gpu-operator chart gains a kube-prometheus-stack edge: unlike the generated clouds, Civo's kube-prometheus-stack keeps its bundled CRDs enabled, so that release is what provides the ServiceMonitor CRD, and it now sets `wait=True` as a depended-on chart must.\r\n\r\nOn `source: Existing` clusters Modelplane doesn't install an exporter, on purpose: it can't know whether the cluster already runs one, and the collector scrapes every pod matching `.*dcgm.*`, so a second exporter would collect each GPU twice. The docs now say so. A new GPUs section in the telemetry page documents the discovery contract, the seven DCGM fields with their unit conversions, and how to check what an exporter publishes; the existing-cluster requirements gain a DCGM exporter bullet pointing at it.\r\n\r\n<!--\r\nLead with the problem, then the change and why it's right. Direct reviewers to\r\nthe parts that need judgment. Don't pad or invent rationale. See the Pull\r\nrequests and Writing style sections of CONTRIBUTING.md for what a good\r\ndescription looks like.\r\n\r\nIf this PR fixes an open issue, reference it below, e.g. \"Fixes #95\".\r\n-->\r\n\r\nFixes #519.\r\nTowards #524.\r\n\r\nI have: <!-- You MUST either [x] check or [ ] ~strike through~ every item. -->\r\n\r\n- [x] Read and followed Modelplane's [contribution process](https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md).\r\n- [x] Run `nix flake check` (or `./nix.sh flake check`) and made sure it passes.\r\n- [x] Added or updated tests covering any composition function changes.\r\n- [x] Signed off every commit with `git commit -s`.\r\n\r\n### Validated\r\n\r\non a live Civo NYC1 cluster: all seven renamed series arrive at the collector's debug sink.\r\n\r\n```\r\n    kubectl logs deploy/modelplane-collector -n modelplane-system | grep -E 'modelplane_gpu_|modelplane_energy' | sort -u\r\n    -> Name: modelplane_energy_joules_total\r\n    -> Name: modelplane_gpu_compute_active_ratio\r\n    -> Name: modelplane_gpu_memory_bandwidth_ratio\r\n    -> Name: modelplane_gpu_memory_used_bytes\r\n    -> Name: modelplane_gpu_power_watts\r\n    -> Name: modelplane_gpu_temperature_celsius\r\n    -> Name: modelplane_gpu_tensor_active_ratio\r\n\r\n```",
+    "author": {
+      "id": "MDQ6VXNlcjIxMDgzNDk3",
+      "is_bot": false,
+      "login": "haarchri",
+      "name": "Christopher Haar"
+    },
+    "baseRefName": "eval/526-base",
+    "headRefOid": "8813b16a565483a009bd3eb3020058d59656fcab",
+    "commits": [
+      {
+        "oid": "8813b16a565483a009bd3eb3020058d59656fcab",
+        "messageHeadline": "fix(servingstack): make sure dcgm in civo is installed, updated docs for existing",
+        "messageBody": "Signed-off-by: Christopher Haar <christopher.haar@upbound.io>",
+        "authors": [
+          {
+            "name": "Christopher Haar"
+          }
+        ]
+      }
+    ],
+    "closingIssuesReferences": [
+      {
+        "body": "### What happened?\n\nGPU metrics aren't generated on `source: Existing` clusters. On existing clusters Modelplane doesn't install a GPU exporter, and [Requirements for an existing cluster](https://github.com/modelplaneai/modelplane/blob/v0.5.0/docs/content/platform/inference-cluster.md#requirements-for-an-existing-cluster) doesn't say one is needed. [Telemetry](https://github.com/modelplaneai/modelplane/blob/v0.5.0/docs/content/platform/telemetry.md) only says the collector reads \"the GPU exporter your cloud provides\".\n\nWe expect the requirements for an existing cluster to include the instructions to get GPU metrics.\n\n### How can we reproduce it?\n\nThis comes from a user's report on v0.5.0 and from reading the docs and code. We haven't reproduced it on a cluster ourselves.\n\n1. Import a GPU cluster with `source: Existing` that doesn't run a DCGM exporter.\n2. Deploy a model on it and send it some requests.\n3. Engine and gateway metrics arrive at the sink. No `modelplane_gpu_*` series do.\n\n### What environment did it happen in?\n\nModelplane version: v0.5.0\n\n- Cluster imported with `source: Existing`. We don't have the user's cloud, Kubernetes version or GPU type.\n- The docs and code are the same on main (1b3046ef).\n",
+        "comments": [],
+        "number": 519,
+        "title": "Docs don't say how to get GPU metrics on a `source: Existing` cluster"
+      }
+    ],
+    "files": [
+      {
+        "path": "docs/content/platform/inference-cluster.md",
+        "additions": 16,
+        "deletions": 0
+      },
+      {
+        "path": "docs/content/platform/telemetry.md",
+        "additions": 56,
+        "deletions": 2
+      },
+      {
+        "path": "docs/utils/vale/styles/config/vocabularies/Modelplane/accept.txt",
+        "additions": 3,
+        "deletions": 0
+      },
+      {
+        "path": "functions/compose-serving-stack/function/stacks/clouds/civo.py",
+        "additions": 86,
+        "deletions": 6
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_fn.py",
+        "additions": 140,
+        "deletions": 20
+      },
+      {
+        "path": "functions/compose-serving-stack/tests/test_stacks.py",
+        "additions": 81,
+        "deletions": 6
+      },
+      {
+        "path": "pyproject.toml",
+        "additions": 3,
+        "deletions": 0
+      }
+    ]
+  }
+}
