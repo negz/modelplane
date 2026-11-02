@@ -27,7 +27,7 @@ def gh(*args: str) -> str:
 
 def body_at(number: int, when: str, current: str) -> str:
     q = (
-        "query($n:Int!){repository(owner:\"modelplaneai\",name:\"modelplane\"){pullRequest(number:$n)"
+        'query($n:Int!){repository(owner:"modelplaneai",name:"modelplane"){pullRequest(number:$n)'
         "{userContentEdits(first:100){nodes{editedAt diff}}}}}"
     )
     data = json.loads(gh("api", "graphql", "-f", f"query={q}", "-F", f"n={number}"))
@@ -54,9 +54,7 @@ def main() -> int:
     for line in sys.stdin:
         number, head, base, when = line.split()[:4]
         n = int(number)
-        pr = json.loads(
-            gh("pr", "view", number, "-R", UPSTREAM, "--json", "title,body,author,closingIssuesReferences")
-        )
+        pr = json.loads(gh("pr", "view", number, "-R", UPSTREAM, "--json", "title,body,author,closingIssuesReferences"))
         commits = []
         for oid in git("rev-list", "--reverse", f"{base}..{head}").split():
             commits.append(
@@ -70,7 +68,13 @@ def main() -> int:
         files = []
         for row in git("diff", "--numstat", base, head).splitlines():
             add, delete, path = row.split("\t")
-            files.append({"path": path, "additions": int(add) if add != "-" else 0, "deletions": int(delete) if delete != "-" else 0})
+            files.append(
+                {
+                    "path": path,
+                    "additions": int(add) if add != "-" else 0,
+                    "deletions": int(delete) if delete != "-" else 0,
+                }
+            )
         case = {
             "pr": n,
             "base": base,

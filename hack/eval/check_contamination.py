@@ -31,11 +31,7 @@ def comments(dump: dict) -> list[str]:
 
 def main() -> int:
     root, dumps = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-    prompts = {
-        p: p.read_text()
-        for d in (".agents", ".opencode")
-        for p in (root / d).rglob("*.md")
-    }
+    prompts = {p: p.read_text() for d in (".agents", ".opencode") for p in (root / d).rglob("*.md")}
     found = 0
     for dump_path in sorted(dumps.glob("*.json")):
         n = dump_path.stem
