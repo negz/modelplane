@@ -1,9 +1,9 @@
 # The NVIDIA AICR CLI, from the GitHub release tarballs. nixpkgs has no
-# aicr package, and the serving stack generator needs the exact release
-# its catalog fork was synced against.
+# aicr package, and the device stack generator needs the exact release
+# its tables and catalog forks were synced against.
 #
 # The version here and AICR_PIN in
-# functions/compose-serving-stack/generate.py move together: the
+# sdk/python/modelplane_sdk/aicr/tables.py move together: the
 # generator asserts `aicr --version` matches its pin and fails closed on
 # a mismatch. To bump, follow "Bumping aicr" in CONTRIBUTING.md and
 # refresh the hashes from the release's aicr_checksums.txt:

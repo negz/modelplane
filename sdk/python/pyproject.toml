@@ -1,0 +1,18 @@
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "modelplane-sdk"
+version = "0.0.0"
+description = "Build Modelplane cluster providers: device stacks, and the Usages their ProviderConfigs need."
+requires-python = ">=3.11,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "crossplane-function-sdk-python>=0.14.0",
+  "pyyaml>=6.0",
+]
+
+[tool.uv.build-backend]
+module-name = "modelplane_sdk"
+module-root = ""
