@@ -10,13 +10,13 @@
 #   done
 { pkgs, ... }:
 let
-  version = "v2.6.0-rc.0.73.ga588ce6";
+  version = "v2.6.0-rc.0.306.g763f9f2";
   channel = "master";
 
   hashes = {
-    linux_amd64 = "8184e02bbb419652f475fe8f3dd9681d2c62549563209c27c41e169437f2fb8f";
-    linux_arm64 = "6c4d38e9a903beb72d2f45feffa0f9f1b5e95be986165ecfa1bd8426b98137ed";
-    darwin_arm64 = "180ee3796aca6e8ae98ddf339c5b23e8220434064b867970dd67b6a2c05b2970";
+    linux_amd64 = "eead6bf85f18d62e29e32489197f408b5612075a58e8733c3ac8321f55128fb1";
+    linux_arm64 = "4a339e5e346da5032f67055aeddb39e0006f8f9ff6b0d0f364dedee16f106a21";
+    darwin_arm64 = "f2fc76665b80c27d48c6abf40ffd531d46687c23e0af2fa5b2eccb2c3de0b9a6";
   };
 
   platforms = {
