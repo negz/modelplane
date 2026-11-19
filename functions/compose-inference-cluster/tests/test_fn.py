@@ -54,7 +54,7 @@ def _inference_cluster(*, cluster: v1alpha1.Cluster, node_pools: list[v1alpha1.N
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             v1alpha1.InferenceCluster(
-                metadata=metav1.ObjectMeta(name="test-cluster", namespace="modelplane-system"),
+                metadata=metav1.ObjectMeta(name="test-cluster"),
                 spec=v1alpha1.Spec(cluster=cluster, nodePools=node_pools),
             ).model_dump(exclude_none=True, mode="json", by_alias=True)
         ),
@@ -77,67 +77,92 @@ def _desired_inference_cluster(
     return fnv1.Resource(resource=resource.dict_to_struct({"status": status}))
 
 
-def _inference_class(*, name: str, count: int, memory: str, provisioning: dict) -> fnv1.Resource:
-    """An InferenceClass of count DRA-claimed NVIDIA GPUs with memory each, as its class requirement returns it."""
+def _inference_class(*, name: str, count: int, memory: str, node_class: str | None) -> fnv1.Resource:
+    """An InferenceClass of count DRA-claimed NVIDIA GPUs with memory each, as its class requirement returns it,
+    referencing the AcmeNodeClass node_class unless it's None."""
+    spec: dict = {
+        "devices": [
+            {
+                "name": "gpu",
+                "claim": "DRA",
+                "driver": "gpu.nvidia.com",
+                "deviceClassName": "gpu.nvidia.com",
+                "count": count,
+                "capacity": {"memory": {"value": memory}},
+            },
+        ],
+    }
+    if node_class is not None:
+        spec["nodeClassRef"] = {"apiVersion": "acme.example.org/v1alpha1", "kind": "AcmeNodeClass", "name": node_class}
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {"apiVersion": "modelplane.ai/v1alpha1", "kind": "InferenceClass", "metadata": {"name": name}, "spec": spec}
+        )
+    )
+
+
+def _cpu_inference_class(*, name: str, cpus: str, node_class: str | None) -> fnv1.Resource:
+    """An InferenceClass of one DRA-claimed CPU device of cpus cores, as its class requirement returns it,
+    referencing the AcmeNodeClass node_class unless it's None."""
+    spec: dict = {
+        "devices": [
+            {
+                "name": "cpu",
+                "claim": "DRA",
+                "driver": "dra.cpu",
+                "deviceClassName": "dra.cpu",
+                "count": 1,
+                "capacity": {"cpu": {"value": cpus}},
+            },
+        ],
+    }
+    if node_class is not None:
+        spec["nodeClassRef"] = {"apiVersion": "acme.example.org/v1alpha1", "kind": "AcmeNodeClass", "name": node_class}
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {"apiVersion": "modelplane.ai/v1alpha1", "kind": "InferenceClass", "metadata": {"name": name}, "spec": spec}
+        )
+    )
+
+
+def _provider(*, name: str, annotations: dict, api_version: str) -> fnv1.Resource:
+    """The acme provider's Composition for a ProvisionedCluster, as the provider requirement returns it."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
-                "apiVersion": "modelplane.ai/v1alpha1",
-                "kind": "InferenceClass",
-                "metadata": {"name": name},
+                "apiVersion": "apiextensions.crossplane.io/v1",
+                "kind": "Composition",
+                "metadata": {
+                    "name": name,
+                    "labels": {
+                        "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                        "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                    },
+                    "annotations": annotations,
+                },
                 "spec": {
-                    "devices": [
-                        {
-                            "name": "gpu",
-                            "claim": "DRA",
-                            "driver": "gpu.nvidia.com",
-                            "deviceClassName": "gpu.nvidia.com",
-                            "count": count,
-                            "capacity": {"memory": {"value": memory}},
-                        },
-                    ],
-                    "provisioning": provisioning,
+                    "compositeTypeRef": {
+                        "apiVersion": api_version,
+                        "kind": "ProvisionedCluster",
+                    },
                 },
             }
         )
     )
 
 
-def _cpu_inference_class(*, name: str, cpus: str, provisioning: dict) -> fnv1.Resource:
-    """An InferenceClass of one DRA-claimed CPU device of cpus cores, as its class requirement returns it."""
+def _model_replica(*, namespace: str) -> fnv1.Resource:
+    """A ModelReplica scheduled to test-cluster, as the model-replicas requirement returns it."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "modelplane.ai/v1alpha1",
-                "kind": "InferenceClass",
-                "metadata": {"name": name},
-                "spec": {
-                    "devices": [
-                        {
-                            "name": "cpu",
-                            "claim": "DRA",
-                            "driver": "dra.cpu",
-                            "deviceClassName": "dra.cpu",
-                            "count": 1,
-                            "capacity": {"cpu": {"value": cpus}},
-                        },
-                    ],
-                    "provisioning": provisioning,
+                "kind": "ModelReplica",
+                "metadata": {
+                    "name": "deploy-test-cluster-0",
+                    "namespace": namespace,
+                    "labels": {"modelplane.ai/cluster": "test-cluster"},
                 },
-            }
-        )
-    )
-
-
-def _capacity_reservation(*, name: str, spec: dict) -> fnv1.Resource:
-    """A CapacityReservation with spec, as its reservation requirement returns it."""
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "modelplane.ai/v1alpha1",
-                "kind": "CapacityReservation",
-                "metadata": {"name": name},
-                "spec": spec,
             }
         )
     )
@@ -171,19 +196,6 @@ def _model_cache(*, name: str, namespace: str, cluster: str) -> fnv1.Resource:
     )
 
 
-def _observed_activation_policy(*, activated: list[str]) -> fnv1.Resource:
-    """The observed ManagedResourceActivationPolicy, reporting the kinds it has activated."""
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "apiextensions.crossplane.io/v1alpha1",
-                "kind": "ManagedResourceActivationPolicy",
-                "status": {"activated": activated},
-            }
-        )
-    )
-
-
 def _observed_serving_stack(*, gateway: dict) -> fnv1.Resource:
     """The observed ServingStack, Ready, with the gateway status it has published."""
     return fnv1.Resource(
@@ -198,177 +210,66 @@ def _observed_serving_stack(*, gateway: dict) -> fnv1.Resource:
     )
 
 
-def _activation_policy(*, activate: list[str], ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed ManagedResourceActivationPolicy, activating a cloud's managed resource kinds."""
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "apiextensions.crossplane.io/v1alpha1",
-                "kind": "ManagedResourceActivationPolicy",
-                "spec": {"activate": activate},
-            }
-        ),
-        ready=ready,
-    )
-
-
-def _gke_cluster(*, credentials: dict | None, reservation: dict | None, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed GKECluster with l4-pool, using credentials and backing l4-pool with reservation unless they're
-    None."""
-    pool: dict = {
-        "name": "l4-pool",
-        "role": "GPU",
-        "machineType": "g2-standard-48",
-        "nodeCount": 2,
-        "minNodeCount": None,
-        "maxNodeCount": 4,
-        "diskSizeGb": 100,
-        "gpu": {"acceleratorType": "nvidia-l4", "acceleratorCount": 1},
-        "zones": ["us-central1-a"],
-    }
-    if reservation is not None:
-        pool["reservation"] = reservation
-    spec: dict = {
-        "region": "us-central1",
-        "kubernetesVersion": "1.35",
-        "nodePools": [pool],
-    }
-    if credentials is not None:
-        spec["credentials"] = credentials
+def _observed_provisioned_cluster(*, status: dict) -> fnv1.Resource:
+    """The observed ProvisionedCluster for l4-pool, with the status its provider reported."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "GKECluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                "spec": spec,
-            }
-        ),
-        ready=ready,
-    )
-
-
-def _eks_cluster(
-    *, zones: list[str], capacity_reservation: dict | None, fabric: str | None, ready: fnv1.Ready
-) -> fnv1.Resource:
-    """The composed EKSCluster with l4-pool in zones, setting its capacityReservation and fabric unless they're
-    None."""
-    pool: dict = {
-        "name": "l4-pool",
-        "role": "GPU",
-        "instanceType": "g6.xlarge",
-        "nodeCount": 2,
-        "minNodeCount": None,
-        "maxNodeCount": 4,
-        "diskSizeGb": 100,
-        "gpu": {"acceleratorType": "nvidia-l4"},
-        "zones": zones,
-    }
-    if capacity_reservation is not None:
-        pool["capacityReservation"] = capacity_reservation
-    if fabric is not None:
-        pool["fabric"] = fabric
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "EKSCluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                "spec": {"region": "us-west-2", "kubernetesVersion": "1.36", "nodePools": [pool]},
-            }
-        ),
-        ready=ready,
-    )
-
-
-def _vultr_cluster(*, credentials: dict | None, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed VultrCluster with l40s-pool, using credentials unless they're None."""
-    spec: dict = {
-        "region": "ewr",
-        "kubernetesVersion": "v1.36.6+1",
-        "nodePools": [
-            {
-                "name": "l40s-pool",
-                "role": "GPU",
-                "plan": "vcg-l40s-16c-180g-48vram",
-                "nodeCount": 2,
-                "maxNodeCount": 4,
-                "gpu": {"acceleratorType": "nvidia-l40s"},
-            },
-        ],
-    }
-    if credentials is not None:
-        spec["credentials"] = credentials
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "VultrCluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                "spec": spec,
-            }
-        ),
-        ready=ready,
-    )
-
-
-def _vultr_cluster_cpu(*, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed VultrCluster with cpu-pool, a CPU-role pool with no gpu block."""
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "VultrCluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
+                "kind": "ProvisionedCluster",
+                "metadata": {"name": "test-cluster"},
                 "spec": {
-                    "region": "ewr",
-                    "kubernetesVersion": "v1.36.6+1",
+                    "configRef": {
+                        "apiVersion": "acme.example.org/v1alpha1",
+                        "kind": "AcmeClusterConfig",
+                        "name": "default",
+                    },
+                    "draDrivers": ["gpu.nvidia.com"],
                     "nodePools": [
                         {
-                            "name": "cpu-pool",
-                            "role": "CPU",
-                            "plan": "vc2-6c-16gb",
+                            "name": "l4-pool",
+                            "nodeClassRef": {
+                                "apiVersion": "acme.example.org/v1alpha1",
+                                "kind": "AcmeNodeClass",
+                                "name": "l4",
+                            },
+                            "role": "Accelerator",
                             "nodeCount": 2,
                             "maxNodeCount": 4,
                         },
                     ],
                 },
+                "status": status,
             }
-        ),
-        ready=ready,
+        )
     )
 
 
-def _civo_cluster(*, node_pools: list[dict], credentials: dict | None, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed CivoCluster in LON1 with node_pools, using credentials unless they're None."""
-    spec: dict = {"region": "LON1", "nodePools": node_pools}
-    if credentials is not None:
-        spec["credentials"] = credentials
+def _provisioned_cluster(*, node_pools: list[dict], dra_drivers: list[str], ready: fnv1.Ready) -> fnv1.Resource:
+    """The composed ProvisionedCluster, provisioned from the default AcmeClusterConfig by the acme provider."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "CivoCluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                "spec": spec,
-            }
-        ),
-        ready=ready,
-    )
-
-
-def _coreweave_cluster(*, node_pools: list[dict], credentials: dict | None, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed CoreWeaveCluster in US-EAST-04A with node_pools, using credentials unless they're None."""
-    spec: dict = {"zone": "US-EAST-04A", "nodePools": node_pools}
-    if credentials is not None:
-        spec["credentials"] = credentials
-    return fnv1.Resource(
-        resource=resource.dict_to_struct(
-            {
-                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                "kind": "CoreWeaveCluster",
-                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                "spec": spec,
+                "kind": "ProvisionedCluster",
+                "metadata": {"name": "test-cluster"},
+                "spec": {
+                    "crossplane": {
+                        "compositionSelector": {
+                            "matchLabels": {
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            },
+                        },
+                    },
+                    "configRef": {
+                        "apiVersion": "acme.example.org/v1alpha1",
+                        "kind": "AcmeClusterConfig",
+                        "name": "default",
+                    },
+                    "draDrivers": dra_drivers,
+                    "nodePools": node_pools,
+                },
             }
         ),
         ready=ready,
@@ -400,30 +301,30 @@ def _cluster_provider_config(*, kubeconfig: str, identity: dict | None) -> fnv1.
 
 def _serving_stack(
     *,
-    cloud: str,
+    device_stacks: str,
     secrets: list[dict],
+    dra_drivers: list[str],
     client_cas: list[dict] | None,
-    gpu: dict | None,
+    service: dict | None,
+    telemetry: dict | None,
     ready: fnv1.Ready,
-    dra_drivers: tuple[str, ...],
 ) -> fnv1.Resource:
-    """The composed ServingStack, its gateway accepting client_cas and its spec.gpu set to gpu unless they're None.
-
-    dra_drivers is the drivers the cluster's classes claim, always stamped
-    on the spec.
-    """
+    """The composed ServingStack, its gateway accepting client_cas and configuring its Service as service, and its
+    telemetry set to telemetry, unless they're None."""
     gateway: dict = {"hostname": "gateway-test-cluster-09532.modelplane-system.svc.cluster.local"}
     if client_cas is not None:
         gateway["clientCAs"] = client_cas
+    if service is not None:
+        gateway["service"] = service
     spec: dict = {
-        "cloud": cloud,
+        "deviceStacks": device_stacks,
         "gateway": gateway,
         "stack": "Standard",
         "secrets": secrets,
-        "draDrivers": list(dra_drivers),
+        "draDrivers": dra_drivers,
     }
-    if gpu is not None:
-        spec["gpu"] = gpu
+    if telemetry is not None:
+        spec["telemetry"] = telemetry
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
@@ -437,8 +338,8 @@ def _serving_stack(
     )
 
 
-def _backend_usage(*, cluster_kind: str) -> fnv1.Resource:
-    """The composed Usage holding the cluster_kind cluster XR until the ServingStack is gone."""
+def _provisioned_usage() -> fnv1.Resource:
+    """The composed Usage holding the ProvisionedCluster until the ServingStack is gone."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
@@ -448,8 +349,8 @@ def _backend_usage(*, cluster_kind: str) -> fnv1.Resource:
                 "spec": {
                     "of": {
                         "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                        "kind": cluster_kind,
-                        "resourceSelector": {"matchControllerRef": True},
+                        "kind": "ProvisionedCluster",
+                        "resourceRef": {"name": "test-cluster", "namespace": ""},
                     },
                     "by": {
                         "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
@@ -486,16 +387,20 @@ def _guard_cluster_usage(*, reason: str) -> fnv1.Resource:
     )
 
 
-def _input_usage(*, kind: str, name: str) -> fnv1.Resource:
-    """The ClusterUsage blocking deletion of an InferenceClass or CapacityReservation test-cluster uses."""
+def _input_usage(*, name: str) -> fnv1.Resource:
+    """The ClusterUsage blocking deletion of an InferenceClass test-cluster uses."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "protection.crossplane.io/v1beta1",
                 "kind": "ClusterUsage",
                 "spec": {
-                    "of": {"apiVersion": "modelplane.ai/v1alpha1", "kind": kind, "resourceRef": {"name": name}},
-                    "reason": f"InferenceCluster test-cluster uses this {kind}",
+                    "of": {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "InferenceClass",
+                        "resourceRef": {"name": name},
+                    },
+                    "reason": "InferenceCluster test-cluster uses this InferenceClass",
                     "replayDeletion": True,
                 },
             }
@@ -534,7 +439,8 @@ def _namespace_object(*, team: str, name: str) -> fnv1.Resource:
 
 
 def _pool_observation(*, pool: str) -> fnv1.Resource:
-    """The composed Object that creates a PoolObservation of pool on the cluster, watched and polled, without deleting it, and marked ready."""
+    """The composed Object that creates a PoolObservation of pool on the cluster, watched and polled, without
+    deleting it, and marked ready."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
@@ -619,11 +525,12 @@ def _to_dict(msg: message.Message) -> dict:
 # can't be label-selected to one, leaving the function to filter by
 # status.clusters[]; every InferenceGateway, since the cluster gateway accepts
 # client certificates from each of their CAs, which is how an InferenceGateway
-# proves itself; and the InferenceClass behind each node pool.
+# proves itself; and the InferenceClass behind each node pool. A Provisioned
+# cluster also requires its provider: the Composition for a ProvisionedCluster
+# labelled with the group and kind of its cluster config.
 #
-# A cloud cluster's case observes its ManagedResourceActivationPolicy with every
-# kind in status.activated, so the function composes the cluster XR rather than
-# waiting for activation, unless the case says otherwise.
+# The Provisioned cases use a made-up acme provider, whose cluster config is
+# an AcmeClusterConfig, so nothing here names a real cloud.
 #
 # gateway-test-cluster-09532.modelplane-system.svc.cluster.local is the internal
 # name Modelplane derives for test-cluster's gateway, which
@@ -631,7 +538,7 @@ def _to_dict(msg: message.Message) -> dict:
 COMPOSE_CASES = [
     ComposeCase(
         name="ExistingCluster",
-        reason="An Existing cluster composes a ClusterProviderConfig and a ServingStack from its kubeconfig Secret.",
+        reason="An Existing cluster composes a ClusterProviderConfig and a ServingStack that manages its device stacks from its kubeconfig Secret.",
         req=fnv1.RunFunctionRequest(
             observed=fnv1.State(
                 composite=_inference_cluster(
@@ -646,21 +553,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -688,16 +581,17 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -729,8 +623,8 @@ COMPOSE_CASES = [
         ),
     ),
     ComposeCase(
-        name="ExistingNonGCPIdentity",
-        reason="An Existing cluster threads its non-GCP identity's type into the ClusterProviderConfig and the ServingStack's secrets.",
+        name="ExistingIdentityAndCache",
+        reason="An Existing cluster threads its identity's type into the ClusterProviderConfig and the ServingStack's secrets, and relays its cache StorageClass to status.",
         req=fnv1.RunFunctionRequest(
             observed=fnv1.State(
                 composite=_inference_cluster(
@@ -743,6 +637,7 @@ COMPOSE_CASES = [
                                 key="credentials.json",
                                 type="NebiusServiceAccountCredentials",
                             ),
+                            cache=v1alpha1.Cache(storageClassName="nfs-rwx"),
                         ),
                     ),
                     node_pools=[
@@ -752,21 +647,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -790,11 +671,11 @@ COMPOSE_CASES = [
                             ],
                         },
                     ],
-                    cache=None,
+                    cache={"storageClassName": "nfs-rwx"},
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig",
                         identity={
@@ -808,8 +689,7 @@ COMPOSE_CASES = [
                         },
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[
                             {"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"},
                             {
@@ -818,8 +698,10 @@ COMPOSE_CASES = [
                                 "key": "credentials.json",
                             },
                         ],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -850,823 +732,43 @@ COMPOSE_CASES = [
             ],
         ),
     ),
+    # Nothing on an Existing cluster says which drivers it can serve, so its
+    # classes' drivers are never gated. A typo'd driver surfaces when its
+    # ResourceClaim can't allocate. The Synthetic device is described for
+    # scheduling and never claimed, so its driver isn't a device stack to
+    # install, while the GPU's unset claim defaults to DRA.
     ComposeCase(
-        name="GKEFirstPass",
-        reason="With no GKECluster observed yet, a GKE cluster composes only the activation policy and the GKECluster.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "gke-cluster": _gke_cluster(credentials=None, reservation=None, ready=fnv1.READY_UNSPECIFIED),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="GKEClassWrongProvider",
-        reason="A GKE node pool whose InferenceClass has no GKE provisioning block is rejected with a fatal result.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            results=[
-                fnv1.Result(severity=fnv1.SEVERITY_FATAL, message="InferenceClass gpu-l4 has no GKE provisioning block")
-            ],
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="InvalidNodePool",
-                    message="InferenceClass gpu-l4 has no GKE provisioning block",
-                ),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="GKEReservation",
-        reason="A node pool referencing a GKE CapacityReservation passes the reservation's name through to the GKECluster pool.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-calendar"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-calendar": fnv1.Resources(
-                    items=[
-                        _capacity_reservation(
-                            name="l4-calendar",
-                            spec={
-                                "provider": "GKE",
-                                "gke": {"zone": "us-central1-a", "name": "l4-calendar"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "usage-capacityreservation-l4-calendar": _input_usage(
-                        kind="CapacityReservation", name="l4-calendar"
-                    ),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "gke-cluster": _gke_cluster(
-                        credentials=None,
-                        reservation={"name": "l4-calendar"},
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                    "reservation-l4-calendar": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-calendar"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # An invalid node pool fails the reconcile, so Crossplane applies none of its
-    # desired state, and an existing GKECluster isn't deleted for being missing
-    # from it. Crossplane still sets the conditions.
-    ComposeCase(
-        name="GKEReservationZoneMismatch",
-        reason="A node pool referencing a GKE CapacityReservation in a zone it isn't restricted to is rejected with a fatal result.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a", "us-central1-b"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-calendar"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-calendar": fnv1.Resources(
-                    items=[
-                        _capacity_reservation(
-                            name="l4-calendar",
-                            spec={"provider": "GKE", "gke": {"zone": "us-central1-a", "name": "l4-calendar"}},
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "usage-capacityreservation-l4-calendar": _input_usage(
-                        kind="CapacityReservation", name="l4-calendar"
-                    ),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                    "reservation-l4-calendar": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-calendar"
-                    ),
-                },
-            ),
-            results=[
-                fnv1.Result(
-                    severity=fnv1.SEVERITY_FATAL,
-                    message="Node pool l4-pool must set zones to [us-central1-a] to use CapacityReservation l4-calendar",
-                ),
-            ],
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="InvalidNodePool",
-                    message="Node pool l4-pool must set zones to [us-central1-a] to use CapacityReservation l4-calendar",
-                ),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="GKEReservationWrongProvider",
-        reason="A GKE node pool referencing an EKS CapacityReservation is rejected with a fatal result.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-block"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-block": fnv1.Resources(
-                    items=[
-                        _capacity_reservation(
-                            name="l4-block",
-                            spec={
-                                "provider": "EKS",
-                                "eks": {"region": "us-west-2", "type": "CapacityBlock", "id": "cr-0123456789abcdef0"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "usage-capacityreservation-l4-block": _input_usage(kind="CapacityReservation", name="l4-block"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                    "reservation-l4-block": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-block"
-                    ),
-                },
-            ),
-            results=[
-                fnv1.Result(
-                    severity=fnv1.SEVERITY_FATAL,
-                    message="CapacityReservation l4-block is for EKS, not GKE",
-                ),
-            ],
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="InvalidNodePool",
-                    message="CapacityReservation l4-block is for EKS, not GKE",
-                ),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="GKEReservationMissing",
-        reason="A node pool referencing a CapacityReservation that doesn't exist fails the reconcile until the reservation exists.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-calendar"),
-                        ),
-                    ],
-                ),
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-calendar": fnv1.Resources(),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                    "reservation-l4-calendar": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-calendar"
-                    ),
-                },
-            ),
-            results=[
-                fnv1.Result(
-                    severity=fnv1.SEVERITY_FATAL,
-                    message="Waiting for CapacityReservations: l4-calendar",
-                ),
-            ],
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="WaitingForReservations",
-                    message="Waiting for CapacityReservations: l4-calendar",
-                ),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="ReservationNotYetFetched",
-        reason="Before Crossplane has fetched its CapacityReservation, the function asks for it and waits, without failing the reconcile.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-calendar"),
-                        ),
-                    ],
-                ),
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                    "reservation-l4-calendar": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-calendar"
-                    ),
-                },
-            ),
-        ),
-    ),
-    ComposeCase(
-        name="GKECredentials",
-        reason="A GKE cluster's credentials pass through to the GKECluster's spec.",
+        name="ExistingAnyDriver",
+        reason="An Existing cluster composes a class claiming a driver no provider declares, and stamps only its claimed drivers on the ServingStack.",
         req=fnv1.RunFunctionRequest(
             observed=fnv1.State(
                 composite=_inference_cluster(
                     cluster=v1alpha1.Cluster(
-                        source="GKE",
-                        gke=v1alpha1.Gke(
-                            region="us-central1",
-                            credentials=v1alpha1.Credentials(type="ProviderConfig", name="my-gcp-account"),
-                        ),
+                        source="Existing",
+                        existing=v1alpha1.Existing(secretRef=v1alpha1.SecretRef(name="my-kubeconfig")),
                     ),
                     node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
+                        v1alpha1.NodePool(name="byo-pool", className="byo", nodeCount=1),
                     ],
                 ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
             ),
             required_resources={
-                "class-gpu-l4": fnv1.Resources(
+                "class-byo": fnv1.Resources(
                     items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
+                        fnv1.Resource(
+                            resource=resource.dict_to_struct(
+                                {
+                                    "apiVersion": "modelplane.ai/v1alpha1",
+                                    "kind": "InferenceClass",
+                                    "metadata": {"name": "byo"},
+                                    "spec": {
+                                        "devices": [
+                                            {"name": "gpu", "driver": "gpu.example.com", "deviceClassName": "g"},
+                                            {"name": "fabric", "claim": "Synthetic", "driver": "fabric.example.com"},
+                                        ],
+                                    },
+                                }
+                            )
                         ),
                     ],
                 ),
@@ -1678,17 +780,18 @@ COMPOSE_CASES = [
                 composite=_desired_inference_cluster(
                     schedulable_pools=[
                         {
-                            "name": "l4-pool",
-                            "nodes": 4,
+                            "name": "byo-pool",
+                            "nodes": 1,
+                            # The class's schema defaults each device's claim and count.
                             "devices": [
                                 {
                                     "name": "gpu",
                                     "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
+                                    "driver": "gpu.example.com",
+                                    "deviceClassName": "g",
                                     "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
                                 },
+                                {"name": "fabric", "claim": "Synthetic", "driver": "fabric.example.com", "count": 1},
                             ],
                         },
                     ],
@@ -1696,23 +799,17 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
+                    "usage-inferenceclass-byo": _input_usage(name="byo"),
+                    "cluster-provider-config-kubernetes": _cluster_provider_config(
+                        kubeconfig="my-kubeconfig", identity=None
                     ),
-                    "gke-cluster": _gke_cluster(
-                        credentials={"type": "ProviderConfig", "name": "my-gcp-account"},
-                        reservation=None,
+                    "serving-stack": _serving_stack(
+                        device_stacks="Managed",
+                        secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.example.com"],
+                        client_cas=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -1732,14 +829,14 @@ COMPOSE_CASES = [
                     ),
                     "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
                     "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    "class-byo": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="byo"
                     ),
                 },
             ),
             conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
+                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
             ],
         ),
     ),
@@ -1763,21 +860,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -1805,16 +888,17 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                     "pool-observation-l4-pool": _pool_observation(pool="l4-pool"),
@@ -1848,7 +932,7 @@ COMPOSE_CASES = [
     ),
     ComposeCase(
         name="ExistingCPUPoolObserved",
-        reason="Once its ServingStack is Ready, an Existing cluster composes a PoolObservation for its CPU pool as well as its NVIDIA GPU pool, and publishes the agent's observation of the CPU pool.",
+        reason="Once its ServingStack is Ready, an Existing cluster composes a PoolObservation for its CPU pool as well as its GPU pool, and publishes the agent's observation of the CPU pool.",
         req=fnv1.RunFunctionRequest(
             observed=fnv1.State(
                 composite=_inference_cluster(
@@ -1891,30 +975,10 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
                 "class-cpu": fnv1.Resources(
-                    items=[
-                        _cpu_inference_class(
-                            name="cpu",
-                            cpus="6",
-                            provisioning={"provider": "Civo", "civo": {"size": "g4p.kube.medium"}},
-                        ),
-                    ],
+                    items=[_cpu_inference_class(name="cpu", cpus="6", node_class=None)],
                 ),
             },
         ),
@@ -1958,17 +1022,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-cpu": _input_usage(kind="InferenceClass", name="cpu"),
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-cpu": _input_usage(name="cpu"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["dra.cpu", "gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                     "pool-observation-l4-pool": _pool_observation(pool="l4-pool"),
@@ -2005,7 +1070,7 @@ COMPOSE_CASES = [
         ),
     ),
     # The PoolObservation status is what the agent reported for a pool of one
-    # g6.12xlarge node with three of its four L4s allocated.
+    # node with four L4s, three of them allocated.
     ComposeCase(
         name="ExistingPoolObserved",
         reason="Once the agent reports on a pool, the cluster publishes the nodes the pool has, how many devices are free on them, and when the agent last saw a claim allocated on them.",
@@ -2057,21 +1122,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4x4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4x4",
-                            count=4,
-                            memory="23034Mi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.12xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 4},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4x4", count=4, memory="23034Mi", node_class=None)],
                 ),
             },
         ),
@@ -2102,17 +1153,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4x4": _input_usage(kind="InferenceClass", name="gpu-l4x4"),
+                    "usage-inferenceclass-gpu-l4x4": _input_usage(name="gpu-l4x4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
-                        dra_drivers=("gpu.nvidia.com",),
                     ),
                     "pool-observation-gpu-l4x4-a": _pool_observation(pool="gpu-l4x4-a"),
                 },
@@ -2190,21 +1242,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4x4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4x4",
-                            count=4,
-                            memory="23034Mi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.12xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 4},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4x4", count=4, memory="23034Mi", node_class=None)],
                 ),
             },
         ),
@@ -2232,17 +1270,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4x4": _input_usage(kind="InferenceClass", name="gpu-l4x4"),
+                    "usage-inferenceclass-gpu-l4x4": _input_usage(name="gpu-l4x4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
-                        dra_drivers=("gpu.nvidia.com",),
                     ),
                     "pool-observation-gpu-l4x4-a": _pool_observation(pool="gpu-l4x4-a"),
                 },
@@ -2326,21 +1365,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4x4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4x4",
-                            count=4,
-                            memory="23034Mi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.12xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 4},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4x4", count=4, memory="23034Mi", node_class=None)],
                 ),
             },
         ),
@@ -2371,17 +1396,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4x4": _input_usage(kind="InferenceClass", name="gpu-l4x4"),
+                    "usage-inferenceclass-gpu-l4x4": _input_usage(name="gpu-l4x4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
-                        dra_drivers=("gpu.nvidia.com",),
                     ),
                     "pool-observation-gpu-l4x4-a": _pool_observation(pool="gpu-l4x4-a"),
                 },
@@ -2464,21 +1490,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4x4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4x4",
-                            count=4,
-                            memory="23034Mi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.12xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 4},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4x4", count=4, memory="23034Mi", node_class=None)],
                 ),
             },
         ),
@@ -2506,17 +1518,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4x4": _input_usage(kind="InferenceClass", name="gpu-l4x4"),
+                    "usage-inferenceclass-gpu-l4x4": _input_usage(name="gpu-l4x4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
-                        dra_drivers=("gpu.nvidia.com",),
                     ),
                     "pool-observation-gpu-l4x4-a": _pool_observation(pool="gpu-l4x4-a"),
                 },
@@ -2618,21 +1631,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "class-gpu-l4x4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4x4",
-                            count=4,
-                            memory="23034Mi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.12xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 4},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4x4", count=4, memory="23034Mi", node_class=None)],
                 ),
             },
         ),
@@ -2662,17 +1661,18 @@ COMPOSE_CASES = [
                     gateway={"address": "34.55.100.10"},
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4x4": _input_usage(kind="InferenceClass", name="gpu-l4x4"),
+                    "usage-inferenceclass-gpu-l4x4": _input_usage(name="gpu-l4x4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
-                        dra_drivers=("gpu.nvidia.com",),
                     ),
                     "pool-observation-gpu-l4x4-a": _pool_observation(pool="gpu-l4x4-a"),
                 },
@@ -2704,3865 +1704,6 @@ COMPOSE_CASES = [
         ),
     ),
     ComposeCase(
-        name="EKSFirstPass",
-        reason="With no EKSCluster observed yet, an EKS cluster composes only the activation policy and the EKSCluster.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a", "us-west-2b"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "eks-cluster": _eks_cluster(
-                        zones=["us-west-2a", "us-west-2b"],
-                        capacity_reservation=None,
-                        fabric=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The ClusterProviderConfig is built only from the kubeconfig, so it's
-    # recreated once the kubeconfig is observed again. It is never emitted with
-    # an empty secretRef.
-    ComposeCase(
-        name="EKSObservedCPC",
-        reason="With a ClusterProviderConfig observed but no EKSCluster yet, an EKS cluster leaves the ClusterProviderConfig out of desired state.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a", "us-west-2b"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "cluster-provider-config-kubernetes": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-                                "kind": "ClusterProviderConfig",
-                                "metadata": {"name": "test-cluster-cluster-kubeconfig-d0f89"},
-                                "spec": {
-                                    "credentials": {
-                                        "source": "Secret",
-                                        "secretRef": {
-                                            "namespace": "modelplane-system",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    },
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "eks-cluster": _eks_cluster(
-                        zones=["us-west-2a", "us-west-2b"],
-                        capacity_reservation=None,
-                        fabric=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The GKE kubeconfig has no embedded credentials, hence the service account
-    # identity on the ClusterProviderConfig.
-    ComposeCase(
-        name="GKEReady",
-        reason="Once its GKECluster is Ready, a GKE cluster composes the ClusterProviderConfig, ServingStack and Usage, and relays its RWX StorageClass.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "gke-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "GKECluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "us-central1",
-                                    "nodePools": [{"name": "system", "role": "System", "machineType": "e2-standard-4"}],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2026-06-08T00:00:00Z",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx"},
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                        {
-                                            "type": "GoogleApplicationCredentials",
-                                            "name": "test-cluster-sa-key-fghij",
-                                            "key": "credentials.json",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "gke-cluster": _gke_cluster(credentials=None, reservation=None, ready=fnv1.READY_TRUE),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde",
-                        identity={
-                            "type": "GoogleApplicationCredentials",
-                            "source": "Secret",
-                            "secretRef": {
-                                "namespace": "modelplane-system",
-                                "name": "test-cluster-sa-key-fghij",
-                                "key": "credentials.json",
-                            },
-                        },
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="GKE",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[
-                            {"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"},
-                            {
-                                "type": "GoogleApplicationCredentials",
-                                "name": "test-cluster-sa-key-fghij",
-                                "key": "credentials.json",
-                            },
-                        ],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-gke-by-backend": _backend_usage(cluster_kind="GKECluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="GKE cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="EKSReady",
-        reason="Once its EKSCluster is Ready, an EKS cluster composes the ClusterProviderConfig, ServingStack and Usage, and relays its status.cache.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a", "us-west-2b"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "eks-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "EKSCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "us-west-2",
-                                    "nodePools": [
-                                        {"name": "l4-pool", "role": "GPU", "instanceType": "g6.xlarge", "nodeCount": 2},
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx-efs"},
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx-efs"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "eks-cluster": _eks_cluster(
-                        zones=["us-west-2a", "us-west-2b"],
-                        capacity_reservation=None,
-                        fabric=None,
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="EKS",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-eks-by-backend": _backend_usage(cluster_kind="EKSCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="EKS cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # compose-eks-cluster turns the pool's capacityReservation into a
-    # CAPACITY_BLOCK node group.
-    ComposeCase(
-        name="EKSCapacityBlock",
-        reason="A node pool referencing a Capacity Block CapacityReservation passes its type and ID through to the EKSCluster pool's capacityReservation.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-block"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-block": fnv1.Resources(
-                    items=[
-                        _capacity_reservation(
-                            name="l4-block",
-                            spec={
-                                "provider": "EKS",
-                                "eks": {"region": "us-west-2", "type": "CapacityBlock", "id": "cr-0123456789abcdef0"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "usage-capacityreservation-l4-block": _input_usage(kind="CapacityReservation", name="l4-block"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "eks-cluster": _eks_cluster(
-                        zones=["us-west-2a"],
-                        capacity_reservation={"type": "CapacityBlock", "id": "cr-0123456789abcdef0"},
-                        fabric=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                    "reservation-l4-block": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-block"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # compose-eks-cluster turns the pool's fabric into EFA launch-template
-    # interfaces.
-    ComposeCase(
-        name="EKSReservationWrongRegion",
-        reason="A node pool referencing a CapacityReservation in another region is rejected with a fatal result.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a"],
-                            reservationRef=v1alpha1.ReservationRef(name="l4-block"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "reservation-l4-block": fnv1.Resources(
-                    items=[
-                        _capacity_reservation(
-                            name="l4-block",
-                            spec={
-                                "provider": "EKS",
-                                "eks": {"region": "us-east-2", "type": "CapacityBlock", "id": "cr-0123456789abcdef0"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "usage-capacityreservation-l4-block": _input_usage(kind="CapacityReservation", name="l4-block"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                    "reservation-l4-block": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="CapacityReservation", match_name="l4-block"
-                    ),
-                },
-            ),
-            results=[
-                fnv1.Result(
-                    severity=fnv1.SEVERITY_FATAL,
-                    message="CapacityReservation l4-block is in region us-east-2, but the cluster is in us-west-2",
-                )
-            ],
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="InvalidNodePool",
-                    message="CapacityReservation l4-block is in region us-east-2, but the cluster is in us-west-2",
-                ),
-            ],
-        ),
-    ),
-    # compose-eks-cluster turns the pool's fabric into EFA launch-template
-    # interfaces.
-    ComposeCase(
-        name="EKSFabricEFA",
-        reason="A node pool that opts into the EFA fabric passes fabric.type through to the EKSCluster pool.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="EKS", eks=v1alpha1.Eks(region="us-west-2")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4-eks",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-west-2a"],
-                            fabric=v1alpha1.Fabric(type="EFA"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4-eks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4-eks",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "EKS",
-                                "eks": {
-                                    "instanceType": "g6.xlarge",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4-eks": _input_usage(kind="InferenceClass", name="gpu-l4-eks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "eips.ec2.aws.m.upbound.io",
-                            "internetgateways.ec2.aws.m.upbound.io",
-                            "launchtemplates.ec2.aws.m.upbound.io",
-                            "natgateways.ec2.aws.m.upbound.io",
-                            "routes.ec2.aws.m.upbound.io",
-                            "routetables.ec2.aws.m.upbound.io",
-                            "routetableassociations.ec2.aws.m.upbound.io",
-                            "securitygroups.ec2.aws.m.upbound.io",
-                            "securitygroupegressrules.ec2.aws.m.upbound.io",
-                            "securitygroupingressrules.ec2.aws.m.upbound.io",
-                            "subnets.ec2.aws.m.upbound.io",
-                            "vpcs.ec2.aws.m.upbound.io",
-                            "filesystems.efs.aws.m.upbound.io",
-                            "mounttargets.efs.aws.m.upbound.io",
-                            "addons.eks.aws.m.upbound.io",
-                            "clusters.eks.aws.m.upbound.io",
-                            "clusterauths.eks.aws.m.upbound.io",
-                            "nodegroups.eks.aws.m.upbound.io",
-                            "podidentityassociations.eks.aws.m.upbound.io",
-                            "policies.iam.aws.m.upbound.io",
-                            "roles.iam.aws.m.upbound.io",
-                            "rolepolicyattachments.iam.aws.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "eks-cluster": _eks_cluster(
-                        zones=["us-west-2a"], capacity_reservation=None, fabric="EFA", ready=fnv1.READY_UNSPECIFIED
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4-eks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4-eks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # minNodeCount stays unset so the pool's autoscaling floor defaults to its
-    # node count downstream.
-    ComposeCase(
-        name="NebiusFirstPass",
-        reason="With no NebiusCluster observed yet, a Nebius cluster composes only the activation policy and a NebiusCluster carrying its pool's InfiniBand fabric.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="Nebius", nebius=v1alpha1.Nebius()),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="h100-pool",
-                            className="gpu-h100-nebius",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            fabric=v1alpha1.Fabric(
-                                type="InfiniBand",
-                                infiniband=v1alpha1.Infiniband(fabric="fabric-2"),
-                            ),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "filesystems.compute.nebius.m.upbound.io",
-                            "gpuclusters.compute.nebius.m.upbound.io",
-                            "clusters.mk8s.nebius.m.upbound.io",
-                            "nodegroups.mk8s.nebius.m.upbound.io",
-                            "networks.vpc.nebius.m.upbound.io",
-                            "subnets.vpc.nebius.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-nebius": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-nebius",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "Nebius",
-                                "nebius": {
-                                    "platform": "gpu-h100-sxm",
-                                    "preset": "8gpu-128vcpu-1600gb",
-                                    "diskSizeGb": 200,
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-nebius": _input_usage(kind="InferenceClass", name="gpu-h100-nebius"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "filesystems.compute.nebius.m.upbound.io",
-                            "gpuclusters.compute.nebius.m.upbound.io",
-                            "clusters.mk8s.nebius.m.upbound.io",
-                            "nodegroups.mk8s.nebius.m.upbound.io",
-                            "networks.vpc.nebius.m.upbound.io",
-                            "subnets.vpc.nebius.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "nebius-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "NebiusCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "kubernetesVersion": "1.34",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100-pool",
-                                            "role": "GPU",
-                                            "platform": "gpu-h100-sxm",
-                                            "preset": "8gpu-128vcpu-1600gb",
-                                            "diskSizeGb": 200,
-                                            "nodeCount": 2,
-                                            "maxNodeCount": 4,
-                                            "gpu": {"acceleratorType": "nvidia-h100", "driversPreset": "cuda13.0"},
-                                            "fabric": {"type": "InfiniBand", "infiniband": {"fabric": "fabric-2"}},
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-nebius": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-nebius"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The mk8s kubeconfig has no embedded credentials, hence the identity. The
-    # credentials Secret carries a namespace: it is the Nebius
-    # ClusterProviderConfig's Secret, which lives outside modelplane-system.
-    ComposeCase(
-        name="NebiusReady",
-        reason="Once its NebiusCluster is Ready, a Nebius cluster composes a ClusterProviderConfig with the Nebius identity, the ServingStack and the Usage.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="Nebius", nebius=v1alpha1.Nebius()),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="h100-pool",
-                            className="gpu-h100-nebius",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            fabric=v1alpha1.Fabric(
-                                type="InfiniBand",
-                                infiniband=v1alpha1.Infiniband(fabric="fabric-2"),
-                            ),
-                        ),
-                    ],
-                ),
-                resources={
-                    "nebius-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "NebiusCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "nodePools": [
-                                        {
-                                            "name": "h100-pool",
-                                            "role": "GPU",
-                                            "platform": "gpu-h100-sxm",
-                                            "preset": "8gpu-128vcpu-1600gb",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                        {
-                                            "type": "NebiusServiceAccountCredentials",
-                                            "name": "nebius-credentials",
-                                            "key": "credentials.json",
-                                            "namespace": "crossplane-system",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "filesystems.compute.nebius.m.upbound.io",
-                            "gpuclusters.compute.nebius.m.upbound.io",
-                            "clusters.mk8s.nebius.m.upbound.io",
-                            "nodegroups.mk8s.nebius.m.upbound.io",
-                            "networks.vpc.nebius.m.upbound.io",
-                            "subnets.vpc.nebius.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-nebius": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-nebius",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "Nebius",
-                                "nebius": {
-                                    "platform": "gpu-h100-sxm",
-                                    "preset": "8gpu-128vcpu-1600gb",
-                                    "diskSizeGb": 200,
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-nebius": _input_usage(kind="InferenceClass", name="gpu-h100-nebius"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "filesystems.compute.nebius.m.upbound.io",
-                            "gpuclusters.compute.nebius.m.upbound.io",
-                            "clusters.mk8s.nebius.m.upbound.io",
-                            "nodegroups.mk8s.nebius.m.upbound.io",
-                            "networks.vpc.nebius.m.upbound.io",
-                            "subnets.vpc.nebius.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "nebius-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "NebiusCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "kubernetesVersion": "1.34",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100-pool",
-                                            "role": "GPU",
-                                            "platform": "gpu-h100-sxm",
-                                            "preset": "8gpu-128vcpu-1600gb",
-                                            "diskSizeGb": 200,
-                                            "nodeCount": 2,
-                                            "maxNodeCount": 4,
-                                            "gpu": {"acceleratorType": "nvidia-h100", "driversPreset": "cuda13.0"},
-                                            "fabric": {"type": "InfiniBand", "infiniband": {"fabric": "fabric-2"}},
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde",
-                        identity={
-                            "type": "NebiusServiceAccountCredentials",
-                            "source": "Secret",
-                            "secretRef": {
-                                "namespace": "crossplane-system",
-                                "name": "nebius-credentials",
-                                "key": "credentials.json",
-                            },
-                        },
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="Nebius",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[
-                            {"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"},
-                            {
-                                "type": "NebiusServiceAccountCredentials",
-                                "name": "nebius-credentials",
-                                "key": "credentials.json",
-                                "namespace": "crossplane-system",
-                            },
-                        ],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-nebius-by-backend": _backend_usage(cluster_kind="NebiusCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Nebius cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-nebius": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-nebius"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # The fabric is the plain string - Azure has no user-selectable fabric ID.
-    # The pool sets minNodeCount to 1, as an AKS GPU pool must, because the AKS
-    # autoscaler can't scale a DRA pool up from zero nodes.
-    ComposeCase(
-        name="AKSFirstPass",
-        reason="With no AKSCluster observed yet, an AKS cluster composes only the activation policy and an AKSCluster carrying its pool's fabric and minNodeCount.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="AKS", aks=v1alpha1.Aks(location="westeurope")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="h100pool",
-                            className="gpu-h100-aks",
-                            nodeCount=2,
-                            minNodeCount=1,
-                            maxNodeCount=4,
-                            fabric=v1alpha1.Fabric(type="InfiniBand"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "kubernetesclusters.containerservice.azure.m.upbound.io",
-                            "kubernetesclusternodepools.containerservice.azure.m.upbound.io",
-                            "subnets.network.azure.m.upbound.io",
-                            "virtualnetworks.network.azure.m.upbound.io",
-                            "resourcegroups.azure.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-aks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-aks",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "AKS",
-                                "aks": {
-                                    "vmSize": "Standard_ND96isr_H100_v5",
-                                    "diskSizeGb": 200,
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-aks": _input_usage(kind="InferenceClass", name="gpu-h100-aks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "kubernetesclusters.containerservice.azure.m.upbound.io",
-                            "kubernetesclusternodepools.containerservice.azure.m.upbound.io",
-                            "subnets.network.azure.m.upbound.io",
-                            "virtualnetworks.network.azure.m.upbound.io",
-                            "resourcegroups.azure.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "aks-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "AKSCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "location": "westeurope",
-                                    "kubernetesVersion": "1.34",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100pool",
-                                            "role": "GPU",
-                                            "vmSize": "Standard_ND96isr_H100_v5",
-                                            "diskSizeGb": 200,
-                                            "nodeCount": 2,
-                                            "minNodeCount": 1,
-                                            "maxNodeCount": 4,
-                                            "gpu": {"acceleratorType": "nvidia-h100"},
-                                            "fabric": "InfiniBand",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-aks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-aks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The kubeconfig embeds a client certificate, so the ClusterProviderConfig
-    # carries no identity (unlike GKE and Nebius).
-    ComposeCase(
-        name="AKSReady",
-        reason="Once its AKSCluster is Ready, an AKS cluster composes a ClusterProviderConfig without identity, the ServingStack and the Usage, and relays its status.cache.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="AKS", aks=v1alpha1.Aks(location="westeurope")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="h100pool",
-                            className="gpu-h100-aks",
-                            nodeCount=2,
-                            minNodeCount=1,
-                            maxNodeCount=4,
-                            fabric=v1alpha1.Fabric(type="InfiniBand"),
-                        ),
-                    ],
-                ),
-                resources={
-                    "aks-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "AKSCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "location": "westeurope",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100pool",
-                                            "role": "GPU",
-                                            "vmSize": "Standard_ND96isr_H100_v5",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx-fs"},
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "kubernetesclusters.containerservice.azure.m.upbound.io",
-                            "kubernetesclusternodepools.containerservice.azure.m.upbound.io",
-                            "subnets.network.azure.m.upbound.io",
-                            "virtualnetworks.network.azure.m.upbound.io",
-                            "resourcegroups.azure.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-aks": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-aks",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "AKS",
-                                "aks": {
-                                    "vmSize": "Standard_ND96isr_H100_v5",
-                                    "diskSizeGb": 200,
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx-fs"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-aks": _input_usage(kind="InferenceClass", name="gpu-h100-aks"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "kubernetesclusters.containerservice.azure.m.upbound.io",
-                            "kubernetesclusternodepools.containerservice.azure.m.upbound.io",
-                            "subnets.network.azure.m.upbound.io",
-                            "virtualnetworks.network.azure.m.upbound.io",
-                            "resourcegroups.azure.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "aks-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "AKSCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "location": "westeurope",
-                                    "kubernetesVersion": "1.34",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100pool",
-                                            "role": "GPU",
-                                            "vmSize": "Standard_ND96isr_H100_v5",
-                                            "diskSizeGb": 200,
-                                            "nodeCount": 2,
-                                            "minNodeCount": 1,
-                                            "maxNodeCount": 4,
-                                            "gpu": {"acceleratorType": "nvidia-h100"},
-                                            "fabric": "InfiniBand",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="AKS",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-aks-by-backend": _backend_usage(cluster_kind="AKSCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="AKS cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-aks": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-aks"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # A kind is missing while, for example, a provider is still installing.
-    # Leaving the policy not ready keeps the composite from reporting ready.
-    # Observing the policy with one kind missing, here
-    # nodepools.container.gcp.m.upbound.io, exercises the all-kinds check rather
-    # than the policy-absent branch.
-    ComposeCase(
-        name="KindNotActivated",
-        reason="While its activation policy is missing one kind and no GKECluster is observed, a GKE cluster composes only the policy, not ready.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # Once the cluster is observed, the function keeps composing it even when
-    # its activation policy isn't observed, so an activation blip never drops a
-    # provisioned cluster from desired state.
-    ComposeCase(
-        name="ActivationBlip",
-        reason="With its GKECluster observed but no activation policy, a GKE cluster keeps composing the GKECluster and everything built on it.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="l4-pool",
-                            className="gpu-l4",
-                            nodeCount=2,
-                            maxNodeCount=4,
-                            zones=["us-central1-a"],
-                        ),
-                    ],
-                ),
-                resources={
-                    "gke-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "GKECluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "us-central1",
-                                    "nodePools": [{"name": "system", "role": "System", "machineType": "e2-standard-4"}],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2026-06-08T00:00:00Z",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx"},
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                        {
-                                            "type": "GoogleApplicationCredentials",
-                                            "name": "test-cluster-sa-key-fghij",
-                                            "key": "credentials.json",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l4-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "24Gi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "projectiammembers.cloudplatform.gcp.m.upbound.io",
-                            "projectservices.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccounts.cloudplatform.gcp.m.upbound.io",
-                            "serviceaccountkeys.cloudplatform.gcp.m.upbound.io",
-                            "networks.compute.gcp.m.upbound.io",
-                            "subnetworks.compute.gcp.m.upbound.io",
-                            "clusters.container.gcp.m.upbound.io",
-                            "nodepools.container.gcp.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "gke-cluster": _gke_cluster(credentials=None, reservation=None, ready=fnv1.READY_TRUE),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde",
-                        identity={
-                            "type": "GoogleApplicationCredentials",
-                            "source": "Secret",
-                            "secretRef": {
-                                "namespace": "modelplane-system",
-                                "name": "test-cluster-sa-key-fghij",
-                                "key": "credentials.json",
-                            },
-                        },
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="GKE",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[
-                            {"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"},
-                            {
-                                "type": "GoogleApplicationCredentials",
-                                "name": "test-cluster-sa-key-fghij",
-                                "key": "credentials.json",
-                            },
-                        ],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-gke-by-backend": _backend_usage(cluster_kind="GKECluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="GKE cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # minNodeCount stays unset so the pool's autoscaling floor defaults to its
-    # node count downstream.
-    ComposeCase(
-        name="VultrFirstPass",
-        reason="With no VultrCluster observed yet, a Vultr cluster composes only the activation policy and the VultrCluster.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="Vultr", vultr=v1alpha1.Vultr(region="ewr", kubernetesVersion="v1.36.6+1")
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-vultr", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-vultr": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-vultr",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Vultr",
-                                "vultr": {
-                                    "plan": "vcg-l40s-16c-180g-48vram",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-vultr": _input_usage(kind="InferenceClass", name="gpu-l40s-vultr"),
-                    "activation": _activation_policy(
-                        activate=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "vultr-cluster": _vultr_cluster(credentials=None, ready=fnv1.READY_UNSPECIFIED),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-vultr": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-vultr"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="VultrCredentials",
-        reason="A Vultr cluster's credentials pass through to the VultrCluster's spec.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="Vultr",
-                        vultr=v1alpha1.Vultr(
-                            region="ewr",
-                            kubernetesVersion="v1.36.6+1",
-                            credentials=v1alpha1.Credentials(type="ProviderConfig", name="my-vultr-account"),
-                        ),
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-vultr", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-vultr": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-vultr",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Vultr",
-                                "vultr": {
-                                    "plan": "vcg-l40s-16c-180g-48vram",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-vultr": _input_usage(kind="InferenceClass", name="gpu-l40s-vultr"),
-                    "activation": _activation_policy(
-                        activate=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "vultr-cluster": _vultr_cluster(
-                        credentials={"type": "ProviderConfig", "name": "my-vultr-account"}, ready=fnv1.READY_UNSPECIFIED
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-vultr": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-vultr"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The VKE kubeconfig embeds static client certificates, so the
-    # ClusterProviderConfig carries no identity (unlike Nebius). VultrCluster
-    # reports no cache StorageClass, so status.cache stays unset.
-    ComposeCase(
-        name="VultrReady",
-        reason="Once its VultrCluster is Ready, a Vultr cluster composes a ClusterProviderConfig without identity, the ServingStack and the Usage.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="Vultr", vultr=v1alpha1.Vultr(region="ewr", kubernetesVersion="v1.36.6+1")
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-vultr", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "vultr-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "VultrCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "ewr",
-                                    "kubernetesVersion": "v1.36.6+1",
-                                    "nodePools": [
-                                        {
-                                            "name": "l40s-pool",
-                                            "role": "GPU",
-                                            "plan": "vcg-l40s-16c-180g-48vram",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-vultr": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-vultr",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Vultr",
-                                "vultr": {
-                                    "plan": "vcg-l40s-16c-180g-48vram",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-vultr": _input_usage(kind="InferenceClass", name="gpu-l40s-vultr"),
-                    "activation": _activation_policy(
-                        activate=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "vultr-cluster": _vultr_cluster(credentials=None, ready=fnv1.READY_TRUE),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="Vultr",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-vultr-by-backend": _backend_usage(cluster_kind="VultrCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Vultr cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-vultr": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-vultr"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # A class with no accelerator describes a CPU pool: the VultrCluster pool is
-    # CPU-role with no gpu block, the ServingStack installs the dra.cpu stack,
-    # and the class's CPU device lists in schedulablePools like any other.
-    ComposeCase(
-        name="VultrReadyCPUPool",
-        reason="Once its VultrCluster is Ready, a Vultr cluster whose pool's class names no accelerator composes a CPU-role pool, a ServingStack claiming dra.cpu and the Usage.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="Vultr", vultr=v1alpha1.Vultr(region="ewr", kubernetesVersion="v1.36.6+1")
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(name="cpu-pool", className="cpu-vultr", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "vultr-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "VultrCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "ewr",
-                                    "kubernetesVersion": "v1.36.6+1",
-                                    "nodePools": [
-                                        {
-                                            "name": "cpu-pool",
-                                            "role": "CPU",
-                                            "plan": "vc2-6c-16gb",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-cpu-vultr": fnv1.Resources(
-                    items=[
-                        _cpu_inference_class(
-                            name="cpu-vultr",
-                            cpus="6",
-                            provisioning={
-                                "provider": "Vultr",
-                                "vultr": {"plan": "vc2-6c-16gb"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "cpu-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "cpu",
-                                    "claim": "DRA",
-                                    "driver": "dra.cpu",
-                                    "deviceClassName": "dra.cpu",
-                                    "count": 1,
-                                    "capacity": {"cpu": {"value": "6"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-cpu-vultr": _input_usage(kind="InferenceClass", name="cpu-vultr"),
-                    "activation": _activation_policy(
-                        activate=["kubernetes.vke.vultr.m.upbound.io", "kubernetesnodepools.vke.vultr.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "vultr-cluster": _vultr_cluster_cpu(ready=fnv1.READY_TRUE),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="Vultr",
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                        dra_drivers=("dra.cpu",),
-                    ),
-                    "usage-vultr-by-backend": _backend_usage(cluster_kind="VultrCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Vultr cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-cpu-vultr": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="cpu-vultr"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # minNodeCount stays unset so the pool's autoscaling floor defaults to its
-    # node count downstream.
-    ComposeCase(
-        name="CivoFirstPass",
-        reason="With no CivoCluster observed yet, a Civo cluster composes only the activation policy and the CivoCluster.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="Civo", civo=v1alpha1.Civo(region="LON1")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-civo", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-civo": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-civo",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Civo",
-                                "civo": {
-                                    "size": "an.g1.l40s.kube.x1",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-civo": _input_usage(kind="InferenceClass", name="gpu-l40s-civo"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "civo-cluster": _civo_cluster(
-                        node_pools=[
-                            {
-                                "name": "l40s-pool",
-                                "role": "GPU",
-                                "size": "an.g1.l40s.kube.x1",
-                                "nodeCount": 2,
-                                "maxNodeCount": 4,
-                                "gpu": {"acceleratorType": "nvidia-l40s"},
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-civo": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-civo"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="CivoCredentials",
-        reason="A Civo cluster's credentials pass through to the CivoCluster's spec.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="Civo",
-                        civo=v1alpha1.Civo(
-                            region="LON1",
-                            credentials=v1alpha1.Credentials(type="ProviderConfig", name="my-civo-account"),
-                        ),
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-civo", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-civo": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-civo",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Civo",
-                                "civo": {
-                                    "size": "an.g1.l40s.kube.x1",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-civo": _input_usage(kind="InferenceClass", name="gpu-l40s-civo"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "civo-cluster": _civo_cluster(
-                        node_pools=[
-                            {
-                                "name": "l40s-pool",
-                                "role": "GPU",
-                                "size": "an.g1.l40s.kube.x1",
-                                "nodeCount": 2,
-                                "maxNodeCount": 4,
-                                "gpu": {"acceleratorType": "nvidia-l40s"},
-                            },
-                        ],
-                        credentials={"type": "ProviderConfig", "name": "my-civo-account"},
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-civo": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-civo"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # The Civo kubeconfig embeds static client certificates, so the
-    # ClusterProviderConfig carries no identity (unlike Nebius). CivoCluster
-    # reports no cache StorageClass, so status.cache stays unset.
-    ComposeCase(
-        name="CivoReady",
-        reason="Once its CivoCluster is Ready, a Civo cluster composes a ClusterProviderConfig without identity, the ServingStack and the Usage.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="Civo", civo=v1alpha1.Civo(region="LON1")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l40s-pool", className="gpu-l40s-civo", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "civo-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "CivoCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "LON1",
-                                    "nodePools": [
-                                        {
-                                            "name": "l40s-pool",
-                                            "role": "GPU",
-                                            "size": "an.g1.l40s.kube.x1",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-civo": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-civo",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Civo",
-                                "civo": {
-                                    "size": "an.g1.l40s.kube.x1",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "l40s-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "46068Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-l40s-civo": _input_usage(kind="InferenceClass", name="gpu-l40s-civo"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "civo-cluster": _civo_cluster(
-                        node_pools=[
-                            {
-                                "name": "l40s-pool",
-                                "role": "GPU",
-                                "size": "an.g1.l40s.kube.x1",
-                                "nodeCount": 2,
-                                "maxNodeCount": 4,
-                                "gpu": {"acceleratorType": "nvidia-l40s"},
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="Civo",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-civo-by-backend": _backend_usage(cluster_kind="CivoCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Civo cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l40s-civo": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l40s-civo"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # A lone H100 SXM has NVLink links but no peer, so the serving stack must
-    # load that pool's driver with NVreg_NvLinkDisable=1. CivoReady's L40S pool
-    # gets no spec.gpu.
-    #
-    # The request still returns the gpu-l40s-civo class, which no node pool
-    # references, and the observed CivoCluster still reports l40s-pool in its
-    # spec. The function reads neither.
-    ComposeCase(
-        name="CivoSingleH100",
-        reason="Once its CivoCluster is Ready, a Civo cluster whose pool has one H100 per node disables NVLink for that pool in the ServingStack's spec.gpu.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="Civo", civo=v1alpha1.Civo(region="LON1")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="h100-pool", className="gpu-h100-civo", nodeCount=1),
-                    ],
-                ),
-                resources={
-                    "civo-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "CivoCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "region": "LON1",
-                                    "nodePools": [
-                                        {
-                                            "name": "l40s-pool",
-                                            "role": "GPU",
-                                            "size": "an.g1.l40s.kube.x1",
-                                            "nodeCount": 2,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l40s-civo": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l40s-civo",
-                            count=1,
-                            memory="46068Mi",
-                            provisioning={
-                                "provider": "Civo",
-                                "civo": {
-                                    "size": "an.g1.l40s.kube.x1",
-                                    "accelerator": {"type": "nvidia-l40s", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-                "class-gpu-h100-civo": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-civo",
-                            count=1,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "Civo",
-                                "civo": {
-                                    "size": "an.g1.h100.kube.x1",
-                                    "accelerator": {"type": "nvidia-h100", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 1,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-civo": _input_usage(kind="InferenceClass", name="gpu-h100-civo"),
-                    "activation": _activation_policy(
-                        activate=[
-                            "clusters.kubernetes.civo.m.upbound.io",
-                            "nodepools.kubernetes.civo.m.upbound.io",
-                            "networks.vpc.civo.m.upbound.io",
-                            "firewalls.vpc.civo.m.upbound.io",
-                        ],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "civo-cluster": _civo_cluster(
-                        node_pools=[
-                            {
-                                "name": "h100-pool",
-                                "role": "GPU",
-                                "size": "an.g1.h100.kube.x1",
-                                "nodeCount": 1,
-                                "gpu": {"acceleratorType": "nvidia-h100"},
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="Civo",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu={"pools": [{"name": "h100-pool", "disableNvLink": True}]},
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-civo-by-backend": _backend_usage(cluster_kind="CivoCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Civo cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-civo": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-civo"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="CoreWeaveFirstPass",
-        reason="With no CoreWeaveCluster observed yet, a CoreWeave cluster composes only the activation policy and the CoreWeaveCluster.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="CoreWeave", coreweave=v1alpha1.Coreweave(zone="US-EAST-04A")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="h100-pool", className="gpu-h100-coreweave", nodeCount=1),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-coreweave": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-coreweave",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "CoreWeave",
-                                "coreweave": {
-                                    "instanceType": "gd-8xh100ib-i128",
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 1,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-coreweave": _input_usage(
-                        kind="InferenceClass", name="gpu-h100-coreweave"
-                    ),
-                    "activation": _activation_policy(
-                        activate=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "coreweave-cluster": _coreweave_cluster(
-                        node_pools=[
-                            {
-                                "name": "h100-pool",
-                                "role": "GPU",
-                                "instanceType": "gd-8xh100ib-i128",
-                                "nodeCount": 1,
-                                "gpu": {"acceleratorType": "nvidia-h100"},
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-coreweave": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-coreweave"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    ComposeCase(
-        name="CoreWeaveCredentials",
-        reason=(
-            "A CoreWeave cluster's credentials, Kubernetes version and autoscaling bounds pass through to the "
-            "CoreWeaveCluster's spec."
-        ),
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(
-                        source="CoreWeave",
-                        coreweave=v1alpha1.Coreweave(
-                            zone="US-EAST-04A",
-                            kubernetesVersion="1.36",
-                            credentials=v1alpha1.Credentials(type="ProviderConfig", name="my-coreweave-org"),
-                        ),
-                    ),
-                    node_pools=[
-                        v1alpha1.NodePool(
-                            name="h100-pool",
-                            className="gpu-h100-coreweave",
-                            nodeCount=1,
-                            minNodeCount=0,
-                            maxNodeCount=4,
-                        ),
-                    ],
-                ),
-                resources={
-                    "activation": _observed_activation_policy(
-                        activated=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-coreweave": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-coreweave",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "CoreWeave",
-                                "coreweave": {
-                                    "instanceType": "gd-8xh100ib-i128",
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 4,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache=None,
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-coreweave": _input_usage(
-                        kind="InferenceClass", name="gpu-h100-coreweave"
-                    ),
-                    "activation": _activation_policy(
-                        activate=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "coreweave-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "CoreWeaveCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "zone": "US-EAST-04A",
-                                    "kubernetesVersion": "1.36",
-                                    "credentials": {"type": "ProviderConfig", "name": "my-coreweave-org"},
-                                    "nodePools": [
-                                        {
-                                            "name": "h100-pool",
-                                            "role": "GPU",
-                                            "instanceType": "gd-8xh100ib-i128",
-                                            "nodeCount": 1,
-                                            "minNodeCount": 0,
-                                            "maxNodeCount": 4,
-                                            "gpu": {"acceleratorType": "nvidia-h100"},
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                },
-            ),
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-coreweave": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-coreweave"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
-            ],
-        ),
-    ),
-    # compose-coreweave-cluster renders the kubeconfig with a CoreWeave API
-    # access token, so the ClusterProviderConfig carries no identity (unlike
-    # Nebius). The CoreWeaveCluster reports its cache StorageClass, which is
-    # relayed to status.cache.
-    ComposeCase(
-        name="CoreWeaveReady",
-        reason=(
-            "Once its CoreWeaveCluster is Ready, a CoreWeave cluster composes a ClusterProviderConfig without "
-            "identity, the ServingStack and the Usage, and relays the cache StorageClass."
-        ),
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="CoreWeave", coreweave=v1alpha1.Coreweave(zone="US-EAST-04A")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="h100-pool", className="gpu-h100-coreweave", nodeCount=1),
-                    ],
-                ),
-                resources={
-                    "coreweave-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "CoreWeaveCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "zone": "US-EAST-04A",
-                                    "nodePools": [
-                                        {
-                                            "name": "h100-pool",
-                                            "role": "GPU",
-                                            "instanceType": "gd-8xh100ib-i128",
-                                            "nodeCount": 1,
-                                            "gpu": {"acceleratorType": "nvidia-h100"},
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx-fs"},
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-h100-coreweave": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-h100-coreweave",
-                            count=8,
-                            memory="81559Mi",
-                            provisioning={
-                                "provider": "CoreWeave",
-                                "coreweave": {
-                                    "instanceType": "gd-8xh100ib-i128",
-                                    "accelerator": {"type": "nvidia-h100", "count": 8},
-                                },
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "h100-pool",
-                            "nodes": 1,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 8,
-                                    "capacity": {"memory": {"value": "81559Mi"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx-fs"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-gpu-h100-coreweave": _input_usage(
-                        kind="InferenceClass", name="gpu-h100-coreweave"
-                    ),
-                    "activation": _activation_policy(
-                        activate=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "coreweave-cluster": _coreweave_cluster(
-                        node_pools=[
-                            {
-                                "name": "h100-pool",
-                                "role": "GPU",
-                                "instanceType": "gd-8xh100ib-i128",
-                                "nodeCount": 1,
-                                "gpu": {"acceleratorType": "nvidia-h100"},
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="CoreWeave",
-                        dra_drivers=("gpu.nvidia.com",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-coreweave-by-backend": _backend_usage(cluster_kind="CoreWeaveCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="CoreWeave cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-h100-coreweave": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-h100-coreweave"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # A class with no accelerator describes a CPU pool: the CoreWeaveCluster
-    # pool is CPU-role with no gpu block, and the ServingStack installs the
-    # dra.cpu stack.
-    ComposeCase(
-        name="CoreWeaveCPUPool",
-        reason=(
-            "Once its CoreWeaveCluster is Ready, a CoreWeave cluster whose pool's class names no accelerator "
-            "composes a CPU-role pool and a ServingStack claiming dra.cpu."
-        ),
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="CoreWeave", coreweave=v1alpha1.Coreweave(zone="US-EAST-04A")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="cpu-pool", className="cpu-coreweave", nodeCount=1),
-                    ],
-                ),
-                resources={
-                    "coreweave-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "CoreWeaveCluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "spec": {
-                                    "zone": "US-EAST-04A",
-                                    "nodePools": [
-                                        {
-                                            "name": "cpu-pool",
-                                            "role": "CPU",
-                                            "instanceType": "cd-gp-i64-erapids",
-                                            "nodeCount": 1,
-                                        },
-                                    ],
-                                },
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2024-01-01T00:00:00Z",
-                                        },
-                                    ],
-                                    "secrets": [
-                                        {
-                                            "type": "Kubeconfig",
-                                            "name": "test-cluster-kubeconfig-abcde",
-                                            "key": "kubeconfig",
-                                        },
-                                    ],
-                                    "cache": {"storageClassName": "modelplane-rwx-fs"},
-                                },
-                            }
-                        ),
-                    ),
-                    "activation": _observed_activation_policy(
-                        activated=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"]
-                    ),
-                },
-            ),
-            required_resources={
-                "class-cpu-coreweave": fnv1.Resources(
-                    items=[
-                        _cpu_inference_class(
-                            name="cpu-coreweave",
-                            cpus="64",
-                            provisioning={
-                                "provider": "CoreWeave",
-                                "coreweave": {"instanceType": "cd-gp-i64-erapids"},
-                            },
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                composite=_desired_inference_cluster(
-                    schedulable_pools=[
-                        {
-                            "name": "cpu-pool",
-                            "nodes": 1,
-                            "devices": [
-                                {
-                                    "name": "cpu",
-                                    "claim": "DRA",
-                                    "driver": "dra.cpu",
-                                    "deviceClassName": "dra.cpu",
-                                    "count": 1,
-                                    "capacity": {"cpu": {"value": "64"}},
-                                },
-                            ],
-                        },
-                    ],
-                    cache={"storageClassName": "modelplane-rwx-fs"},
-                    gateway=None,
-                ),
-                resources={
-                    "usage-inferenceclass-cpu-coreweave": _input_usage(kind="InferenceClass", name="cpu-coreweave"),
-                    "activation": _activation_policy(
-                        activate=["clusters.cks.coreweave.m.upbound.io", "vpcs.networking.coreweave.m.upbound.io"],
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "coreweave-cluster": _coreweave_cluster(
-                        node_pools=[
-                            {
-                                "name": "cpu-pool",
-                                "role": "CPU",
-                                "instanceType": "cd-gp-i64-erapids",
-                                "nodeCount": 1,
-                            },
-                        ],
-                        credentials=None,
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "cluster-provider-config-kubernetes": _cluster_provider_config(
-                        kubeconfig="test-cluster-kubeconfig-abcde", identity=None
-                    ),
-                    "serving-stack": _serving_stack(
-                        cloud="CoreWeave",
-                        dra_drivers=("dra.cpu",),
-                        secrets=[{"type": "Kubeconfig", "name": "test-cluster-kubeconfig-abcde", "key": "kubeconfig"}],
-                        client_cas=None,
-                        gpu=None,
-                        ready=fnv1.READY_UNSPECIFIED,
-                    ),
-                    "usage-coreweave-by-backend": _backend_usage(cluster_kind="CoreWeaveCluster"),
-                },
-            ),
-            results=[fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="CoreWeave cluster ready, composing backend")],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-cpu-coreweave": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="cpu-coreweave"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
-                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Installing"),
-            ],
-        ),
-    ),
-    # The deletion guard cases, ReplicasRoutesAndCaches through ClassUnresolved,
-    # observe an existing cluster along with whatever uses it.
-    #
-    # One reason-only ClusterUsage blocks deletion whatever the count or
-    # namespace of its users. The mirrored namespaces are the deduplicated union
-    # of team-a (replica), team-b (replica and route), team-c (route) and team-d
-    # (cache staging onto this cluster). A cache staging only onto another
-    # cluster (team-e) is filtered out by its status.clusters[], proving the
-    # namespaces track what actually lands here.
-    ComposeCase(
         name="ReplicasRoutesAndCaches",
         reason="ModelReplicas, ModelRoutes and ModelCaches across namespaces compose one ClusterUsage naming each kind, and mirror the namespaces that land here.",
         req=fnv1.RunFunctionRequest(
@@ -6579,34 +1720,7 @@ COMPOSE_CASES = [
             ),
             required_resources={
                 "model-replicas": fnv1.Resources(
-                    items=[
-                        fnv1.Resource(
-                            resource=resource.dict_to_struct(
-                                {
-                                    "apiVersion": "modelplane.ai/v1alpha1",
-                                    "kind": "ModelReplica",
-                                    "metadata": {
-                                        "name": "deploy-test-cluster-0",
-                                        "namespace": "team-a",
-                                        "labels": {"modelplane.ai/cluster": "test-cluster"},
-                                    },
-                                }
-                            )
-                        ),
-                        fnv1.Resource(
-                            resource=resource.dict_to_struct(
-                                {
-                                    "apiVersion": "modelplane.ai/v1alpha1",
-                                    "kind": "ModelReplica",
-                                    "metadata": {
-                                        "name": "deploy-test-cluster-0",
-                                        "namespace": "team-b",
-                                        "labels": {"modelplane.ai/cluster": "test-cluster"},
-                                    },
-                                }
-                            )
-                        ),
-                    ],
+                    items=[_model_replica(namespace="team-a"), _model_replica(namespace="team-b")],
                 ),
                 "model-routes": fnv1.Resources(
                     items=[
@@ -6645,21 +1759,7 @@ COMPOSE_CASES = [
                     ],
                 ),
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -6687,7 +1787,7 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "usage-replicas": _guard_cluster_usage(
                         reason="ModelReplicas, ModelRoutes and ModelCaches use this InferenceCluster"
                     ),
@@ -6699,11 +1799,12 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -6770,21 +1871,7 @@ COMPOSE_CASES = [
                     ]
                 ),
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -6812,18 +1899,19 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "usage-replicas": _guard_cluster_usage(reason="ModelRoutes use this InferenceCluster"),
                     "namespace-team-c": _namespace_object(team="team-c", name="mp-team-c-d79d9"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -6876,21 +1964,7 @@ COMPOSE_CASES = [
                     items=[_model_cache(name="qwen", namespace="team-d", cluster="test-cluster")]
                 ),
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -6918,18 +1992,19 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "usage-replicas": _guard_cluster_usage(reason="ModelCaches use this InferenceCluster"),
                     "namespace-team-d": _namespace_object(team="team-d", name="mp-team-d-c2383"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -6983,21 +2058,7 @@ COMPOSE_CASES = [
                     items=[_inference_gateway(name="public", cluster="test-cluster", status=None)]
                 ),
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -7025,17 +2086,18 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "usage-replicas": _guard_cluster_usage(reason="InferenceGateways use this InferenceCluster"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -7094,21 +2156,7 @@ COMPOSE_CASES = [
                     items=[_inference_gateway(name="elsewhere", cluster="other-cluster", status=None)]
                 ),
                 "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        _inference_class(
-                            name="gpu-l4",
-                            count=1,
-                            memory="24Gi",
-                            provisioning={
-                                "provider": "GKE",
-                                "gke": {
-                                    "machineType": "g2-standard-48",
-                                    "diskSizeGb": 100,
-                                    "accelerator": {"type": "nvidia-l4", "count": 1},
-                                },
-                            },
-                        ),
-                    ],
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
                 ),
             },
         ),
@@ -7136,16 +2184,17 @@ COMPOSE_CASES = [
                     gateway=None,
                 ),
                 resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
                     "cluster-provider-config-kubernetes": _cluster_provider_config(
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=("gpu.nvidia.com",),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=["gpu.nvidia.com"],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                 },
@@ -7177,7 +2226,7 @@ COMPOSE_CASES = [
         ),
     ),
     # A missing InferenceClass fails the reconcile, so Crossplane applies none
-    # of its desired state and an existing cluster XR isn't deleted for being
+    # of its desired state and a running cluster isn't deleted for being
     # missing from it.
     ComposeCase(
         name="ClassUnresolved",
@@ -7195,23 +2244,7 @@ COMPOSE_CASES = [
                 ),
             ),
             required_resources={
-                "model-replicas": fnv1.Resources(
-                    items=[
-                        fnv1.Resource(
-                            resource=resource.dict_to_struct(
-                                {
-                                    "apiVersion": "modelplane.ai/v1alpha1",
-                                    "kind": "ModelReplica",
-                                    "metadata": {
-                                        "name": "deploy-test-cluster-0",
-                                        "namespace": "team-a",
-                                        "labels": {"modelplane.ai/cluster": "test-cluster"},
-                                    },
-                                }
-                            )
-                        )
-                    ]
-                ),
+                "model-replicas": fnv1.Resources(items=[_model_replica(namespace="team-a")]),
                 # Crossplane fetched the class, and it doesn't exist.
                 "class-gpu-l4": fnv1.Resources(),
             },
@@ -7255,16 +2288,6 @@ COMPOSE_CASES = [
             ],
         ),
     ),
-    # The hostname gate, which is what keeps a cluster off the schedule until
-    # traffic to it is mutually authenticated in both directions. These cases
-    # observe an existing cluster's ServingStack ready, with whatever it and the
-    # fleet's InferenceGateways have published so far. The gateway name is
-    # Modelplane's own, so nothing configures it. An InferenceGateway running on
-    # test-cluster also composes the deletion guard.
-    #
-    # This cluster's CA lets an InferenceGateway tell it reached the right
-    # cluster, and an InferenceGateway CA makes the cluster gateway demand a
-    # client certificate.
     ComposeCase(
         name="ClassNotYetFetched",
         reason="Before Crossplane has fetched its class, the function asks for it and waits, without failing the reconcile.",
@@ -7281,23 +2304,7 @@ COMPOSE_CASES = [
                 ),
             ),
             required_resources={
-                "model-replicas": fnv1.Resources(
-                    items=[
-                        fnv1.Resource(
-                            resource=resource.dict_to_struct(
-                                {
-                                    "apiVersion": "modelplane.ai/v1alpha1",
-                                    "kind": "ModelReplica",
-                                    "metadata": {
-                                        "name": "deploy-test-cluster-0",
-                                        "namespace": "team-a",
-                                        "labels": {"modelplane.ai/cluster": "test-cluster"},
-                                    },
-                                }
-                            )
-                        )
-                    ]
-                ),
+                "model-replicas": fnv1.Resources(items=[_model_replica(namespace="team-a")]),
             },
         ),
         want=fnv1.RunFunctionResponse(
@@ -7328,126 +2335,6 @@ COMPOSE_CASES = [
                     ),
                 },
             ),
-        ),
-    ),
-    # The devices gate fires on a cluster that is already running - a shared
-    # class edited to claim a driver the cloud can't serve. Everything after
-    # the gate composes the cluster, so a bare return would empty the desired
-    # state and Crossplane would garbage-collect the cloud cluster XR, the
-    # ServingStack and their Usages. The fatal result is what stops that:
-    # Crossplane returns before applying desired state or collecting anything,
-    # and still applies the condition. This is the case that regresses if the
-    # gate goes back to returning without a fatal result.
-    ComposeCase(
-        name="UnsupportedDriverHolds",
-        reason="A running cluster whose class turns unsupported gets a fatal result, so Crossplane holds its resources instead of collecting them.",
-        req=fnv1.RunFunctionRequest(
-            observed=fnv1.State(
-                composite=_inference_cluster(
-                    cluster=v1alpha1.Cluster(source="GKE", gke=v1alpha1.Gke(region="us-central1")),
-                    node_pools=[
-                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
-                    ],
-                ),
-                resources={
-                    "gke-cluster": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
-                                "kind": "GKECluster",
-                                "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
-                                "status": {
-                                    "conditions": [
-                                        {
-                                            "type": "Ready",
-                                            "status": "True",
-                                            "reason": "Available",
-                                            "lastTransitionTime": "2026-06-08T00:00:00Z",
-                                        },
-                                    ],
-                                },
-                            }
-                        ),
-                    ),
-                },
-            ),
-            required_resources={
-                "class-gpu-l4": fnv1.Resources(
-                    items=[
-                        fnv1.Resource(
-                            resource=resource.dict_to_struct(
-                                {
-                                    "apiVersion": "modelplane.ai/v1alpha1",
-                                    "kind": "InferenceClass",
-                                    "metadata": {"name": "gpu-l4"},
-                                    "spec": {
-                                        "devices": [
-                                            {
-                                                "name": "gpu",
-                                                "claim": "DRA",
-                                                "driver": "gpu.amd.com",
-                                                "deviceClassName": "gpu.amd.com",
-                                                "count": 1,
-                                                "capacity": {"memory": {"value": "24Gi"}},
-                                            },
-                                        ],
-                                        "provisioning": {
-                                            "provider": "GKE",
-                                            "gke": {
-                                                "machineType": "g2-standard-48",
-                                                "diskSizeGb": 100,
-                                                "accelerator": {"type": "nvidia-l4", "count": 1},
-                                            },
-                                        },
-                                    },
-                                }
-                            )
-                        ),
-                    ],
-                ),
-            },
-        ),
-        want=fnv1.RunFunctionResponse(
-            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
-            desired=fnv1.State(
-                resources={
-                    "usage-inferenceclass-gpu-l4": _input_usage(kind="InferenceClass", name="gpu-l4"),
-                },
-            ),
-            results=[
-                fnv1.Result(
-                    severity=fnv1.SEVERITY_FATAL,
-                    message="class gpu-l4 claims gpu.amd.com; GKE clusters support dra.cpu, gpu.nvidia.com",
-                ),
-            ],
-            context=structpb.Struct(),
-            requirements=fnv1.Requirements(
-                resources={
-                    "model-replicas": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelReplica",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-routes": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1",
-                        kind="ModelRoute",
-                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
-                    ),
-                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
-                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
-                    "class-gpu-l4": fnv1.ResourceSelector(
-                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
-                    ),
-                },
-            ),
-            conditions=[
-                fnv1.Condition(
-                    type="ClusterReady",
-                    status=fnv1.STATUS_CONDITION_FALSE,
-                    reason="UnsupportedDevices",
-                    message="class gpu-l4 claims gpu.amd.com; GKE clusters support dra.cpu, gpu.nvidia.com",
-                ),
-            ],
         ),
     ),
     # The hostname gate, which is what keeps a cluster off the schedule until
@@ -7506,11 +2393,12 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=(),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=[],
                         client_cas=[{"name": "fleet-0", "certificate": "fleet-ca"}],
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -7573,11 +2461,12 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=(),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=[],
                         client_cas=None,
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -7646,11 +2535,12 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=(),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=[],
                         client_cas=[{"name": "fleet-0", "certificate": "fleet-ca"}],
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -7716,11 +2606,12 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=(),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=[],
                         client_cas=[{"name": "fleet-0", "certificate": "fleet-ca"}],
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -7803,15 +2694,16 @@ COMPOSE_CASES = [
                         kubeconfig="my-kubeconfig", identity=None
                     ),
                     "serving-stack": _serving_stack(
-                        cloud="Existing",
-                        dra_drivers=(),
+                        device_stacks="Managed",
                         secrets=[{"type": "Kubeconfig", "name": "my-kubeconfig", "key": "kubeconfig"}],
+                        dra_drivers=[],
                         client_cas=[
                             {"name": "aaa", "certificate": "aaa-ca"},
                             {"name": "fleet-0", "certificate": "fleet-0-ca"},
                             {"name": "fleet-1", "certificate": "fleet-1-ca"},
                         ],
-                        gpu=None,
+                        service=None,
+                        telemetry=None,
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -7836,6 +2728,1573 @@ COMPOSE_CASES = [
             conditions=[
                 fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
                 fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_TRUE, reason="BackendHealthy"),
+            ],
+        ),
+    ),
+    # On the first call nothing required has been fetched, so the function
+    # composes nothing for the cluster yet: Crossplane would discard it anyway.
+    ComposeCase(
+        name="ProvisionedRequirements",
+        reason="On its first call, a Provisioned cluster requires its classes and its provider's Composition by the config's group and kind, and waits.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+        ),
+    ),
+    ComposeCase(
+        name="ProviderNotYetFetched",
+        reason="Before Crossplane has fetched its provider's Composition, a Provisioned cluster guards its classes and waits, without failing the reconcile.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+        ),
+    ),
+    ComposeCase(
+        name="NoProvider",
+        reason="With no installed provider provisioning from its config's kind, a Provisioned cluster fails the reconcile with NoProvider.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                # Crossplane fetched the provider, and found none.
+                "provider": fnv1.Resources(),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="No installed cluster provider provisions clusters from "
+                    "AcmeClusterConfig.acme.example.org; install the provider that owns it",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="NoProvider",
+                    message="No installed cluster provider provisions clusters from "
+                    "AcmeClusterConfig.acme.example.org; install the provider that owns it",
+                ),
+            ],
+        ),
+    ),
+    # Crossplane picks one of several matching Compositions at random and
+    # never reselects, so the function refuses to choose.
+    ComposeCase(
+        name="ManyProviders",
+        reason="With two Compositions provisioning from its config's kind, a Provisioned cluster fails the reconcile with ConflictingProviders, naming both.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme-fork",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="Several Compositions provision clusters from AcmeClusterConfig.acme.example.org "
+                    "(provisioned-acme, provisioned-acme-fork); uninstall all but one provider",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="ConflictingProviders",
+                    message="Several Compositions provision clusters from AcmeClusterConfig.acme.example.org "
+                    "(provisioned-acme, provisioned-acme-fork); uninstall all but one provider",
+                ),
+            ],
+        ),
+    ),
+    ComposeCase(
+        name="OtherContractVersion",
+        reason="A Composition labelled for its config's kind but for another version of the contract isn't one Crossplane would select, so a Provisioned cluster fails the reconcile with NoProvider.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1beta1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="No installed cluster provider provisions clusters from "
+                    "AcmeClusterConfig.acme.example.org; install the provider that owns it",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="NoProvider",
+                    message="No installed cluster provider provisions clusters from "
+                    "AcmeClusterConfig.acme.example.org; install the provider that owns it",
+                ),
+            ],
+        ),
+    ),
+    ComposeCase(
+        name="ClassWithoutNodeClass",
+        reason="A Provisioned cluster's pool whose class names no node class fails the reconcile with InvalidNodePool.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class=None)],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="Can't provision node pools: node pool l4-pool's InferenceClass gpu-l4 has no nodeClassRef",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="InvalidNodePool",
+                    message="Can't provision node pools: node pool l4-pool's InferenceClass gpu-l4 has no nodeClassRef",
+                ),
+            ],
+        ),
+    ),
+    ComposeCase(
+        name="UnsupportedByProvider",
+        reason="Pools asking for zones or a reservation from a provider that declares neither capability fail the reconcile with UnsupportedByProvider, naming every pool.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-a", className="gpu-l4", nodeCount=2, zones=["acme-east-1a"]),
+                        v1alpha1.NodePool(
+                            name="l4-b",
+                            className="gpu-l4",
+                            nodeCount=2,
+                            zones=["acme-east-1b"],
+                            reservationRef=v1alpha1.ReservationRef(
+                                apiVersion="acme.example.org/v1alpha1",
+                                kind="AcmeCapacityReservation",
+                                name="l4-reserved",
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="node pool l4-a needs Zones; node pool l4-b needs Zones, CapacityReservations, which the "
+                    "provider for AcmeClusterConfig.acme.example.org doesn't support (it supports none)",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="UnsupportedByProvider",
+                    message="node pool l4-a needs Zones; node pool l4-b needs Zones, CapacityReservations, which the "
+                    "provider for AcmeClusterConfig.acme.example.org doesn't support (it supports none)",
+                ),
+            ],
+        ),
+    ),
+    # The devices gate can fire on a cluster that is already running - a shared
+    # class edited to claim a driver the provider can't serve. Everything after
+    # the gate composes the cluster, so a bare return would empty the desired
+    # state and Crossplane would garbage-collect the ProvisionedCluster, the
+    # ServingStack and their Usages. The fatal result is what stops that:
+    # Crossplane returns before applying desired state or collecting anything,
+    # and still applies the condition.
+    ComposeCase(
+        name="UnsupportedDevices",
+        reason="Classes claiming DRA drivers the provider doesn't declare fail the reconcile with UnsupportedDevices, naming every class and the drivers the provider supports, dra.cpu among them.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="mi300x-pool", className="mi300x", nodeCount=1),
+                        v1alpha1.NodePool(name="gaudi-pool", className="gaudi3", nodeCount=1),
+                        v1alpha1.NodePool(name="cpu-pool", className="cpu", nodeCount=1),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-mi300x": fnv1.Resources(
+                    items=[
+                        fnv1.Resource(
+                            resource=resource.dict_to_struct(
+                                {
+                                    "apiVersion": "modelplane.ai/v1alpha1",
+                                    "kind": "InferenceClass",
+                                    "metadata": {"name": "mi300x"},
+                                    "spec": {
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.amd.com",
+                                                "deviceClassName": "gpu.amd.com",
+                                            },
+                                        ],
+                                        "nodeClassRef": {
+                                            "apiVersion": "acme.example.org/v1alpha1",
+                                            "kind": "AcmeNodeClass",
+                                            "name": "mi300x",
+                                        },
+                                    },
+                                }
+                            )
+                        ),
+                    ],
+                ),
+                "class-gaudi3": fnv1.Resources(
+                    items=[
+                        fnv1.Resource(
+                            resource=resource.dict_to_struct(
+                                {
+                                    "apiVersion": "modelplane.ai/v1alpha1",
+                                    "kind": "InferenceClass",
+                                    "metadata": {"name": "gaudi3"},
+                                    "spec": {
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.intel.com",
+                                                "deviceClassName": "gpu.intel.com",
+                                            },
+                                        ],
+                                        "nodeClassRef": {
+                                            "apiVersion": "acme.example.org/v1alpha1",
+                                            "kind": "AcmeNodeClass",
+                                            "name": "gaudi3",
+                                        },
+                                    },
+                                }
+                            )
+                        ),
+                    ],
+                ),
+                "class-cpu": fnv1.Resources(
+                    items=[_cpu_inference_class(name="cpu", cpus="6", node_class="cpu")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                resources={
+                    "usage-inferenceclass-cpu": _input_usage(name="cpu"),
+                    "usage-inferenceclass-gaudi3": _input_usage(name="gaudi3"),
+                    "usage-inferenceclass-mi300x": _input_usage(name="mi300x"),
+                },
+            ),
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_FATAL,
+                    message="class gaudi3 claims gpu.intel.com; class mi300x claims gpu.amd.com; clusters from "
+                    "AcmeClusterConfig.acme.example.org support dra.cpu, gpu.nvidia.com",
+                ),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-cpu": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="cpu"
+                    ),
+                    "class-gaudi3": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gaudi3"
+                    ),
+                    "class-mi300x": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="mi300x"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="UnsupportedDevices",
+                    message="class gaudi3 claims gpu.intel.com; class mi300x claims gpu.amd.com; clusters from "
+                    "AcmeClusterConfig.acme.example.org support dra.cpu, gpu.nvidia.com",
+                ),
+            ],
+        ),
+    ),
+    # The CPU class claims only dra.cpu, which every provider supports though
+    # this one doesn't declare it, and which makes its pool a CPU pool.
+    ComposeCase(
+        name="ProvisionedComposed",
+        reason="A Provisioned cluster composes a ProvisionedCluster selecting its provider, with each pool's node class, role, sizes, zones and reservation, and waits for the provider to report how to reach it.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(
+                            name="l4-pool",
+                            className="gpu-l4",
+                            nodeCount=2,
+                            minNodeCount=1,
+                            maxNodeCount=4,
+                            zones=["acme-east-1a", "acme-east-1b"],
+                            reservationRef=v1alpha1.ReservationRef(
+                                apiVersion="acme.example.org/v1alpha1",
+                                kind="AcmeCapacityReservation",
+                                name="l4-reserved",
+                            ),
+                        ),
+                        v1alpha1.NodePool(name="cpu-pool", className="cpu", nodeCount=1),
+                    ],
+                ),
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "class-cpu": fnv1.Resources(
+                    items=[_cpu_inference_class(name="cpu", cpus="6", node_class="cpu")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={
+                                "infrastructure.modelplane.ai/capabilities": "Zones, CapacityReservations",
+                                "infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com",
+                            },
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=_desired_inference_cluster(
+                    schedulable_pools=[
+                        {
+                            "name": "l4-pool",
+                            "nodes": 4,
+                            "devices": [
+                                {
+                                    "name": "gpu",
+                                    "claim": "DRA",
+                                    "driver": "gpu.nvidia.com",
+                                    "deviceClassName": "gpu.nvidia.com",
+                                    "count": 1,
+                                    "capacity": {"memory": {"value": "24Gi"}},
+                                },
+                            ],
+                        },
+                        {
+                            "name": "cpu-pool",
+                            "nodes": 1,
+                            "devices": [
+                                {
+                                    "name": "cpu",
+                                    "claim": "DRA",
+                                    "driver": "dra.cpu",
+                                    "deviceClassName": "dra.cpu",
+                                    "count": 1,
+                                    "capacity": {"cpu": {"value": "6"}},
+                                },
+                            ],
+                        },
+                    ],
+                    cache=None,
+                    gateway=None,
+                ),
+                resources={
+                    "usage-inferenceclass-cpu": _input_usage(name="cpu"),
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                    "provisioned-cluster": _provisioned_cluster(
+                        node_pools=[
+                            {
+                                "name": "l4-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "l4",
+                                },
+                                "role": "Accelerator",
+                                "nodeCount": 2,
+                                "minNodeCount": 1,
+                                "maxNodeCount": 4,
+                                "zones": ["acme-east-1a", "acme-east-1b"],
+                                "reservationRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeCapacityReservation",
+                                    "name": "l4-reserved",
+                                },
+                            },
+                            {
+                                "name": "cpu-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "cpu",
+                                },
+                                "role": "CPU",
+                                "nodeCount": 1,
+                            },
+                        ],
+                        dra_drivers=["dra.cpu", "gpu.nvidia.com"],
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                },
+            ),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-cpu": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="cpu"
+                    ),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
+            ],
+        ),
+    ),
+    # The ServingStack doesn't wait for the ProvisionedCluster to be Ready,
+    # because the provider's device stack depends on the serving stack's
+    # cert-manager. The identity secret is in the namespace the provider says,
+    # not modelplane-system.
+    ComposeCase(
+        name="ProvisionedReachable",
+        reason="Once the provider publishes a kubeconfig, a Provisioned cluster composes a ClusterProviderConfig with its identity, a ServingStack relaying the provider's gateway and telemetry needs, and a Usage holding the ProvisionedCluster.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+                resources={
+                    "provisioned-cluster": _observed_provisioned_cluster(
+                        status={
+                            "conditions": [
+                                {
+                                    "type": "Ready",
+                                    "status": "False",
+                                    "reason": "Creating",
+                                    "lastTransitionTime": "2026-10-20T10:00:00Z",
+                                },
+                            ],
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig",
+                                    "namespace": "modelplane-system",
+                                    "key": "kubeconfig",
+                                },
+                                {
+                                    "type": "GoogleApplicationCredentials",
+                                    "name": "acme-credentials",
+                                    "namespace": "crossplane-system",
+                                    "key": "credentials.json",
+                                },
+                            ],
+                            "gateway": {"service": {"annotations": {"acme.example.org/load-balancer-type": "public"}}},
+                            "telemetry": {"ignoredNamespaces": ["acme-exporters"]},
+                        },
+                    ),
+                },
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=_desired_inference_cluster(
+                    schedulable_pools=[
+                        {
+                            "name": "l4-pool",
+                            "nodes": 4,
+                            "devices": [
+                                {
+                                    "name": "gpu",
+                                    "claim": "DRA",
+                                    "driver": "gpu.nvidia.com",
+                                    "deviceClassName": "gpu.nvidia.com",
+                                    "count": 1,
+                                    "capacity": {"memory": {"value": "24Gi"}},
+                                },
+                            ],
+                        },
+                    ],
+                    cache=None,
+                    gateway=None,
+                ),
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                    "provisioned-cluster": _provisioned_cluster(
+                        node_pools=[
+                            {
+                                "name": "l4-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "l4",
+                                },
+                                "role": "Accelerator",
+                                "nodeCount": 2,
+                                "maxNodeCount": 4,
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                    "cluster-provider-config-kubernetes": _cluster_provider_config(
+                        kubeconfig="test-cluster-kubeconfig",
+                        identity={
+                            "type": "GoogleApplicationCredentials",
+                            "source": "Secret",
+                            "secretRef": {
+                                "namespace": "crossplane-system",
+                                "name": "acme-credentials",
+                                "key": "credentials.json",
+                            },
+                        },
+                    ),
+                    "serving-stack": _serving_stack(
+                        device_stacks="External",
+                        secrets=[
+                            {
+                                "type": "Kubeconfig",
+                                "name": "test-cluster-kubeconfig",
+                                "namespace": "modelplane-system",
+                                "key": "kubeconfig",
+                            },
+                            {
+                                "type": "GoogleApplicationCredentials",
+                                "name": "acme-credentials",
+                                "namespace": "crossplane-system",
+                                "key": "credentials.json",
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        client_cas=None,
+                        service={"annotations": {"acme.example.org/load-balancer-type": "public"}},
+                        telemetry={"ignoredNamespaces": ["acme-exporters"]},
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                    "usage-provisioned-cluster-by-backend": _provisioned_usage(),
+                },
+            ),
+            results=[
+                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Cluster is reachable, composing its serving stack"),
+            ],
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
+            ],
+        ),
+    ),
+    # Dropping the ServingStack from desired state would have Crossplane delete
+    # it, uninstalling the serving stack from a running cluster, and dropping
+    # what the provider relayed would change its gateways' Service and its
+    # collector.
+    ComposeCase(
+        name="ProvisionedSecretsLost",
+        reason="When the provider's status loses what it relayed, a Provisioned cluster keeps composing its ServingStack and ClusterProviderConfig from the observed ServingStack's secrets, gateway Service annotations and ignored namespaces.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+                resources={
+                    "provisioned-cluster": _observed_provisioned_cluster(status={}),
+                    "serving-stack": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "ServingStack",
+                                "metadata": {
+                                    "name": "test-cluster-serving-stack-fd00b",
+                                    "namespace": "modelplane-system",
+                                },
+                                "spec": {
+                                    "deviceStacks": "External",
+                                    "gateway": {
+                                        "hostname": "gateway-test-cluster-09532.modelplane-system.svc.cluster.local",
+                                        "service": {
+                                            "annotations": {"acme.example.org/load-balancer-type": "public"},
+                                        },
+                                    },
+                                    "telemetry": {"ignoredNamespaces": ["acme-exporters"]},
+                                    "stack": "Standard",
+                                    "secrets": [
+                                        {
+                                            "type": "Kubeconfig",
+                                            "name": "test-cluster-kubeconfig",
+                                            "namespace": "modelplane-system",
+                                            "key": "kubeconfig",
+                                        },
+                                    ],
+                                    "draDrivers": ["gpu.nvidia.com"],
+                                },
+                            }
+                        ),
+                    ),
+                },
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=_desired_inference_cluster(
+                    schedulable_pools=[
+                        {
+                            "name": "l4-pool",
+                            "nodes": 4,
+                            "devices": [
+                                {
+                                    "name": "gpu",
+                                    "claim": "DRA",
+                                    "driver": "gpu.nvidia.com",
+                                    "deviceClassName": "gpu.nvidia.com",
+                                    "count": 1,
+                                    "capacity": {"memory": {"value": "24Gi"}},
+                                },
+                            ],
+                        },
+                    ],
+                    cache=None,
+                    gateway=None,
+                ),
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                    "provisioned-cluster": _provisioned_cluster(
+                        node_pools=[
+                            {
+                                "name": "l4-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "l4",
+                                },
+                                "role": "Accelerator",
+                                "nodeCount": 2,
+                                "maxNodeCount": 4,
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                    "cluster-provider-config-kubernetes": _cluster_provider_config(
+                        kubeconfig="test-cluster-kubeconfig", identity=None
+                    ),
+                    "serving-stack": _serving_stack(
+                        device_stacks="External",
+                        secrets=[
+                            {
+                                "type": "Kubeconfig",
+                                "name": "test-cluster-kubeconfig",
+                                "namespace": "modelplane-system",
+                                "key": "kubeconfig",
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        client_cas=None,
+                        service={"annotations": {"acme.example.org/load-balancer-type": "public"}},
+                        telemetry={"ignoredNamespaces": ["acme-exporters"]},
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                    "usage-provisioned-cluster-by-backend": _provisioned_usage(),
+                },
+            ),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_FALSE, reason="Provisioning"),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
+            ],
+        ),
+    ),
+    ComposeCase(
+        name="ProvisionedReady",
+        reason="Once the ProvisionedCluster is Ready, a Provisioned cluster marks it ready, reports ClusterReady, and relays the provider's cache StorageClass.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+                resources={
+                    "provisioned-cluster": _observed_provisioned_cluster(
+                        status={
+                            "conditions": [
+                                {
+                                    "type": "Synced",
+                                    "status": "True",
+                                    "reason": "ReconcileSuccess",
+                                    "lastTransitionTime": "2026-10-20T10:00:00Z",
+                                },
+                                {
+                                    "type": "Ready",
+                                    "status": "True",
+                                    "reason": "Available",
+                                    "lastTransitionTime": "2026-10-20T10:00:00Z",
+                                },
+                            ],
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig",
+                                    "namespace": "modelplane-system",
+                                    "key": "kubeconfig",
+                                },
+                            ],
+                            "cache": {"storageClassName": "acme-rwx"},
+                        },
+                    ),
+                    "serving-stack": _observed_serving_stack(gateway={"address": "34.55.100.10"}),
+                },
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=_desired_inference_cluster(
+                    schedulable_pools=[
+                        {
+                            "name": "l4-pool",
+                            "nodes": 4,
+                            "devices": [
+                                {
+                                    "name": "gpu",
+                                    "claim": "DRA",
+                                    "driver": "gpu.nvidia.com",
+                                    "deviceClassName": "gpu.nvidia.com",
+                                    "count": 1,
+                                    "capacity": {"memory": {"value": "24Gi"}},
+                                },
+                            ],
+                        },
+                    ],
+                    cache={"storageClassName": "acme-rwx"},
+                    gateway={"address": "34.55.100.10"},
+                ),
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                    "provisioned-cluster": _provisioned_cluster(
+                        node_pools=[
+                            {
+                                "name": "l4-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "l4",
+                                },
+                                "role": "Accelerator",
+                                "nodeCount": 2,
+                                "maxNodeCount": 4,
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "cluster-provider-config-kubernetes": _cluster_provider_config(
+                        kubeconfig="test-cluster-kubeconfig", identity=None
+                    ),
+                    "serving-stack": _serving_stack(
+                        device_stacks="External",
+                        secrets=[
+                            {
+                                "type": "Kubeconfig",
+                                "name": "test-cluster-kubeconfig",
+                                "namespace": "modelplane-system",
+                                "key": "kubeconfig",
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        client_cas=None,
+                        service=None,
+                        telemetry=None,
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "usage-provisioned-cluster-by-backend": _provisioned_usage(),
+                    "pool-observation-l4-pool": _pool_observation(pool="l4-pool"),
+                },
+            ),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClusterReady", status=fnv1.STATUS_CONDITION_TRUE, reason="ClusterRunning"),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_TRUE, reason="BackendHealthy"),
+            ],
+        ),
+    ),
+    # A provider that can't provision what it was asked for fails its
+    # ProvisionedCluster's reconcile, which Crossplane reports on Synced.
+    ComposeCase(
+        name="ProviderError",
+        reason="When the ProvisionedCluster isn't Synced, a Provisioned cluster reports ClusterReady False with reason ProviderError and the provider's message.",
+        req=fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=_inference_cluster(
+                    cluster=v1alpha1.Cluster(
+                        source="Provisioned",
+                        provisioned=v1alpha1.Provisioned(
+                            configRef=v1alpha1.ConfigRef(
+                                apiVersion="acme.example.org/v1alpha1", kind="AcmeClusterConfig", name="default"
+                            ),
+                        ),
+                    ),
+                    node_pools=[
+                        v1alpha1.NodePool(name="l4-pool", className="gpu-l4", nodeCount=2, maxNodeCount=4),
+                    ],
+                ),
+                resources={
+                    "provisioned-cluster": _observed_provisioned_cluster(
+                        status={
+                            "conditions": [
+                                {
+                                    "type": "Synced",
+                                    "status": "False",
+                                    "reason": "ReconcileError",
+                                    "message": "AcmeNodeClass l4 offers no L4 GPUs in region acme-east-1",
+                                    "lastTransitionTime": "2026-10-20T10:00:00Z",
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+            required_resources={
+                "class-gpu-l4": fnv1.Resources(
+                    items=[_inference_class(name="gpu-l4", count=1, memory="24Gi", node_class="l4")],
+                ),
+                "provider": fnv1.Resources(
+                    items=[
+                        _provider(
+                            name="provisioned-acme",
+                            annotations={"infrastructure.modelplane.ai/dra-drivers": "gpu.nvidia.com"},
+                            api_version="infrastructure.modelplane.ai/v1alpha1",
+                        ),
+                    ],
+                ),
+            },
+        ),
+        want=fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=_desired_inference_cluster(
+                    schedulable_pools=[
+                        {
+                            "name": "l4-pool",
+                            "nodes": 4,
+                            "devices": [
+                                {
+                                    "name": "gpu",
+                                    "claim": "DRA",
+                                    "driver": "gpu.nvidia.com",
+                                    "deviceClassName": "gpu.nvidia.com",
+                                    "count": 1,
+                                    "capacity": {"memory": {"value": "24Gi"}},
+                                },
+                            ],
+                        },
+                    ],
+                    cache=None,
+                    gateway=None,
+                ),
+                resources={
+                    "usage-inferenceclass-gpu-l4": _input_usage(name="gpu-l4"),
+                    "provisioned-cluster": _provisioned_cluster(
+                        node_pools=[
+                            {
+                                "name": "l4-pool",
+                                "nodeClassRef": {
+                                    "apiVersion": "acme.example.org/v1alpha1",
+                                    "kind": "AcmeNodeClass",
+                                    "name": "l4",
+                                },
+                                "role": "Accelerator",
+                                "nodeCount": 2,
+                                "maxNodeCount": 4,
+                            },
+                        ],
+                        dra_drivers=["gpu.nvidia.com"],
+                        ready=fnv1.READY_UNSPECIFIED,
+                    ),
+                },
+            ),
+            context=structpb.Struct(),
+            requirements=fnv1.Requirements(
+                resources={
+                    "model-replicas": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelReplica",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-routes": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1",
+                        kind="ModelRoute",
+                        match_labels=fnv1.MatchLabels(labels={"modelplane.ai/cluster": "test-cluster"}),
+                    ),
+                    "model-caches": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelCache"),
+                    "gateways": fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway"),
+                    "class-gpu-l4": fnv1.ResourceSelector(
+                        api_version="modelplane.ai/v1alpha1", kind="InferenceClass", match_name="gpu-l4"
+                    ),
+                    "provider": fnv1.ResourceSelector(
+                        api_version="apiextensions.crossplane.io/v1",
+                        kind="Composition",
+                        match_labels=fnv1.MatchLabels(
+                            labels={
+                                "infrastructure.modelplane.ai/config-group": "acme.example.org",
+                                "infrastructure.modelplane.ai/config-kind": "AcmeClusterConfig",
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="ProviderError",
+                    message="AcmeNodeClass l4 offers no L4 GPUs in region acme-east-1",
+                ),
+                fnv1.Condition(type="BackendReady", status=fnv1.STATUS_CONDITION_FALSE, reason="WaitingForCluster"),
             ],
         ),
     ),
@@ -7880,114 +4339,3 @@ GATEWAY_HOSTNAME_CASES = [
 def test_gateway_hostname(case: GatewayHostnameCase) -> None:
     """_gateway_hostname derives a cluster's gateway hostname."""
     assert fn._gateway_hostname(case.cluster_name) == case.want, case.reason
-
-
-def _composer(*, source: fn.Cloud, devices_by_class: dict[str, list[dict]]) -> fn.Composer:
-    """A Composer for a test-cluster of the given source whose resolved
-    classes each declare the given devices, calling the derivation and
-    gate directly - through RunFunction every combination would need a
-    whole compose case."""
-    cluster = v1alpha1.Cluster(source=source)
-    req = fnv1.RunFunctionRequest(
-        observed=fnv1.State(composite=_inference_cluster(cluster=cluster, node_pools=None)),
-    )
-    composer = fn.Composer(req, fnv1.RunFunctionResponse())
-    for name, devices in devices_by_class.items():
-        composer.classes[name] = fn.iclv1alpha1.InferenceClass.model_validate(
-            {
-                "apiVersion": "modelplane.ai/v1alpha1",
-                "kind": "InferenceClass",
-                "metadata": {"name": name},
-                "spec": {"devices": devices},
-            }
-        )
-    return composer
-
-
-def test_dra_drivers_sorted() -> None:
-    """dra_drivers collects each claim: DRA device's driver once, sorted."""
-    composer = _composer(
-        source="Existing",
-        devices_by_class={
-            "nvidia-a": [{"name": "gpu", "claim": "DRA", "driver": "gpu.nvidia.com", "deviceClassName": "g"}],
-            "nvidia-b": [{"name": "gpu", "claim": "DRA", "driver": "gpu.nvidia.com", "deviceClassName": "g"}],
-            "cpu": [{"name": "cpu", "claim": "DRA", "driver": "dra.cpu", "deviceClassName": "dra.cpu"}],
-        },
-    )
-    assert composer.dra_drivers() == ["dra.cpu", "gpu.nvidia.com"]
-
-
-def test_dra_drivers_synthetic() -> None:
-    """A Synthetic device is never claimed: its driver names the attribute
-    domain its CEL selectors read, not an installable stack, so it stays
-    off spec.draDrivers. An unset claim defaults to DRA and counts."""
-    composer = _composer(
-        source="Existing",
-        devices_by_class={
-            "efa": [
-                {"name": "gpu", "driver": "gpu.nvidia.com", "deviceClassName": "g"},
-                {"name": "fabric", "claim": "Synthetic", "driver": "fabric.example.com"},
-            ],
-        },
-    )
-    assert composer.dra_drivers() == ["gpu.nvidia.com"]
-
-
-def test_unsupported_devices() -> None:
-    """Classes claiming drivers their cloud can't serve gate ClusterReady
-    with UnsupportedDevices, naming every offending class, and stop with
-    a fatal result so a running cluster holds its existing resources
-    rather than being garbage-collected."""
-    composer = _composer(
-        source="Vultr",
-        devices_by_class={
-            "amd-mi355x-8x": [
-                {"name": "gpu", "claim": "DRA", "driver": "gpu.amd.com", "deviceClassName": "gpu.amd.com"},
-            ],
-            "nvidia-l40s": [
-                {"name": "gpu", "claim": "DRA", "driver": "gpu.nvidia.com", "deviceClassName": "gpu.nvidia.com"},
-            ],
-            "efa": [
-                {"name": "efa", "claim": "DRA", "driver": "dra.net", "deviceClassName": "efa.networking.k8s.aws"},
-            ],
-        },
-    )
-    assert composer.check_devices_supported("Vultr") is False
-    conditions = {c.type: c for c in composer.rsp.conditions}
-    assert conditions["ClusterReady"].status == fnv1.STATUS_CONDITION_FALSE
-    assert conditions["ClusterReady"].reason == "UnsupportedDevices"
-    assert conditions["ClusterReady"].message == (
-        "class amd-mi355x-8x claims gpu.amd.com; class efa claims dra.net; "
-        "Vultr clusters support dra.cpu, gpu.nvidia.com"
-    )
-    assert [(r.severity, r.message) for r in composer.rsp.results] == [
-        (
-            fnv1.SEVERITY_FATAL,
-            "class amd-mi355x-8x claims gpu.amd.com; class efa claims dra.net; "
-            "Vultr clusters support dra.cpu, gpu.nvidia.com",
-        ),
-    ]
-
-
-def test_external_driver() -> None:
-    """dra.net is declared external on EKS - compose_eks_cluster installs
-    the EFA driver - so it passes there and gates everywhere else."""
-    devices = {
-        "efa": [{"name": "efa", "claim": "DRA", "driver": "dra.net", "deviceClassName": "efa.networking.k8s.aws"}],
-    }
-    assert _composer(source="EKS", devices_by_class=devices).check_devices_supported("EKS") is True
-    assert _composer(source="GKE", devices_by_class=devices).check_devices_supported("GKE") is False
-
-
-def test_existing_never_gates() -> None:
-    """Existing is BYO: any driver is treated as externally installed, so
-    nothing gates - a typo'd driver surfaces when its ResourceClaim can't
-    allocate, not as a condition."""
-    composer = _composer(
-        source="Existing",
-        devices_by_class={
-            "byo": [{"name": "gpu", "claim": "DRA", "driver": "gpu.example.com", "deviceClassName": "g"}],
-        },
-    )
-    assert composer.check_devices_supported("Existing") is True
-    assert list(composer.rsp.conditions) == []

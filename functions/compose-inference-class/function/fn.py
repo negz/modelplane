@@ -15,8 +15,8 @@
 """Compose an InferenceClass.
 
 InferenceClass is a data resource: it describes hardware (devices) and
-optionally how to provision it (provisioning). It has no composed
-children. This function just marks the XR Ready.
+optionally the cluster provider's node class that provisions it
+(nodeClassRef). It has no composed children. This function just marks the XR Ready.
 """
 
 import grpc

@@ -6,10 +6,10 @@
 # provider that serves it.
 #
 # This policy activates only provider-helm and provider-kubernetes, which serve
-# every control plane. compose-inference-cluster composes a second, cluster-
-# scoped policy activating just the kinds the cloud it provisions needs, so a
+# every control plane. A cluster provider's ProvisionedCluster composes a
+# second, cluster-scoped policy activating just the kinds its cloud needs, so a
 # control plane runs a cloud's providers only once it has an InferenceCluster on
-# that cloud, rather than all of them from here.
+# that cloud.
 #
 # It ships in the Configuration package, so it installs with the Modelplane
 # APIs. For it to take effect, install Crossplane with an empty default

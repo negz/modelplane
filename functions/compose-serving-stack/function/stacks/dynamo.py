@@ -31,8 +31,7 @@ import pathlib
 from typing import Any
 
 import yaml
-
-from function.stacks.components import Chart, Component, Manifests
+from modelplane_sdk.stacks import Chart, Component, Manifests
 
 # The name and the `default` namespace are a cross-function contract:
 # compose-model-replica points engine pods, which run in their team's

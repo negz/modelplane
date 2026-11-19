@@ -15,11 +15,12 @@
 """Install the serving stack on a remote cluster.
 
 The stack is a list of components fixed at build time: the function
-joins the XR's cloud and stack through the stacks package (see
+joins the XR's stack and device stacks through the stacks package (see
 function/stacks/__init__.py and design/serving-stack-generation.md) and
-renders each entry - a Chart as a provider-helm Release, a Manifests as
-provider-kubernetes Objects - all targeting the remote cluster via
-ProviderConfigs built from the XR's secrets. The reconcile path holds no
+renders each entry through modelplane_sdk.stacks.render - a Chart as a
+provider-helm Release, a Manifests as provider-kubernetes Objects - all
+targeting the remote cluster via ProviderConfigs built from the XR's
+secrets. The reconcile path holds no
 decisions of its own: every version, values block, and membership
 decision was resolved where a human reviewed a diff.
 
@@ -41,16 +42,15 @@ import pydantic
 from crossplane.function import logging, request, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
+from modelplane_sdk import contract
+from modelplane_sdk.stacks import render
 from models.ai.modelplane.infrastructure.servingstack import v1alpha1
 from models.ai.modelplane.metricmapping import v1alpha1 as mmv1alpha1
 from models.ai.modelplane.telemetrydestination import v1alpha1 as tdv1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
-from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
-from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from models.io.crossplane.m.kubernetes.providerconfig import (
     v1alpha1 as k8spcv1alpha1,
 )
-from models.io.crossplane.protection.usage import v1beta1 as usagev1beta1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 from function import collector, gateway, stacks
@@ -58,47 +58,12 @@ from function import collector, gateway, stacks
 # The Pydantic model one required resource is parsed into.
 _T = TypeVar("_T", bound=pydantic.BaseModel)
 
-# Label key every rendered Release and Object carries, valued with its
-# composed-resource key, so Usage resourceSelectors can name any
-# component (or one doc of a bundle) mechanically.
-_LABEL_RESOURCE = "modelplane.ai/resource"
-
-# Annotation provider-helm reads as the Helm release name. The stack
-# lists carry the release name per Chart entry (mp-<chart>): stable
-# across chart-version upgrades so provider-helm upgrades in place,
-# short enough that chart-derived names stay inside the 63-character
-# label limit, and mp- reserves a namespace so Modelplane can't adopt a
-# same-named release a user already runs. See issue #215 and the
-# design's "Ordering and identity".
-_EXTERNAL_NAME_ANNOTATION = "crossplane.io/external-name"
-
-# Secret type that names the kubeconfig entry in the XR's secrets. Every other
-# entry's type is a provider identity type, which both ProviderConfigs stamp
-# verbatim as their identity.type.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
-
-# cert-manager reads a ClusterIssuer's CA secret from its cluster-resource-
-# namespace. The InferenceGateway's client CA ClusterIssuer and its secret live
-# in modelplane-system, so the stack points cert-manager there rather than at its
-# own namespace. Forced here, over every cloud's cert-manager values, because it's
-# a cross-function contract with compose-inference-gateway. _CERT_MANAGER_KEY is
-# the component key the cloud lists use.
-#
-# cert-manager also owns each certificate's Secret by its Certificate, so
-# deleting the Certificate deletes the Secret. compose-model-route issues a
-# client certificate per ModelRoute, and without this every deleted route would
-# leave its client key behind, still valid against the cluster gateways.
-_CERT_MANAGER_KEY = "cert-manager"
-_CLUSTER_RESOURCE_NAMESPACE = "modelplane-system"
+# The namespace on the cluster where the gateway PKI and the CA bundles live.
+_NAMESPACE_SYSTEM = "modelplane-system"
 
 # The composed-resource key of the EnvoyProxy the GatewayClass references
 # (stacks.common.gateway_proxy).
 _GATEWAY_PROXY = "gateway-proxy"
-
-# The (apiVersion, kind) a component's composed resources render as,
-# used by the derived Usages' of/by references.
-_RELEASE_REF = ("helm.m.crossplane.io/v1beta1", "Release")
-_OBJECT_REF = ("kubernetes.m.crossplane.io/v1alpha1", "Object")
 
 # The cluster gateway's own PKI, issued by cert-manager, which the stack
 # already installs. Composition functions are called repeatedly and must be a
@@ -164,116 +129,6 @@ def _namespace(meta: metav1.ObjectMeta | None) -> str:
     return meta.namespace
 
 
-def _helm_release(chart: stacks.Chart, provider_config: str) -> helmv1beta1.Release:
-    """Build a Helm Release for a Chart entry, targeting the remote cluster."""
-    release = helmv1beta1.Release(
-        metadata=metav1.ObjectMeta(
-            annotations={_EXTERNAL_NAME_ANNOTATION: chart.release},
-            labels={_LABEL_RESOURCE: chart.key},
-        ),
-        spec=helmv1beta1.Spec(
-            providerConfigRef=helmv1beta1.ProviderConfigRef(
-                kind="ProviderConfig",
-                name=provider_config,
-            ),
-            forProvider=helmv1beta1.ForProvider(
-                chart=helmv1beta1.Chart(
-                    name=chart.chart,
-                    repository=chart.repository,
-                    version=chart.version,
-                ),
-                namespace=chart.namespace,
-            ),
-        ),
-    )
-    if chart.wait:
-        # Helm --wait: Ready means the workloads rolled out, so the
-        # install gate orders dependents on health, not deploy. The
-        # default 5m can be tight for the big monitoring charts on a
-        # fresh cluster pulling images.
-        release.spec.forProvider.wait = True
-        release.spec.forProvider.waitTimeout = "10m"
-    values = dict(chart.values) if chart.values else {}
-    if chart.key == _CERT_MANAGER_KEY:
-        values["clusterResourceNamespace"] = _CLUSTER_RESOURCE_NAMESPACE
-        values["enableCertificateOwnerRef"] = True
-    if values:
-        release.spec.forProvider.values = values
-    return release
-
-
-def _k8s_object(
-    provider_config: str,
-    manifest: dict,
-    metadata: metav1.ObjectMeta | None = None,
-    *,
-    ready_when: str | None = None,
-    management_policies: list | None = None,
-) -> k8sobjv1alpha1.Object:
-    """Build a provider-kubernetes Object wrapping an arbitrary manifest.
-
-    Readiness defaults to SuccessfulCreate (the Object is Ready once applied),
-    which suits resources with no meaningful runtime readiness. Pass ready_when
-    for an Object whose readiness must reflect a controller-populated field of
-    the observed manifest - it selects the DeriveFromCelQuery policy with that
-    query (see gateway.READY_CEL), which also keeps provider-kubernetes
-    re-observing on its fast poll until the query passes.
-    """
-    obj = k8sobjv1alpha1.Object(
-        # Only set metadata when present. Under exclude_unset serialization,
-        # passing metadata=None would emit a null metadata into the composed
-        # resource rather than omitting it.
-        **({"metadata": metadata} if metadata is not None else {}),
-        spec=k8sobjv1alpha1.Spec(
-            providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
-                kind="ProviderConfig",
-                name=provider_config,
-            ),
-            forProvider=k8sobjv1alpha1.ForProvider(
-                manifest=manifest,
-            ),
-        ),
-    )
-    if management_policies:
-        obj.spec.managementPolicies = management_policies
-    if ready_when is not None:
-        obj.spec.readiness = k8sobjv1alpha1.Readiness(
-            policy="DeriveFromCelQuery",
-            celQuery=ready_when,
-        )
-    return obj
-
-
-def _usage(
-    of_ref: tuple[str, str],
-    of_key: str,
-    by_ref: tuple[str, str],
-    by_key: str,
-) -> usagev1beta1.Usage:
-    """Build a Usage holding `of` (a dependency) until `by` is gone."""
-    return usagev1beta1.Usage(
-        spec=usagev1beta1.Spec(
-            of=usagev1beta1.Of(
-                apiVersion=of_ref[0],
-                kind=of_ref[1],
-                resourceSelector=usagev1beta1.ResourceSelectorModel(
-                    matchControllerRef=True,
-                    matchLabels={_LABEL_RESOURCE: of_key},
-                ),
-            ),
-            by=usagev1beta1.By(
-                apiVersion=by_ref[0],
-                kind=by_ref[1],
-                resourceSelector=usagev1beta1.ResourceSelector(
-                    matchControllerRef=True,
-                    matchLabels={_LABEL_RESOURCE: by_key},
-                ),
-            ),
-            replayDeletion=True,
-        ),
-    )
-
-
 def _ensure_trailing_newline(cert: str) -> str:
     """A certificate ending in a newline, so several concatenate cleanly."""
     return cert if cert.endswith("\n") else cert + "\n"
@@ -329,36 +184,31 @@ class Composer:
     def compose(self) -> None:
         self.compose_provider_configs()
 
-        # The XRD requires and enums both fields, so the join raising means the
-        # API and the stacks package disagree on a value, a broken Modelplane
-        # build, not a cluster condition - or, for a draDrivers entry, that
-        # compose-inference-cluster's hand-kept mirror of the supported
-        # drivers drifted from the stacks package's: it should have gated the
-        # cluster with UnsupportedDevices before composing this ServingStack.
-        # Let it crash rather than dress it up as a fatal result. draDrivers
-        # absent means the same as empty - the cluster composition always
-        # sets it - so only the untagged components install.
+        # The XRD requires and enums both fields, so the join raising means
+        # the API and the stacks package disagree on a value, a broken
+        # Modelplane build, not a cluster condition. Let it crash rather than
+        # dress it up as a fatal result. draDrivers absent means the same as
+        # empty - the cluster composition always sets it - so only the
+        # untagged components install.
+        gw = self.xr.spec.gateway
         components = stacks.join(
-            self.xr.spec.cloud,
             self.xr.spec.stack or "Standard",
+            self.xr.spec.deviceStacks,
             dra_drivers=[d.root for d in self.xr.spec.draDrivers or []],
+            service={"annotations": gw.service.annotations} if gw.service and gw.service.annotations else None,
         )
 
-        # Per-pool GPU driver configuration is per-cluster state the cluster
-        # composition projects into spec.gpu, so it can't live in the
-        # build-time component lists; the transform is still the stacks
-        # package's (civo.py), keeping the what out of this function. Only
-        # Civo projects it today (single-H100 NVLink disable).
-        if self.xr.spec.cloud == "Civo" and self.xr.spec.gpu and self.xr.spec.gpu.pools:
-            nvlink_pools = [p.name for p in self.xr.spec.gpu.pools if p.disableNvLink]
-            if nvlink_pools:
-                components = stacks.civo.with_nvlink_disabled(components, nvlink_pools)
-
-        rendered = self.compose_components(components)
+        rendered = render.compose(
+            self.req,
+            self.rsp,
+            components,
+            provider_config=_pc_name(self.xr),
+            gate=self.provider_configs_observed(),
+        )
         rendered += self.compose_gateway()
         rendered += self.compose_gateway_pki()
         self.compose_collector()
-        self.compose_component_usages(components)
+        render.compose_usages(self.rsp, components)
         self.compose_gateway_usages()
         self.write_status()
         self.mark_readiness(rendered)
@@ -370,7 +220,7 @@ class Composer:
         """
         xr_secrets = self.xr.spec.secrets or []
 
-        kubeconfig_secret = next(s for s in xr_secrets if s.type == _SECRET_TYPE_KUBECONFIG)
+        kubeconfig_secret = next(s for s in xr_secrets if s.type == contract.SECRET_TYPE_KUBECONFIG)
 
         # The kubeconfig provides the cluster endpoint and CA cert. If an
         # identity secret is present, it's layered on as an identity block so the
@@ -398,16 +248,16 @@ class Composer:
         )
 
         identity_secret = next(
-            (s for s in xr_secrets if s.type != _SECRET_TYPE_KUBECONFIG),
+            (s for s in xr_secrets if s.type != contract.SECRET_TYPE_KUBECONFIG),
             None,
         )
         if identity_secret:
-            # The identity entry may carry its own namespace - the Nebius
-            # credential is the Secret the Nebius ClusterProviderConfig
-            # references, not one in this ServingStack's namespace.
+            # The identity entry may carry its own namespace - a provider may
+            # relay the Secret its cloud's ProviderConfig references, rather
+            # than one in this ServingStack's namespace.
             identity_namespace = identity_secret.namespace or _namespace(self.xr.metadata)
             k8s_pc_spec.identity = k8spcv1alpha1.Identity(
-                type=identity_secret.type,  # ty: ignore[invalid-argument-type]  # non-Kubeconfig types are exactly the provider identity types
+                type=identity_secret.type,  # non-Kubeconfig types are exactly the provider identity types
                 source="Secret",
                 secretRef=k8spcv1alpha1.SecretRef(
                     name=identity_secret.name,
@@ -416,7 +266,7 @@ class Composer:
                 ),
             )
             helm_pc_spec.identity = helmpcv1beta1.Identity(
-                type=identity_secret.type,  # ty: ignore[invalid-argument-type]  # non-Kubeconfig types are exactly the provider identity types
+                type=identity_secret.type,  # non-Kubeconfig types are exactly the provider identity types
                 source="Secret",
                 secretRef=helmpcv1beta1.SecretRef(
                     name=identity_secret.name,
@@ -440,93 +290,6 @@ class Composer:
                 spec=helm_pc_spec,
             ),
         )
-
-    def compose_components(self, components: list[stacks.Component]) -> list[str]:
-        """Render every component of the joined stack.
-
-        A Chart renders as one provider-helm Release under the entry's
-        key; a Manifests entry as one provider-kubernetes Object per
-        doc, keyed by stacks.components.doc_keys. Everything carries the
-        _LABEL_RESOURCE label the derived Usages select on, and
-        everything is gated on the ProviderConfigs being observed (see
-        provider_configs_observed) so first creation doesn't race them.
-
-        depends_on gates first creation too: a component is created
-        only once every doc of every dependency reports Ready, so
-        bring-up proceeds in dependency waves (cert-manager before the
-        GPU Operator, the GPU Operator before the DRA driver). Once a
-        resource exists it always re-composes - the observed check - so
-        a dependency going unready later never deletes dependents. A
-        Release reports Ready when Helm deploys it, not when its
-        workloads run, so this is deploy-order, not health-order.
-
-        Returns the composed-resource keys it rendered, for readiness.
-        """
-        pc_observed = self.provider_configs_observed()
-        pc = _pc_name(self.xr)
-        docs = {c.key: stacks.components.doc_keys(c) for c in components}
-
-        def deps_ready(c: stacks.Component) -> bool:
-            return all(
-                resource.get_condition(self.req.observed.resources.get(key), "Ready").status == "True"
-                for dep in c.depends_on
-                for key in docs[dep]
-            )
-
-        rendered: list[str] = []
-        for c in components:
-            gate = pc_observed and deps_ready(c)
-            if isinstance(c, stacks.Chart):
-                if not (gate or c.key in self.req.observed.resources):
-                    continue
-                resource.update(self.rsp.desired.resources[c.key], _helm_release(c, pc))
-                rendered.append(c.key)
-                continue
-            for key, doc in zip(stacks.components.doc_keys(c), c.manifests, strict=True):
-                if not (gate or key in self.req.observed.resources):
-                    continue
-                resource.update(
-                    self.rsp.desired.resources[key],
-                    _k8s_object(
-                        pc,
-                        doc,
-                        metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: key}),
-                        ready_when=c.ready,
-                    ),
-                )
-                rendered.append(key)
-        return rendered
-
-    def compose_component_usages(self, components: list[stacks.Component]) -> None:
-        """Derive teardown-ordering Usages from the components' edges.
-
-        Crossplane applies composed resources concurrently, so without a
-        Usage nothing sequences deletion. Each depends_on edge becomes
-        one Usage per (dependency doc, dependent doc) pair, holding the
-        dependency until the dependent is gone: the kai-scheduler
-        release outlives the Queue CRs whose CRD it owns, cert-manager
-        outlives the Envoy Gateway release whose webhooks need it, and
-        so on. Usages reference nothing on the remote cluster, so they
-        compose ungated and are ready on arrival.
-        """
-        refs: dict[str, tuple[str, str]] = {}
-        docs: dict[str, list[str]] = {}
-        for c in components:
-            keys = stacks.components.doc_keys(c)
-            docs[c.key] = keys
-            for key in keys:
-                refs[key] = _RELEASE_REF if isinstance(c, stacks.Chart) else _OBJECT_REF
-
-        for c in components:
-            for dep in c.depends_on:
-                for of_key in docs[dep]:
-                    for by_key in docs[c.key]:
-                        key = f"usage-{of_key}-by-{by_key}"
-                        resource.update(
-                            self.rsp.desired.resources[key],
-                            _usage(refs[of_key], of_key, refs[by_key], by_key),
-                        )
-                        self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
 
     def serves_gateway(self) -> bool:
         """Whether this cluster's gateway should be serving.
@@ -569,10 +332,11 @@ class Composer:
             )
         # Envoy Gateway creates the Gateway's LoadBalancer Service from the
         # EnvoyProxy that exists at that moment, and some clouds assign the
-        # Service an address only once. CKS gives a Service without its public
-        # annotation a private address and keeps it after the annotation
-        # arrives. The Gateway waits for the EnvoyProxy the first time.
-        proxy_ready = resource.get_condition(self.req.observed.resources.get(_GATEWAY_PROXY), "Ready").status == "True"
+        # Service an address only once: given a Service without the annotation
+        # that asks for a public address, a cloud may assign a private one and
+        # keep it after the annotation arrives. The Gateway waits for the
+        # EnvoyProxy the first time.
+        proxy_ready = render.is_ready(self.req, _GATEWAY_PROXY)
         rendered: list[str] = []
         for key, manifest, cel in gateway.objects(self.xr.spec.gateway):
             if key == "gateway" and not serve_gateway:
@@ -583,10 +347,10 @@ class Composer:
                 continue
             resource.update(
                 self.rsp.desired.resources[key],
-                _k8s_object(
+                render.k8s_object(
                     pc,
                     manifest,
-                    metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: key}),
+                    labels={render.LABEL_RESOURCE: key},
                     ready_when=cel,
                 ),
             )
@@ -624,7 +388,7 @@ class Composer:
                 {
                     "apiVersion": "cert-manager.io/v1",
                     "kind": "Certificate",
-                    "metadata": {"name": _CA_ISSUER, "namespace": "modelplane-system"},
+                    "metadata": {"name": _CA_ISSUER, "namespace": _NAMESPACE_SYSTEM},
                     "spec": {
                         "isCA": True,
                         # Truncated to the 64-byte X.509 commonName limit: the
@@ -650,7 +414,7 @@ class Composer:
                 {
                     "apiVersion": "cert-manager.io/v1",
                     "kind": "Issuer",
-                    "metadata": {"name": _CA_ISSUER, "namespace": "modelplane-system"},
+                    "metadata": {"name": _CA_ISSUER, "namespace": _NAMESPACE_SYSTEM},
                     "spec": {"ca": {"secretName": _CA_SECRET}},
                 },
             ),
@@ -675,7 +439,7 @@ class Composer:
             if not (pc_observed or key in self.req.observed.resources):
                 continue
             cel = _CERTIFICATE_READY_CEL if manifest["kind"] == "Certificate" else None
-            resource.update(self.rsp.desired.resources[key], _k8s_object(pc, manifest, ready_when=cel))
+            resource.update(self.rsp.desired.resources[key], render.k8s_object(pc, manifest, ready_when=cel))
             rendered.append(key)
 
         # Republish the CA certificate on its own, so the control plane can read
@@ -693,7 +457,7 @@ class Composer:
         if pc_observed or "gateway-ca-bundle" in self.req.observed.resources:
             resource.update(
                 self.rsp.desired.resources["gateway-ca-bundle"],
-                _k8s_object(
+                render.k8s_object(
                     pc,
                     {
                         "apiVersion": "trust.cert-manager.io/v1alpha1",
@@ -722,7 +486,7 @@ class Composer:
         if pc_observed or "gateway-ca-configmap" in self.req.observed.resources:
             resource.update(
                 self.rsp.desired.resources["gateway-ca-configmap"],
-                _k8s_object(
+                render.k8s_object(
                     pc,
                     {
                         "apiVersion": "v1",
@@ -745,7 +509,7 @@ class Composer:
         # is what a PEM trust bundle is.
         resource.update(
             self.rsp.desired.resources["gateway-client-ca-bundle"],
-            _k8s_object(
+            render.k8s_object(
                 pc,
                 {
                     "apiVersion": "v1",
@@ -762,7 +526,7 @@ class Composer:
         rendered.append("gateway-client-ca-bundle")
         resource.update(
             self.rsp.desired.resources["gateway-client-auth"],
-            _k8s_object(
+            render.k8s_object(
                 pc,
                 {
                     "apiVersion": "gateway.envoyproxy.io/v1alpha1",
@@ -850,7 +614,7 @@ class Composer:
                 api_version="v1",
                 kind="Secret",
                 match_name=sink.secretRef.name,
-                namespace=_CLUSTER_RESOURCE_NAMESPACE,
+                namespace=_NAMESPACE_SYSTEM,
             )
             if key not in self.req.required_resources:
                 return
@@ -867,6 +631,7 @@ class Composer:
         mappings = list(stacks.BUILTIN_MAPPINGS)
         mappings += self._parse("MetricMapping", mmv1alpha1.MetricMapping, "mappings")
 
+        telemetry = self.xr.spec.telemetry
         pc_observed = self.provider_configs_observed()
         pc = _pc_name(self.xr)
         for key, manifest, cel in collector.objects(
@@ -874,15 +639,16 @@ class Composer:
             mappings=mappings,
             sinks=sinks,
             extensions=extensions,
+            ignored_namespaces=[n.root for n in telemetry.ignoredNamespaces or []] if telemetry else [],
         ):
             if not (pc_observed or key in self.req.observed.resources):
                 continue
             resource.update(
                 self.rsp.desired.resources[key],
-                _k8s_object(
+                render.k8s_object(
                     pc,
                     manifest,
-                    metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: key}),
+                    labels={render.LABEL_RESOURCE: key},
                     ready_when=cel,
                 ),
             )
@@ -897,7 +663,7 @@ class Composer:
             # that isn't text.
             resource.update(
                 self.rsp.desired.resources[key],
-                _k8s_object(
+                render.k8s_object(
                     pc,
                     {
                         "apiVersion": "v1",
@@ -905,7 +671,7 @@ class Composer:
                         "metadata": {"name": secret_name, "namespace": collector.NAMESPACE},
                         "data": data,
                     },
-                    metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: key}),
+                    labels={render.LABEL_RESOURCE: key},
                 ),
             )
             self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
@@ -992,17 +758,17 @@ class Composer:
         Gateway until the cluster has an InferenceGateway CA to trust.
         """
         usages = [
-            ("usage-envoy-gateway-by-gateway-class", _RELEASE_REF, "envoy-gateway", _OBJECT_REF, "gateway-class"),
+            ("usage-envoy-gateway-by-gateway-class", render.RELEASE, "envoy-gateway", render.OBJECT, "gateway-class"),
         ]
         if self.serves_gateway():
             usages.insert(
                 0,
-                ("usage-gateway-class-by-gateway", _OBJECT_REF, "gateway-class", _OBJECT_REF, "gateway"),
+                ("usage-gateway-class-by-gateway", render.OBJECT, "gateway-class", render.OBJECT, "gateway"),
             )
         for key, of_ref, of_key, by_ref, by_key in usages:
             resource.update(
                 self.rsp.desired.resources[key],
-                _usage(of_ref, of_key, by_ref, by_key),
+                render.usage(of_ref, of_key, by_ref, by_key),
             )
             self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
 
@@ -1068,9 +834,7 @@ class Composer:
             if r in self.rsp.desired.resources and r in self.req.observed.resources:
                 self.rsp.desired.resources[r].ready = fnv1.READY_TRUE
 
-        for r in rendered:
-            if resource.get_condition(self.req.observed.resources.get(r), "Ready").status == "True":
-                self.rsp.desired.resources[r].ready = fnv1.READY_TRUE
+        render.mark_ready(self.req, self.rsp, rendered)
 
     def provider_configs_observed(self) -> bool:
         """Check if both ProviderConfigs have been persisted by Crossplane from

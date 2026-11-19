@@ -1,0 +1,257 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: provisionedclusters.infrastructure.modelplane.ai
+spec:
+  group: infrastructure.modelplane.ai
+  names:
+    categories:
+    - crossplane
+    - modelplane
+    - infrastructure
+    kind: ProvisionedCluster
+    plural: provisionedclusters
+  # Cluster scoped, so a provider's Composition can compose the cluster-scoped
+  # resources a cluster needs: the activation policy for its managed resource
+  # kinds, and the ClusterUsages that keep its cluster config, node classes and
+  # reservations from being deleted while this cluster uses them.
+  scope: Cluster
+  # No defaultCompositionRef. Each provider ships a Composition for this XRD,
+  # and compose-inference-cluster selects one by the cluster config's kind.
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: CONFIG
+      type: string
+      jsonPath: .spec.configRef.kind
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A ProvisionedCluster is the contract between Modelplane and a cluster
+          provider. compose-inference-cluster composes one for each
+          InferenceCluster whose source is Provisioned, and a provider's
+          Composition provisions the Kubernetes cluster and node pools it
+          describes, installs the device stacks for the DRA drivers its pools
+          claim, and reports back how to reach the cluster. A provider
+          declares the optional parts of this contract it implements on its
+          Composition; see design/cluster-providers.md.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [configRef, nodePools]
+            properties:
+              configRef:
+                type: object
+                description: >-
+                  The provider's cluster config, projected from the
+                  InferenceCluster's spec.cluster.provisioned.configRef. Its
+                  kind selects the provider.
+                required: [apiVersion, kind, name]
+                properties:
+                  apiVersion:
+                    type: string
+                    minLength: 1
+                    maxLength: 253
+                  kind:
+                    type: string
+                    minLength: 1
+                    maxLength: 63
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 253
+              draDrivers:
+                type: array
+                description: >-
+                  The DRA drivers the node pools' InferenceClasses claim. The
+                  provider installs the device stack for each, except the
+                  drivers the serving stack installs on every cluster, such as
+                  dra.cpu. Every other driver here is one the provider declares
+                  on its Composition.
+                maxItems: 16
+                x-kubernetes-list-type: set
+                items:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+              nodePools:
+                type: array
+                description: >-
+                  The node pools to provision, besides the system pool every
+                  provider adds for Modelplane's own components.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [name]
+                items:
+                  type: object
+                  required: [name, nodeClassRef, role, nodeCount]
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        Name of the pool. The provider labels the pool's nodes
+                        modelplane.ai/pool with it.
+                      maxLength: 40
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                    nodeClassRef:
+                      type: object
+                      description: >-
+                        The provider's node class, from the pool's
+                        InferenceClass spec.nodeClassRef.
+                      required: [apiVersion, kind, name]
+                      properties:
+                        apiVersion:
+                          type: string
+                          minLength: 1
+                          maxLength: 253
+                        kind:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                        name:
+                          type: string
+                          minLength: 1
+                          maxLength: 253
+                    role:
+                      type: string
+                      description: >-
+                        What the pool runs. Accelerator pools run engines on
+                        devices a DRA driver other than dra.cpu publishes. CPU
+                        pools run engines on CPU cores, which the serving
+                        stack's dra-driver-cpu publishes; the provider labels
+                        and taints their nodes modelplane.ai/cpu=true.
+                        compose-inference-cluster derives it from the DRA
+                        drivers the pool's InferenceClass claims.
+                      enum: [Accelerator, CPU]
+                    nodeCount:
+                      type: integer
+                      minimum: 0
+                      maximum: 1000
+                    minNodeCount:
+                      type: integer
+                      minimum: 0
+                      maximum: 1000
+                    maxNodeCount:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                    zones:
+                      type: array
+                      description: >-
+                        Zones to restrict the pool to. Requires the Zones
+                        capability.
+                      maxItems: 16
+                      x-kubernetes-list-type: set
+                      items:
+                        type: string
+                        minLength: 1
+                        maxLength: 63
+                    reservationRef:
+                      type: object
+                      description: >-
+                        The provider's capacity reservation backing the pool.
+                        Requires the CapacityReservations capability.
+                      required: [apiVersion, kind, name]
+                      properties:
+                        apiVersion:
+                          type: string
+                          minLength: 1
+                          maxLength: 253
+                        kind:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                        name:
+                          type: string
+                          minLength: 1
+                          maxLength: 253
+          status:
+            type: object
+            properties:
+              secrets:
+                type: array
+                description: >-
+                  Secrets Modelplane uses to reach the cluster. The provider
+                  publishes them once the cluster is reachable, and
+                  compose-inference-cluster waits for a Kubeconfig entry.
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [type]
+                items:
+                  type: object
+                  required: [type, name, namespace, key]
+                  properties:
+                    type:
+                      type: string
+                      description: >-
+                        Kubeconfig for the cluster's kubeconfig, which is
+                        required. Any other value is a provider-kubernetes and
+                        provider-helm identity type, such as
+                        GoogleApplicationCredentials, which Modelplane
+                        authenticates to the cluster as on top of the
+                        kubeconfig.
+                      minLength: 1
+                      maxLength: 63
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                    key:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+              cache:
+                type: object
+                description: ModelCache storage on the cluster.
+                properties:
+                  storageClassName:
+                    type: string
+                    description: >-
+                      A ReadWriteMany StorageClass for ModelCache volumes.
+                      Absent when the provider offers none.
+                    maxLength: 253
+              gateway:
+                type: object
+                description: What the cluster's gateways need from the provider.
+                properties:
+                  service:
+                    type: object
+                    description: >-
+                      Settings for every gateway's LoadBalancer Service, a
+                      subset of Envoy Gateway's KubernetesServiceSpec.
+                    properties:
+                      annotations:
+                        type: object
+                        description: >-
+                          Annotations the cloud's load balancer controller
+                          reads, such as one asking for a public address.
+                        maxProperties: 16
+                        additionalProperties:
+                          type: string
+                          maxLength: 1024
+              telemetry:
+                type: object
+                description: What the cluster's telemetry collector needs from the provider.
+                properties:
+                  ignoredNamespaces:
+                    type: array
+                    description: >-
+                      Namespaces the collector doesn't scrape. A provider lists
+                      one whose GPU exporter duplicates the one its device
+                      stack installs, so the collector doesn't collect every
+                      GPU series twice.
+                    maxItems: 8
+                    x-kubernetes-list-type: set
+                    items:
+                      type: string
+                      minLength: 1
+                      maxLength: 63

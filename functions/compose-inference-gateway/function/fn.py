@@ -986,8 +986,8 @@ class Composer:
         )
         # The same address again, as the Endpoints this supersedes. kube-dns
         # reads only that API and was never taught the EndpointSlice one, so on
-        # a cluster running it - which is every GKE cluster, where it is still
-        # the default - the name answers NXDOMAIN with the slice alone. Envoy
+        # a cluster running it - some managed clusters still do by default -
+        # the name answers NXDOMAIN with the slice alone. Envoy
         # then resolves no address for the backend and every cross-cluster
         # request is refused with no healthy upstream.
         #

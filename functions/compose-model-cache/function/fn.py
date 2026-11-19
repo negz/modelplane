@@ -109,7 +109,7 @@ _JOB_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update", "Late
 def _storage_class(cluster: icv1alpha1.InferenceCluster) -> str | None:
     """RWX storage class for the cache PVC, from the cluster's
     status.cache.storageClassName. The InferenceCluster reports the
-    Modelplane-managed class for provisioned (GKE/EKS) clusters and the
+    class its provider reports for a provisioned cluster and the
     user-supplied class for Existing clusters. None until the cluster reports
     it - the cache gates on it, so a PVC never references an undecided class."""
     if cluster.status and cluster.status.cache and cluster.status.cache.storageClassName:

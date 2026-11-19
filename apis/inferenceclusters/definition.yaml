@@ -18,6 +18,9 @@ spec:
     - name: SOURCE
       type: string
       jsonPath: .spec.cluster.source
+    - name: CONFIG
+      type: string
+      jsonPath: .spec.cluster.provisioned.configRef.kind
     - name: GATEWAY
       type: string
       jsonPath: .status.gateway.address
@@ -30,10 +33,10 @@ spec:
             type: object
             required: [cluster]
             x-kubernetes-validations:
-            - rule: "self.cluster.source != 'Nebius' || !has(self.nodePools) || self.nodePools.all(p, !has(p.fabric) || p.fabric.type != 'InfiniBand' || has(p.fabric.infiniband))"
-              message: fabric.infiniband is required when fabric.type is InfiniBand and cluster.source is Nebius.
-            - rule: "self.cluster.source in ['GKE', 'EKS'] || !has(self.nodePools) || self.nodePools.all(p, !has(p.reservationRef))"
-              message: nodePools[].reservationRef is only supported when cluster.source is GKE or EKS.
+            - rule: "self.cluster.source == 'Provisioned' || !has(self.nodePools) || self.nodePools.all(p, !has(p.reservationRef))"
+              message: nodePools[].reservationRef is only supported when cluster.source is Provisioned.
+            - rule: "self.cluster.source != 'Provisioned' || has(self.nodePools)"
+              message: spec.nodePools is required when cluster.source is Provisioned.
             properties:
               cluster:
                 type: object
@@ -41,26 +44,21 @@ spec:
                 x-kubernetes-validations:
                 - rule: "self.source != 'Existing' || has(self.existing)"
                   message: spec.cluster.existing is required when spec.cluster.source is Existing.
-                - rule: "self.source != 'GKE' || has(self.gke)"
-                  message: spec.cluster.gke is required when spec.cluster.source is GKE.
-                - rule: "self.source != 'EKS' || has(self.eks)"
-                  message: spec.cluster.eks is required when spec.cluster.source is EKS.
-                - rule: "self.source != 'AKS' || has(self.aks)"
-                  message: spec.cluster.aks is required when spec.cluster.source is AKS.
-                - rule: "self.source != 'Nebius' || has(self.nebius)"
-                  message: spec.cluster.nebius is required when spec.cluster.source is Nebius.
-                - rule: "self.source != 'Vultr' || has(self.vultr)"
-                  message: spec.cluster.vultr is required when spec.cluster.source is Vultr.
-                - rule: "self.source != 'Civo' || has(self.civo)"
-                  message: spec.cluster.civo is required when spec.cluster.source is Civo.
-                - rule: "self.source != 'CoreWeave' || has(self.coreweave)"
-                  message: spec.cluster.coreweave is required when spec.cluster.source is CoreWeave.
+                - rule: "self.source != 'Provisioned' || has(self.provisioned)"
+                  message: spec.cluster.provisioned is required when spec.cluster.source is Provisioned.
                 properties:
                   source:
                     type: string
                     description: >-
-                      Cluster provisioning method.
-                    enum: [GKE, EKS, AKS, Nebius, Vultr, Civo, CoreWeave, Existing]
+                      How Modelplane gets the cluster. Existing registers a
+                      cluster you already run. Provisioned has a cluster
+                      provider create it, from the cluster config
+                      provisioned.configRef names. Immutable: changing it
+                      would delete a provisioned cluster.
+                    enum: [Existing, Provisioned]
+                    x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: spec.cluster.source is immutable; create a new InferenceCluster instead.
                   existing:
                     type: object
                     description: >-
@@ -132,289 +130,42 @@ spec:
                               ReadWriteMany dynamic provisioning).
                             minLength: 1
                             maxLength: 253
-                  gke:
+                  provisioned:
                     type: object
                     description: >-
-                      GKE cluster configuration. Required when source is GKE.
-                    required: [region]
+                      How to provision the cluster. Required when source is
+                      Provisioned.
+                    required: [configRef]
                     properties:
-                      region:
-                        type: string
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        default: "1.35"
-                        description: >-
-                          GKE cluster Kubernetes version. Defaults to a
-                          version where Dynamic Resource Allocation (how GPUs
-                          bind to pods) is generally available. A CPU pool
-                          needs 1.36 or newer: its cores are claimed as
-                          consumable capacity, which Kubernetes enables by
-                          default from 1.36 (DRAConsumableCapacity).
-                      credentials:
+                      configRef:
                         type: object
                         description: >-
-                          GCP ProviderConfig or ClusterProviderConfig used to
-                          authenticate to the GCP API. Defaults to the
-                          ClusterProviderConfig named default.
+                          The cluster config to provision the cluster from,
+                          such as a GKEClusterConfig. Its kind selects the
+                          cluster provider, which must be installed. A config
+                          holds what a provider needs beyond the node pools,
+                          like the region and credentials, and several
+                          clusters can share one. The kind can't change; to
+                          move a cluster to another provider, create a new
+                          InferenceCluster.
+                        required: [apiVersion, kind, name]
+                        x-kubernetes-validations:
+                        - rule: "self.kind == oldSelf.kind && self.apiVersion.split('/')[0] == oldSelf.apiVersion.split('/')[0]"
+                          message: The kind and API group of spec.cluster.provisioned.configRef are immutable.
                         properties:
-                          type:
+                          apiVersion:
                             type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
+                            description: >-
+                              The kind's API group and version, such as
+                              example.modelplane.ai/v1alpha1.
+                            pattern: '^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?/v[a-z0-9]+$'
+                            maxLength: 80
+                          kind:
                             type: string
-                            default: default
                             minLength: 1
-                            maxLength: 253
-                  eks:
-                    type: object
-                    description: >-
-                      EKS cluster configuration. Required when source is EKS.
-                    required: [region]
-                    properties:
-                      region:
-                        type: string
-                        description: >-
-                          AWS region for the cluster (e.g. us-west-2).
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        default: "1.36"
-                        description: >-
-                          EKS cluster Kubernetes version. Defaults to a
-                          version where Dynamic Resource Allocation (how GPUs
-                          bind to pods) is generally available.
-                      credentials:
-                        type: object
-                        description: >-
-                          AWS ProviderConfig or ClusterProviderConfig used to
-                          authenticate to the AWS API. Defaults to the
-                          ClusterProviderConfig named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
+                            maxLength: 63
                           name:
                             type: string
-                            default: default
-                            minLength: 1
-                            maxLength: 253
-                  aks:
-                    type: object
-                    description: >-
-                      AKS cluster configuration. Required when source is AKS.
-                    required: [location]
-                    properties:
-                      location:
-                        type: string
-                        description: >-
-                          Azure region for the cluster (e.g. westeurope,
-                          eastus2).
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        default: "1.34"
-                        description: >-
-                          AKS cluster Kubernetes version. Defaults to a
-                          version where Dynamic Resource Allocation (how GPUs
-                          bind to pods) is generally available. A CPU pool
-                          needs 1.36 or newer: its cores are claimed as
-                          consumable capacity, which Kubernetes enables by
-                          default from 1.36 (DRAConsumableCapacity).
-                      credentials:
-                        type: object
-                        description: >-
-                          Azure ProviderConfig or ClusterProviderConfig used to
-                          authenticate to the Azure API. Defaults to the
-                          ClusterProviderConfig named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
-                            type: string
-                            default: default
-                            minLength: 1
-                            maxLength: 253
-                  nebius:
-                    type: object
-                    description: >-
-                      Nebius mk8s cluster configuration. Required when source
-                      is Nebius; may be empty, since every field has a
-                      default. The cluster is created in the project the
-                      referenced ProviderConfig or ClusterProviderConfig sets
-                      as its projectID; Nebius projects are bound to a region,
-                      so the project also determines where the cluster runs.
-                    properties:
-                      kubernetesVersion:
-                        type: string
-                        default: "1.34"
-                        description: >-
-                          mk8s cluster Kubernetes version. Defaults to a
-                          version where Dynamic Resource Allocation (DRA)
-                          is generally available. A CPU pool needs 1.36 or
-                          newer: its cores are claimed as consumable
-                          capacity, which Kubernetes enables by default from
-                          1.36 (DRAConsumableCapacity).
-                      credentials:
-                        type: object
-                        description: >-
-                          Nebius ProviderConfig or ClusterProviderConfig used
-                          to authenticate to the Nebius API. Defaults to the
-                          ClusterProviderConfig named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
-                            type: string
-                            default: default
-                            minLength: 1
-                            maxLength: 253
-                  vultr:
-                    type: object
-                    description: >-
-                      Vultr Kubernetes Engine (VKE) cluster configuration.
-                      Required when source is Vultr.
-                    required: [region, kubernetesVersion]
-                    properties:
-                      region:
-                        type: string
-                        description: >-
-                          Vultr region for the cluster (e.g. ewr, fra). GPU
-                          plans and Vultr File System availability vary by
-                          region.
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        description: >-
-                          VKE cluster Kubernetes version. VKE requires an
-                          exact version string including the build suffix
-                          and accepts only the versions it currently
-                          offers; list them with vultr-cli kubernetes
-                          versions. Use a version where Dynamic Resource
-                          Allocation (how GPUs bind to pods) is generally
-                          available.
-                      credentials:
-                        type: object
-                        description: >-
-                          Vultr ProviderConfig or ClusterProviderConfig used to
-                          authenticate to the Vultr API. Defaults to the
-                          ClusterProviderConfig named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
-                            type: string
-                            default: default
-                            minLength: 1
-                            maxLength: 253
-                  civo:
-                    type: object
-                    description: >-
-                      Civo Kubernetes (k3s) cluster configuration. Required
-                      when source is Civo.
-                    required: [region]
-                    properties:
-                      region:
-                        type: string
-                        description: >-
-                          Civo region for the cluster (e.g. LON1, NYC1,
-                          FRA1). GPU sizes vary by region.
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        description: >-
-                          Civo Kubernetes (k3s) version. Civo requires an
-                          exact version string including the k3s build
-                          suffix; list current versions with civo kubernetes
-                          versions. Choose 1.34 or newer so Dynamic Resource
-                          Allocation (how devices bind to pods) is generally
-                          available, and 1.36 or newer for a CPU pool: its
-                          cores are claimed as consumable capacity, which
-                          Kubernetes enables by default from 1.36
-                          (DRAConsumableCapacity). Defaults to Civo's current
-                          default version, which may be older than a CPU
-                          pool needs.
-                        minLength: 1
-                        maxLength: 32
-                      credentials:
-                        type: object
-                        description: >-
-                          Civo ProviderConfig or ClusterProviderConfig used to
-                          authenticate to the Civo API. Defaults to the
-                          ClusterProviderConfig named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
-                            type: string
-                            default: default
-                            minLength: 1
-                            maxLength: 253
-                  coreweave:
-                    type: object
-                    description: >-
-                      CoreWeave Kubernetes Service (CKS) cluster
-                      configuration. Required when source is CoreWeave.
-                    required: [zone]
-                    properties:
-                      zone:
-                        type: string
-                        description: >-
-                          CoreWeave Availability Zone for the cluster (e.g.
-                          US-EAST-04A). Instance types vary by zone.
-                        minLength: 1
-                        maxLength: 32
-                      kubernetesVersion:
-                        type: string
-                        description: >-
-                          CKS Kubernetes minor version, in the form X.Y.
-                          CKS applies patch versions itself.
-                        pattern: '^[0-9]+\.[0-9]+$'
-                      credentials:
-                        type: object
-                        description: >-
-                          CoreWeave ProviderConfig or ClusterProviderConfig
-                          used to authenticate to the CoreWeave API. Its API
-                          access token also authenticates Modelplane to the
-                          cluster. Defaults to the ClusterProviderConfig
-                          named default.
-                        properties:
-                          type:
-                            type: string
-                            default: ClusterProviderConfig
-                            enum:
-                            - ProviderConfig
-                            - ClusterProviderConfig
-                          name:
-                            type: string
-                            default: default
                             minLength: 1
                             maxLength: 253
               stack:
@@ -493,9 +244,9 @@ spec:
                 description: >-
                   Inference node pools available on this cluster. Each pool
                   references an InferenceClass that describes the
-                  hardware shape and (for provisioned clusters) how to
-                  create the pool. System pools for control-plane
-                  components are provisioned automatically.
+                  hardware shape and, for a provisioned cluster, the node
+                  class to create the pool from. A provisioned cluster also
+                  gets a system pool for Modelplane's own components.
                 minItems: 1
                 maxItems: 8
                 x-kubernetes-list-type: map
@@ -504,7 +255,7 @@ spec:
                   type: object
                   required: [name, className]
                   x-kubernetes-validations:
-                  - rule: "has(self.reservationRef) == has(oldSelf.reservationRef) && (!has(self.reservationRef) || self.reservationRef.name == oldSelf.reservationRef.name)"
+                  - rule: "has(self.reservationRef) == has(oldSelf.reservationRef) && (!has(self.reservationRef) || self.reservationRef == oldSelf.reservationRef)"
                     message: A node pool's reservationRef is immutable. Add a new pool instead.
                   properties:
                     name:
@@ -526,103 +277,59 @@ spec:
                       type: integer
                       default: 1
                       minimum: 0
+                      maximum: 1000
                     minNodeCount:
                       type: integer
                       minimum: 0
+                      maximum: 1000
                     maxNodeCount:
                       type: integer
                       description: >-
                         Maximum node count for autoscaling. Omit for
                         fixed-size pools.
                       minimum: 1
+                      maximum: 1000
                     zones:
                       type: array
                       description: >-
-                        Zones to restrict this node pool to. Required for
-                        provisioned pools because not all zones in a
-                        region have every GPU type.
+                        Zones to restrict this node pool to, because not
+                        every zone in a region has every GPU type. Only on a
+                        provisioned cluster whose provider supports zones.
+                      maxItems: 16
+                      x-kubernetes-list-type: set
                       items:
                         type: string
+                        minLength: 1
+                        maxLength: 63
                     reservationRef:
                       type: object
                       description: >-
-                        CapacityReservation backing this node pool. GKE and
-                        EKS only. The pool only uses the referenced
-                        reservation, and never falls back to on-demand
-                        capacity, so nodeCount must not exceed the reserved
-                        instance count. The reservation's provider must match
-                        the cluster's source. On GKE the pool's zones must be
-                        exactly the reservation's zone; on EKS they must be
-                        the reservation's Availability Zone. Immutable,
-                        because neither cloud can move an existing node pool
-                        onto or off a reservation. Omit for on-demand pools.
-                      required: [name]
+                        The capacity reservation backing this node pool, such
+                        as a GKECapacityReservation. The pool only uses the
+                        referenced reservation, and never falls back to
+                        on-demand capacity, so nodeCount must not exceed the
+                        reserved instance count. The reservation must be one
+                        the cluster's provider owns, and the provider must
+                        support reservations. Immutable, because a cloud can't
+                        move an existing node pool onto or off a reservation.
+                        Omit for on-demand pools.
+                      required: [apiVersion, kind, name]
                       properties:
+                        apiVersion:
+                          type: string
+                          description: >-
+                            The kind's API group and version, such as
+                            example.modelplane.ai/v1alpha1.
+                          pattern: '^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?/v[a-z0-9]+$'
+                          maxLength: 80
+                        kind:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
                         name:
                           type: string
-                          description: Name of the CapacityReservation.
                           minLength: 1
                           maxLength: 253
-                    fabric:
-                      type: object
-                      description: >-
-                        High-performance node-to-node fabric for multi-node
-                        engines, so a gang's tensor-parallel traffic isn't
-                        capped by TCP. Omit for standard VPC networking.
-                        Ignored on CoreWeave, where a CKS instance type
-                        either includes InfiniBand or doesn't.
-                      x-kubernetes-validations:
-                      - rule: "!has(self.infiniband) || self.type == 'InfiniBand'"
-                        message: fabric.infiniband is only valid when fabric.type is InfiniBand.
-                      properties:
-                        type:
-                          type: string
-                          default: None
-                          description: >-
-                            Fabric technology. None uses standard VPC
-                            networking (TCP). EFA attaches Elastic Fabric
-                            Adapter interfaces to each node for GPUDirect
-                            RDMA across nodes; EKS only, and only useful on
-                            EFA-capable instance types (e.g. p5en.48xlarge).
-                            When any pool sets EFA, Modelplane installs the
-                            EFA DRA driver on the cluster and the gang's pods
-                            claim EFA devices alongside their GPUs.
-                            InfiniBand places the pool's nodes on a physical
-                            InfiniBand fabric for GPUDirect RDMA across
-                            nodes; Nebius and AKS only, and only useful on
-                            InfiniBand-capable shapes (e.g. gpu-h100-sxm on
-                            Nebius, Standard_ND96isr_H100_v5 on AKS). On
-                            Nebius the pool joins the fabric named in
-                            infiniband.fabric; on AKS the pool's VM Scale Set
-                            placement group lands its nodes on one fabric,
-                            and Modelplane installs the NVIDIA network
-                            operator on the cluster.
-                          enum:
-                          - None
-                          - EFA
-                          - InfiniBand
-                        infiniband:
-                          type: object
-                          description: >-
-                            InfiniBand fabric configuration. Required when
-                            type is InfiniBand and the cluster source is
-                            Nebius; not used on AKS.
-                          required:
-                          - fabric
-                          properties:
-                            fabric:
-                              type: string
-                              description: >-
-                                Identifier of the physical InfiniBand fabric
-                                to join (e.g. fabric-2). This selects existing
-                                Nebius infrastructure, not a name for a new
-                                resource: fabrics are per-region - see
-                                https://docs.nebius.com/compute/clusters/gpu#fabrics
-                                - and multi-node GPU capacity is allocated on
-                                specific fabrics, so use the fabric your
-                                capacity lives on.
-                              minLength: 1
-                              maxLength: 63
           status:
             type: object
             properties:

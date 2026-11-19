@@ -39,8 +39,8 @@ class Case:
 
 # compose-usages works on any composite and reads only the observed one's
 # namespace, so both composites are bare. A ServingStack built from its model
-# would need spec.cloud, spec.gateway and spec.secrets, none of which the
-# function reads.
+# would need spec.gateway and spec.secrets, neither of which the function
+# reads.
 def _serving_stack(*, namespace: str | None) -> fnv1.Resource:
     """The bare observed ServingStack composite, in namespace unless it's None."""
     metadata = {"name": "test"}

@@ -8,12 +8,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "compose-aks-cluster",
-    "compose-capacity-reservation",
-    "compose-civo-cluster",
-    "compose-coreweave-cluster",
-    "compose-eks-cluster",
-    "compose-gke-cluster",
     "compose-inference-class",
     "compose-inference-cluster",
     "compose-inference-gateway",
@@ -24,13 +18,12 @@ members = [
     "compose-model-replica",
     "compose-model-route",
     "compose-model-service",
-    "compose-nebius-cluster",
     "compose-serving-stack",
     "compose-telemetry-destination",
     "compose-usages",
-    "compose-vultr-cluster",
     "crossplane-models",
     "modelplane",
+    "modelplane-sdk",
 ]
 
 [[package]]
@@ -276,120 +269,6 @@ wheels = [
 ]
 
 [[package]]
-name = "compose-aks-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-aks-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-capacity-reservation"
-version = "0.0.0"
-source = { editable = "functions/compose-capacity-reservation" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-civo-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-civo-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-coreweave-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-coreweave-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-eks-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-eks-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-gke-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-gke-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
 name = "compose-inference-class"
 version = "0.0.0"
 source = { editable = "functions/compose-inference-class" }
@@ -417,6 +296,7 @@ dependencies = [
     { name = "crossplane-function-sdk-python" },
     { name = "crossplane-models" },
     { name = "grpcio" },
+    { name = "modelplane-sdk" },
 ]
 
 [package.metadata]
@@ -425,6 +305,7 @@ requires-dist = [
     { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
     { name = "crossplane-models", editable = "schemas/python" },
     { name = "grpcio", specifier = ">=1.73.1" },
+    { name = "modelplane-sdk", editable = "sdk/python" },
 ]
 
 [[package]]
@@ -582,25 +463,6 @@ requires-dist = [
 ]
 
 [[package]]
-name = "compose-nebius-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-nebius-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
 name = "compose-serving-stack"
 version = "0.0.0"
 source = { editable = "functions/compose-serving-stack" }
@@ -609,6 +471,7 @@ dependencies = [
     { name = "crossplane-function-sdk-python" },
     { name = "crossplane-models" },
     { name = "grpcio" },
+    { name = "modelplane-sdk" },
     { name = "pyyaml" },
 ]
 
@@ -618,6 +481,7 @@ requires-dist = [
     { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
     { name = "crossplane-models", editable = "schemas/python" },
     { name = "grpcio", specifier = ">=1.73.1" },
+    { name = "modelplane-sdk", editable = "sdk/python" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -649,6 +513,7 @@ dependencies = [
     { name = "crossplane-function-sdk-python" },
     { name = "crossplane-models" },
     { name = "grpcio" },
+    { name = "modelplane-sdk" },
 ]
 
 [package.metadata]
@@ -657,25 +522,7 @@ requires-dist = [
     { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
     { name = "crossplane-models", editable = "schemas/python" },
     { name = "grpcio", specifier = ">=1.73.1" },
-]
-
-[[package]]
-name = "compose-vultr-cluster"
-version = "0.0.0"
-source = { editable = "functions/compose-vultr-cluster" }
-dependencies = [
-    { name = "click" },
-    { name = "crossplane-function-sdk-python" },
-    { name = "crossplane-models" },
-    { name = "grpcio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
-    { name = "crossplane-models", editable = "schemas/python" },
-    { name = "grpcio", specifier = ">=1.73.1" },
+    { name = "modelplane-sdk", editable = "sdk/python" },
 ]
 
 [[package]]
@@ -958,6 +805,21 @@ dev = [
     { name = "pytest", specifier = ">=9.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "types-protobuf", specifier = ">=4.24" },
+]
+
+[[package]]
+name = "modelplane-sdk"
+version = "0.0.0"
+source = { editable = "sdk/python" }
+dependencies = [
+    { name = "crossplane-function-sdk-python" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crossplane-function-sdk-python", specifier = ">=0.14.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

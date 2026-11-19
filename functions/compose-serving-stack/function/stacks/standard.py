@@ -20,7 +20,7 @@ the generated halves on the clouds a generator covers once upstream
 carries an lws component (NVIDIA/aicr#2500 tracks the aicr one).
 """
 
-from function.stacks.components import Chart, Component
+from modelplane_sdk.stacks import Chart, Component
 
 COMPONENTS: list[Component] = [
     Chart(

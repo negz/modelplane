@@ -48,7 +48,7 @@ REASON_WAITING_FOR_PODS = "WaitingForPods"
 _AGENT_CONDITION_SCHEDULED = "Scheduled"
 
 # provider-kubernetes stops receiving watch events once the token in a
-# cluster's kubeconfig expires, which on EKS is after 15 minutes. A watched
+# cluster's kubeconfig expires, which on some clouds is after 15 minutes. A watched
 # ReplicaObservation then only reaches the replica when it's polled, every 10
 # minutes by default, so it's polled more often.
 # TODO(negz): Remove once provider-kubernetes fixes this.

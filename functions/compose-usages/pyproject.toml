@@ -13,10 +13,12 @@ dependencies = [
   "click>=8.1.0",
   "grpcio>=1.73.1",
   "crossplane-models",
+  "modelplane-sdk",
 ]
 
 [tool.uv.sources]
 crossplane-models = { workspace = true }
+modelplane-sdk = { workspace = true }
 
 [project.scripts]
 function = "function.main:cli"

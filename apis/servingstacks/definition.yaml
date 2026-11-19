@@ -33,7 +33,7 @@ spec:
           spec:
             description: ServingStackSpec defines the desired state of ServingStack.
             required:
-            - cloud
+            - deviceStacks
             - secrets
             - gateway
             # A ServingStack is machine-generated, but the API server still
@@ -46,24 +46,18 @@ spec:
             - rule: "self.secrets.exists(s, s.type == 'Kubeconfig')"
               message: spec.secrets must include a Kubeconfig entry.
             properties:
-              cloud:
+              deviceStacks:
                 type: string
                 description: >-
-                  The cloud the target cluster runs on. Selects the fixed set
-                  of components and versions this stack installs there, which
-                  is resolved per cloud at build time and changes only with a
-                  Modelplane release. Mirrors
-                  InferenceCluster.spec.cluster.source; the cluster
-                  composition sets it.
+                  Who installs the device stacks for the DRA drivers in
+                  draDrivers. Managed, for an Existing cluster, installs them
+                  here. External, for a provisioned cluster, leaves them to
+                  the cluster's provider, so this stack installs only the
+                  device stacks Modelplane runs on every cluster, such as
+                  dra-driver-cpu. The cluster composition sets it.
                 enum:
-                - GKE
-                - EKS
-                - AKS
-                - Nebius
-                - Vultr
-                - Civo
-                - CoreWeave
-                - Existing
+                - Managed
+                - External
               draDrivers:
                 type: array
                 description: >-
@@ -83,8 +77,9 @@ spec:
               secrets:
                 type: array
                 description: >-
-                  Secrets used to authenticate to the target cluster. Typically
-                  sourced from a GKECluster's status.secrets. Secrets are in
+                  Secrets used to authenticate to the target cluster, from the
+                  InferenceCluster's existing cluster or its
+                  ProvisionedCluster's status.secrets. Secrets are in
                   the same namespace as this ServingStack unless an entry says
                   otherwise. A Kubeconfig secret is required. If a cloud
                   identity secret is present, the serving stack authenticates
@@ -103,15 +98,13 @@ spec:
                       type: string
                       description: >-
                         The type of credential this secret contains. Kubeconfig
-                        is required. Any other value is a cloud identity type;
-                        when present, the serving stack authenticates to the
-                        cluster as that identity instead of using the
-                        kubeconfig's embedded credentials.
-                      enum:
-                      - Kubeconfig
-                      - GoogleApplicationCredentials
-                      - AWSWebIdentityCredentials
-                      - NebiusServiceAccountCredentials
+                        is required. Any other value is a provider-kubernetes
+                        and provider-helm identity type; when present, the
+                        serving stack authenticates to the cluster as that
+                        identity instead of using the kubeconfig's embedded
+                        credentials.
+                      minLength: 1
+                      maxLength: 63
                     name:
                       type: string
                       description: Name of the Secret.
@@ -141,44 +134,6 @@ spec:
                 enum:
                 - Standard
                 - Dynamo
-              gpu:
-                type: object
-                description: >-
-                  GPU driver configuration for the stack's GPU Operator
-                  install, projected from the InferenceCluster's node pools
-                  by the cluster composition.
-                properties:
-                  pools:
-                    type: array
-                    description: >-
-                      GPU node pools that need a driver configuration of
-                      their own, keyed by the pool name the cluster
-                      composition labels the pool's nodes with
-                      (modelplane.ai/pool). Pools absent from this list run
-                      the stack's default driver configuration.
-                    maxItems: 8
-                    x-kubernetes-list-type: map
-                    x-kubernetes-list-map-keys:
-                    - name
-                    items:
-                      type: object
-                      required:
-                      - name
-                      properties:
-                        name:
-                          type: string
-                          description: Name of the node pool.
-                          minLength: 1
-                          maxLength: 40
-                        disableNvLink:
-                          type: boolean
-                          default: false
-                          description: >-
-                            Load this pool's NVIDIA driver with NVLink
-                            disabled (NVreg_NvLinkDisable=1). Set for pools
-                            of single-H100 nodes on Civo: a lone H100 SXM
-                            has NVLink links but no peer, so link bring-up
-                            fails and the driver never becomes ready.
               gateway:
                 type: object
                 description: >-
@@ -193,6 +148,22 @@ spec:
                       GatewayClass named envoy.
                     minLength: 1
                     maxLength: 63
+                  service:
+                    type: object
+                    description: >-
+                      Settings for every gateway's LoadBalancer Service, a
+                      subset of Envoy Gateway's KubernetesServiceSpec,
+                      projected from the ProvisionedCluster's status.
+                    properties:
+                      annotations:
+                        type: object
+                        description: >-
+                          Annotations the cloud's load balancer controller
+                          reads.
+                        maxProperties: 16
+                        additionalProperties:
+                          type: string
+                          maxLength: 1024
                   hostname:
                     type: string
                     description: >-
@@ -230,6 +201,21 @@ spec:
                           description: The CA certificate, PEM encoded.
                           minLength: 1
                           maxLength: 16384
+              telemetry:
+                type: object
+                description: >-
+                  Configuration for the cluster's telemetry collector,
+                  projected from the ProvisionedCluster's status.
+                properties:
+                  ignoredNamespaces:
+                    type: array
+                    description: Namespaces the collector doesn't scrape.
+                    maxItems: 8
+                    x-kubernetes-list-type: set
+                    items:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
             type: object
           status:
             description: ServingStackStatus defines the observed state of ServingStack.

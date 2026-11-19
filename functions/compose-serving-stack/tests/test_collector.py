@@ -43,6 +43,7 @@ class ConfigCase:
     mappings: list[mmv1alpha1.MetricMapping]
     sinks: list[tdv1alpha1.Sink]
     extensions: dict
+    ignored_namespaces: list[str]
     want: dict
 
 
@@ -98,6 +99,7 @@ class ObjectsCase:
     mappings: list[mmv1alpha1.MetricMapping]
     sinks: list[tdv1alpha1.Sink]
     extensions: dict
+    ignored_namespaces: list[str]
     want: list[tuple[str, dict, str | None]]
 
 
@@ -139,9 +141,26 @@ def _sink(*, name: str, type_: str, secret: str | None) -> tdv1alpha1.Sink:
 # hide the parts that vary. OBJECTS_CASES embeds the same config in the
 # collector's ConfigMap, which is the use the helper rule allows.
 def _config(
-    *, exporters: dict, pipeline_exporters: list[str], extensions: dict | None, service_extensions: list[str] | None
+    *,
+    exporters: dict,
+    pipeline_exporters: list[str],
+    extensions: dict | None,
+    service_extensions: list[str] | None,
+    ignored_namespaces: str | None,
 ) -> dict:
-    """The collector's config for prod-us-east with the built-in mappings, as the dict config dumps to YAML."""
+    """The collector's config for prod-us-east with the built-in mappings, as the dict config dumps to YAML.
+
+    ignored_namespaces is the regex every job drops pods by namespace on, first
+    in its relabel_configs, if there is one.
+    """
+
+    def ignored() -> list[dict]:
+        # A list per job, as the function builds: one shared between jobs
+        # dumps as YAML anchors.
+        if ignored_namespaces is None:
+            return []
+        return [{"source_labels": ["__meta_kubernetes_namespace"], "action": "drop", "regex": ignored_namespaces}]
+
     service: dict = {
         "pipelines": {
             "metrics": {
@@ -176,6 +195,7 @@ def _config(
                             "scrape_interval": "15s",
                             "kubernetes_sd_configs": [{"role": "pod"}],
                             "relabel_configs": [
+                                *ignored(),
                                 {
                                     "source_labels": ["__meta_kubernetes_pod_label_modelplane_ai_deployment"],
                                     "action": "keep",
@@ -223,6 +243,7 @@ def _config(
                             "scrape_interval": "15s",
                             "kubernetes_sd_configs": [{"role": "pod"}],
                             "relabel_configs": [
+                                *ignored(),
                                 {
                                     "source_labels": [
                                         "__meta_kubernetes_pod_label_gateway_envoyproxy_io_owning_gateway_name"
@@ -294,6 +315,7 @@ def _config(
                             "scrape_interval": "15s",
                             "kubernetes_sd_configs": [{"role": "pod"}],
                             "relabel_configs": [
+                                *ignored(),
                                 {
                                     "source_labels": [
                                         "__meta_kubernetes_pod_label_gateway_envoyproxy_io_owning_gateway_name"
@@ -313,6 +335,7 @@ def _config(
                             "scrape_interval": "15s",
                             "kubernetes_sd_configs": [{"role": "pod"}],
                             "relabel_configs": [
+                                *ignored(),
                                 {
                                     "source_labels": [
                                         "__meta_kubernetes_pod_label_app_kubernetes_io_name",
@@ -320,11 +343,6 @@ def _config(
                                     ],
                                     "action": "keep",
                                     "regex": ".*dcgm.*|.*metrics-exporter.*",
-                                },
-                                {
-                                    "source_labels": ["__meta_kubernetes_namespace"],
-                                    "action": "drop",
-                                    "regex": "cw-exporters",
                                 },
                                 {
                                     "source_labels": ["__meta_kubernetes_pod_container_port_name"],
@@ -354,6 +372,7 @@ def _config(
                             "scrape_interval": "30s",
                             "kubernetes_sd_configs": [{"role": "pod"}],
                             "relabel_configs": [
+                                *ignored(),
                                 {
                                     "source_labels": ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"],
                                     "action": "keep",
@@ -702,11 +721,13 @@ CONFIG_CASES = [
         # A client authenticator: an exporter needs one of those, not the oidc
         # extension, which authenticates callers of a receiver.
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=_config(
             exporters={"otlphttp/primary": {"endpoint": "https://otel.acme.example"}},
             pipeline_exporters=["otlphttp/primary"],
             extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
             service_extensions=["oauth2client/acme"],
+            ignored_namespaces=None,
         ),
     ),
     ConfigCase(
@@ -716,11 +737,13 @@ CONFIG_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="otlphttp", secret=None)],
         extensions={},
+        ignored_namespaces=[],
         want=_config(
             exporters={"otlphttp/primary": {"endpoint": "https://otel.acme.example"}},
             pipeline_exporters=["otlphttp/primary"],
             extensions=None,
             service_extensions=None,
+            ignored_namespaces=None,
         ),
     ),
     # The remote-write exporter registers as prometheus_remote_write in 0.161.0
@@ -735,6 +758,7 @@ CONFIG_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="prometheus_remote_write", secret=None)],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=_config(
             exporters={
                 "prometheus_remote_write/primary": {
@@ -745,6 +769,7 @@ CONFIG_CASES = [
             pipeline_exporters=["prometheus_remote_write/primary"],
             extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
             service_extensions=["oauth2client/acme"],
+            ignored_namespaces=None,
         ),
     ),
     ConfigCase(
@@ -754,6 +779,7 @@ CONFIG_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="prometheusremotewrite", secret=None)],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=_config(
             exporters={
                 "prometheusremotewrite/primary": {
@@ -764,6 +790,7 @@ CONFIG_CASES = [
             pipeline_exporters=["prometheusremotewrite/primary"],
             extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
             service_extensions=["oauth2client/acme"],
+            ignored_namespaces=None,
         ),
     ),
     ConfigCase(
@@ -773,6 +800,7 @@ CONFIG_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="prometheus", secret=None)],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=_config(
             exporters={
                 "prometheus/primary": {
@@ -783,6 +811,26 @@ CONFIG_CASES = [
             pipeline_exporters=["prometheus/primary"],
             extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
             service_extensions=["oauth2client/acme"],
+            ignored_namespaces=None,
+        ),
+    ),
+    # A cluster provider names a namespace where its cloud runs a GPU exporter
+    # beside the one the provider's device stack installs. First, so no job's
+    # keep rule can keep a pod in one.
+    ConfigCase(
+        name="IgnoredNamespaces",
+        reason="Every job drops the pods in the ignored namespaces first, matched by one sorted, escaped regex.",
+        cluster="prod-us-east",
+        mappings=list(stacks.BUILTIN_MAPPINGS),
+        sinks=[_sink(name="primary", type_="otlphttp", secret=None)],
+        extensions={},
+        ignored_namespaces=["vendor-monitoring", "gpu-exporters"],
+        want=_config(
+            exporters={"otlphttp/primary": {"endpoint": "https://otel.acme.example"}},
+            pipeline_exporters=["otlphttp/primary"],
+            extensions=None,
+            service_extensions=None,
+            ignored_namespaces="gpu\\-exporters|vendor\\-monitoring",
         ),
     ),
 ]
@@ -791,7 +839,7 @@ CONFIG_CASES = [
 @pytest.mark.parametrize("case", CONFIG_CASES, ids=lambda case: case.name)
 def test_config(case: ConfigCase) -> None:
     """config renders the collector's whole configuration."""
-    got = collector.config(case.cluster, case.mappings, case.sinks, case.extensions)
+    got = collector.config(case.cluster, case.mappings, case.sinks, case.extensions, case.ignored_namespaces)
     # The cases write the config as the dict the function dumps, in the order
     # it builds it, so they read as config rather than as wrapped YAML. PyYAML
     # dumps it on both sides.
@@ -827,6 +875,7 @@ def test_port_rewrite(case: PortRewriteCase) -> None:
             list(stacks.BUILTIN_MAPPINGS),
             [_sink(name="primary", type_="otlphttp", secret=None)],
             {"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+            [],
         )
     )
     rule = next(
@@ -941,6 +990,7 @@ def test_in_flight(case: InFlightCase) -> None:
             list(stacks.BUILTIN_MAPPINGS),
             [_sink(name="primary", type_="otlphttp", secret=None)],
             {"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+            [],
         )
     )
     job = next(j for j in config["receivers"]["prometheus"]["config"]["scrape_configs"] if j["job_name"] == case.job)
@@ -1226,6 +1276,7 @@ OBJECTS_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="otlphttp", secret=None)],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=[
             ("collector-serviceaccount", _service_account(), None),
             ("collector-clusterrole", _cluster_role(), None),
@@ -1238,6 +1289,7 @@ OBJECTS_CASES = [
                         pipeline_exporters=["otlphttp/primary"],
                         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
                         service_extensions=["oauth2client/acme"],
+                        ignored_namespaces=None,
                     )
                 ),
                 None,
@@ -1245,7 +1297,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="522e31c7cedc07c5",
+                    config_hash="ed6e1a2446fa88db",
                     volumes=[{"name": "config", "configMap": {"name": "modelplane-collector"}}],
                     volume_mounts=[{"name": "config", "mountPath": "/conf"}],
                     env_from=None,
@@ -1263,6 +1315,7 @@ OBJECTS_CASES = [
         mappings=list(stacks.BUILTIN_MAPPINGS),
         sinks=[_sink(name="primary", type_="otlphttp", secret="telemetry-credentials")],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=[
             ("collector-serviceaccount", _service_account(), None),
             ("collector-clusterrole", _cluster_role(), None),
@@ -1283,6 +1336,7 @@ OBJECTS_CASES = [
                             "bearertokenauth/primary": {"filename": "/etc/modelplane/telemetry/primary/token"},
                         },
                         service_extensions=["bearertokenauth/primary", "oauth2client/acme"],
+                        ignored_namespaces=None,
                     )
                 ),
                 None,
@@ -1290,7 +1344,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="1f03e323432223be",
+                    config_hash="01749001b45477d3",
                     volumes=[
                         {"name": "config", "configMap": {"name": "modelplane-collector"}},
                         {"name": "credentials-primary", "secret": {"secretName": "telemetry-credentials"}},
@@ -1320,6 +1374,7 @@ OBJECTS_CASES = [
             _sink(name="prometheus", type_="prometheusremotewrite", secret="prom-token"),
         ],
         extensions={"oauth2client/acme": {"token_url": "https://issuer.acme.example/token"}},
+        ignored_namespaces=[],
         want=[
             ("collector-serviceaccount", _service_account(), None),
             ("collector-clusterrole", _cluster_role(), None),
@@ -1350,6 +1405,7 @@ OBJECTS_CASES = [
                             "bearertokenauth/vendor",
                             "oauth2client/acme",
                         ],
+                        ignored_namespaces=None,
                     )
                 ),
                 None,
@@ -1357,7 +1413,7 @@ OBJECTS_CASES = [
             (
                 "collector",
                 _deployment(
-                    config_hash="b1539f5a25d85bfc",
+                    config_hash="4abf1d7de91ea0e6",
                     volumes=[
                         {"name": "config", "configMap": {"name": "modelplane-collector"}},
                         {"name": "credentials-vendor", "secret": {"secretName": "vendor-token"}},
@@ -1388,7 +1444,7 @@ OBJECTS_CASES = [
 @pytest.mark.parametrize("case", OBJECTS_CASES, ids=lambda case: case.name)
 def test_objects(case: ObjectsCase) -> None:
     """objects composes the collector's manifests and their readiness queries."""
-    got = collector.objects(case.cluster, case.mappings, case.sinks, case.extensions)
+    got = collector.objects(case.cluster, case.mappings, case.sinks, case.extensions, case.ignored_namespaces)
     assert got == case.want, case.reason
 
 

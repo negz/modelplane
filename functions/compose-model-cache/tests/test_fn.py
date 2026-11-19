@@ -72,15 +72,26 @@ def _desired_model_cache(*, summary: str, clusters: list[dict], ready: fnv1.Read
     )
 
 
-def _cluster(*, name: str, provider_config: str, cluster: dict, storage_class: str) -> fnv1.Resource:
-    """An InferenceCluster reporting the providerConfigRef and cache StorageClass the function matches on."""
+def _cluster(*, name: str, provider_config: str, storage_class: str) -> fnv1.Resource:
+    """A provisioned InferenceCluster reporting the providerConfigRef and cache StorageClass the function matches on."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "modelplane.ai/v1alpha1",
                 "kind": "InferenceCluster",
                 "metadata": {"name": name},
-                "spec": {"cluster": cluster},
+                "spec": {
+                    "cluster": {
+                        "source": "Provisioned",
+                        "provisioned": {
+                            "configRef": {
+                                "apiVersion": "acme.example.org/v1alpha1",
+                                "kind": "AcmeClusterConfig",
+                                "name": "default",
+                            },
+                        },
+                    },
+                },
                 "status": {
                     "providerConfigRef": {"name": provider_config},
                     "cache": {"storageClassName": storage_class},
@@ -269,7 +280,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -340,7 +350,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -441,7 +450,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="eks-a",
                             provider_config="eks-a-pc",
-                            cluster={"source": "EKS", "eks": {"region": "us-west-2"}},
                             storage_class="modelplane-rwx-efs",
                         ),
                     ],
@@ -510,7 +518,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -565,7 +572,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -626,7 +632,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -689,13 +694,11 @@ COMPOSE_CASES = [
                         _cluster(
                             name="a",
                             provider_config="a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                         _cluster(
                             name="b",
                             provider_config="b-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -770,7 +773,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -822,7 +824,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -867,7 +868,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -938,7 +938,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -1034,7 +1033,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],
@@ -1112,7 +1110,6 @@ COMPOSE_CASES = [
                         _cluster(
                             name="cluster-a",
                             provider_config="cluster-a-pc",
-                            cluster={"source": "GKE", "gke": {"project": "my-project", "region": "us-central1"}},
                             storage_class="modelplane-rwx",
                         ),
                     ],

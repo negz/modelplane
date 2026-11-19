@@ -903,8 +903,8 @@ _POOL_TOLERATIONS = [
     {"key": "modelplane.ai/cpu", "operator": "Exists", "effect": "NoSchedule"},
 ]
 
-# Node label identifying the pool a node belongs to. compose-eks-cluster and
-# compose-gke-cluster stamp it on every node group they provision; the scheduler
+# Node label identifying the pool a node belongs to. A cluster provider stamps it
+# on every node pool it provisions; the scheduler
 # pins a replica to a pool by name, and we steer the pod onto that pool by
 # selecting this label. For BYO (Existing) clusters Modelplane doesn't provision
 # the nodes, so the operator must label their pool's nodes with this key for the

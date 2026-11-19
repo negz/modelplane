@@ -10,7 +10,7 @@ license = "Apache-2.0"
 package = false
 
 [tool.uv.workspace]
-members = ["functions/*", "schemas/python"]
+members = ["functions/*", "schemas/python", "sdk/python"]
 
 [dependency-groups]
 dev = [
@@ -37,6 +37,8 @@ target-version = "py312"
 # Match ruff format's default. The formatter won't produce lines longer than
 # this, but string literals in deeply nested dicts can still exceed it.
 line-length = 120
+# The providers' generated models, like Modelplane's, aren't ours to format.
+extend-exclude = ["providers/*/schemas"]
 
 [tool.ruff.lint]
 select = [
@@ -81,28 +83,32 @@ allow-star-arg-any = true
 "schemas/python/**" = ["ALL"]
 # Function tests use magic values, many parameters, long hardcoded resource
 # dicts, and boolean fixture toggles passed positionally.
-"functions/*/tests/**" = ["E501", "PLR2004", "PLR0913", "FBT001"]
+"{functions,providers/*/functions}/*/tests/**" = ["E501", "PLR2004", "PLR0913", "FBT001"]
+"sdk/python/tests/**" = ["E501", "PLR2004", "PLR0913", "FBT001"]
 # The end-to-end tests compare HTTP statuses and curl exit codes.
 "e2e/**" = ["PLR2004"]
 # The pytest style rules are for tests. Elsewhere an assert guards an invariant.
 "!{**/tests/**,e2e/**}" = ["PT"]
 # fn.py uses gRPC's required PascalCase method name.
-"functions/*/function/fn.py" = ["N802"]
+"{functions,providers/*/functions}/*/function/fn.py" = ["N802"]
 # The docs manifest validator is a CLI script; print is its output.
 "docs/utils/validate/**" = ["T201"]
 # The checkers are CLI scripts; print is their output.
 "hack/check_function_tests.py" = ["T201"]
 "hack/check_list_selectors.py" = ["T201"]
 "hack/check_supported_drivers.py" = ["T201"]
+"hack/check_boundaries.py" = ["T201"]
 # Generated serving stack lists carry upstream chart values verbatim; long
 # string literals and unicode arrive from the recipes.
-"functions/*/function/stacks/clouds/generated/**" = ["E501", "RUF001", "RUF002", "RUF003"]
+"providers/*/functions/*/function/generated/**" = ["E501", "RUF001", "RUF002", "RUF003"]
+# The DCGM exporter's metrics CSV is upstream data, verbatim.
+"sdk/python/modelplane_sdk/stacks/dcgm.py" = ["E501"]
 # main.py is the click CLI entrypoint: boolean flags are idiomatic, and it
 # catches Exception at the top level to report startup failures cleanly.
-"functions/*/function/main.py" = ["FBT001", "BLE001"]
-# The serving stack generator is a CLI script: its classification report
-# prints to stderr, and its recipe transform is legitimately branchy.
-"functions/compose-serving-stack/generate.py" = ["T201", "PLR0912", "PLR0915"]
+"{functions,providers/*/functions}/*/function/main.py" = ["FBT001", "BLE001"]
+# The device stack generator is a CLI: its classification report prints to
+# stderr, and its recipe transform is legitimately branchy.
+"sdk/python/modelplane_sdk/aicr/generate.py" = ["T201", "PLR0912", "PLR0915"]
 
 [tool.ty.environment]
 # The functions target Python 3.12 (see tool.ruff target-version).

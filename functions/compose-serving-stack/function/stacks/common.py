@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hand-written components on every cloud and every stack.
+"""Hand-written components on every cluster and every stack.
 
 Modelplane's own half of the serving stack, where the Standard and
-Dynamo stacks don't differ: the gateway path (Envoy Gateway, Envoy AI
-Gateway and its CRDs, the Gateway API Inference Extension CRDs, the
-gateway namespace, and the EnvoyProxy gateway_proxy builds from the
-cloud's Service settings), the gateway's PKI (a self-signed
-Issuer and trust-manager), the DRA critical-pods quotas, the cluster
-agent, and the device stacks every cloud pins identically - today
-dra-driver-cpu, whose nodes look the same whatever provisioned them.
+Dynamo stacks don't differ: cert-manager, the gateway path (Envoy
+Gateway, Envoy AI Gateway and its CRDs, the Gateway API Inference
+Extension CRDs, the gateway namespace, and the EnvoyProxy gateway_proxy
+builds from the cluster provider's Service settings), the gateway's PKI
+(a self-signed Issuer and trust-manager), the cluster agent, and the
+device stacks every cluster runs identically - today dra-driver-cpu,
+whose nodes look the same whatever provisioned them, and its
+critical-pods quota.
 
 The GatewayClass and Gateway are deliberately absent: they read
 spec.gateway (className, hostname), which is per-cluster configuration,
@@ -37,8 +38,7 @@ import pathlib
 from typing import Any
 
 import yaml
-
-from function.stacks.components import Chart, Component, Manifests
+from modelplane_sdk.stacks import Chart, Component, Manifests
 
 # The AI Gateway controller supplies the ext-proc extension server that
 # Envoy Gateway delegates InferencePool backend resolution to, so
@@ -66,10 +66,11 @@ SELFSIGNED_ISSUER = "modelplane-selfsigned"
 # contract surface, not hardware, so no generator resolves it.
 _TRUST_MANAGER_VERSION = "v0.25.0"
 
-# Must match the namespace every cloud half installs the NVIDIA DRA
-# driver into - generated and hand-written alike - so this quota lands
-# where the kubelet plugin runs.
-_NVIDIA_DRA_DRIVER_NAMESPACE = "nvidia-dra-driver"
+# cert-manager reads a ClusterIssuer's CA secret from its cluster-resource-
+# namespace. The InferenceGateway's client CA ClusterIssuer and its secret live
+# in modelplane-system, so the stack points cert-manager there rather than at its
+# own namespace. A cross-function contract with compose-inference-gateway.
+_CLUSTER_RESOURCE_NAMESPACE = "modelplane-system"
 
 # The namespace the dra-driver-cpu component below installs into; its
 # critical-pods quota must land in the same place.
@@ -95,6 +96,38 @@ def _crds(filename: str) -> list[dict[str, Any]]:
 
 
 COMPONENTS: list[Component] = [
+    # A cluster provider's device stack depends on this release through
+    # modelplane_sdk.stacks.CERT_MANAGER, which observes its webhook
+    # Deployment by the name fullnameOverride gives it, so the release,
+    # namespace and fullnameOverride are part of the provider contract.
+    Chart(
+        key="cert-manager",
+        release="mp-cert-manager",
+        namespace="cert-manager",
+        chart="cert-manager",
+        repository="https://charts.jetstack.io",
+        version="v1.20.2",
+        # Components here and in the device stacks depend on this chart,
+        # so its Ready must mean healthy, not just deployed.
+        wait=True,
+        values={
+            # The chart keeps its CRDs on uninstall by default, which the
+            # gateway PKI needs: it composes Certificates and Issuers as
+            # provider-kubernetes Objects, and removing their CRDs would
+            # stop provider-kubernetes observing them to release their
+            # finalizers.
+            "crds": {"enabled": True},
+            "fullnameOverride": "cert-manager",
+            "clusterResourceNamespace": _CLUSTER_RESOURCE_NAMESPACE,
+            # cert-manager owns each certificate's Secret by its
+            # Certificate, so deleting the Certificate deletes the Secret.
+            # compose-model-route issues a client certificate per
+            # ModelRoute, and without this every deleted route would leave
+            # its client key behind, still valid against the cluster
+            # gateways.
+            "enableCertificateOwnerRef": True,
+        },
+    ),
     Chart(
         key="envoy-gateway",
         release="mp-gateway-helm",
@@ -105,10 +138,7 @@ COMPONENTS: list[Component] = [
         # with Gateway API v1.5.x, so v1.9.x is out of range until the AI
         # Gateway release that pairs with it.
         version="v1.8.4",
-        # cert-manager lives in every cloud half - generated or
-        # hand-written - so this edge crosses the halves and resolves
-        # against the joined list. Envoy Gateway needs it for its
-        # webhooks.
+        # Envoy Gateway needs cert-manager for its webhooks.
         depends_on=["cert-manager"],
         # The extensionManager block points Envoy Gateway at the Envoy AI
         # Gateway controller's ext-proc server and declares InferencePool
@@ -258,54 +288,17 @@ COMPONENTS: list[Component] = [
             "defaultPackage": {"enabled": False},
         },
     ),
-    # The DRA driver's kubelet plugin runs at system-node-critical
-    # priority. GKE only admits such pods in a namespace whose
-    # ResourceQuota permits those priority classes; without it the
-    # daemonset gets FailedCreate and never publishes ResourceSlices.
-    # Laid down wherever the NVIDIA stack installs: it only grants
-    # headroom, so it's harmless on clusters that don't restrict them,
-    # but the tag keeps it off clusters where nothing creates the
-    # nvidia-dra-driver namespace, where the Object could never apply.
-    Manifests(
-        key="dra-driver-critical-pods-quota",
-        dra_drivers=["gpu.nvidia.com"],
-        manifests=[
-            {
-                "apiVersion": "v1",
-                "kind": "ResourceQuota",
-                "metadata": {
-                    "name": "allow-critical-pods",
-                    "namespace": _NVIDIA_DRA_DRIVER_NAMESPACE,
-                },
-                "spec": {
-                    "hard": {"pods": "1000"},
-                    "scopeSelector": {
-                        "matchExpressions": [
-                            {
-                                "operator": "In",
-                                "scopeName": "PriorityClass",
-                                "values": [
-                                    "system-node-critical",
-                                    "system-cluster-critical",
-                                ],
-                            },
-                        ],
-                    },
-                },
-            },
-        ],
-    ),
     # Publishes each CPU node's cores as DRA devices and registers the
     # dra.cpu DeviceClass CPU classes claim through: one device per NUMA
     # node (the chart's default grouped mode), with the node's
     # allocatable CPUs as consumable capacity. A claimed device pins the
     # engine container to a cpuset. Pinned here because a CPU node needs
-    # the same driver whatever provisioned it, so every cloud - Existing
-    # included - installs the one pin. The nodeSelector keeps it to CPU
-    # pools, which every cluster composition labels modelplane.ai/cpu;
+    # the same driver whatever provisioned it, so every cluster installs
+    # the one pin. The nodeSelector keeps it to CPU pools, which every
+    # cluster provider labels modelplane.ai/cpu;
     # the tolerations are set because the chart's default is a keyless
-    # wildcard, which AKS rejects at admission and the e2e toleration
-    # audit flags - the CPU taint is the only one the selector can land
+    # wildcard, which some managed clusters reject at admission and the
+    # e2e toleration audit flags - the CPU taint is the only one the selector can land
     # the driver behind. reservedCPUs holds cores 0-1 back for the OS
     # and kubelet, so a class's capacity.cpu is the node's vCPUs less
     # two - a fixed, documented value rather than a per-pool knob
@@ -326,9 +319,13 @@ COMPONENTS: list[Component] = [
             "driverConfig": {"reservedCPUs": "0-1"},
         },
     ),
-    # dra-driver-cpu's daemonset runs at system-node-critical priority
-    # like the NVIDIA kubelet plugin above, so its namespace needs the
-    # same quota on GKE.
+    # dra-driver-cpu's daemonset runs at system-node-critical priority,
+    # which some clusters only admit in a namespace whose ResourceQuota
+    # permits those priority classes; without it the daemonset gets
+    # FailedCreate and never publishes ResourceSlices. The quota only
+    # grants headroom, so it's harmless on clusters that don't restrict
+    # them, and the tag keeps it off clusters where nothing creates the
+    # namespace, where the Object could never apply.
     Manifests(
         key="dra-driver-cpu-critical-pods-quota",
         dra_drivers=["dra.cpu"],
@@ -389,17 +386,15 @@ def gateway_proxy(service: dict[str, Any]) -> Manifests:
     """The EnvoyProxy the GatewayClass references, configuring the
     LoadBalancer Service of every gateway on the cluster.
 
-    service is the cloud's settings for that Service, a subset of Envoy
-    Gateway's KubernetesServiceSpec. The cluster gateway uses this EnvoyProxy
+    service is the cluster provider's settings for that Service, a subset
+    of Envoy Gateway's KubernetesServiceSpec. The cluster gateway uses this EnvoyProxy
     as is, and compose-inference-gateway's EnvoyProxy merges onto it, which
     gives both gateways' Services these settings.
 
     externalTrafficPolicy is pinned to Cluster over whatever service says.
     Envoy Gateway defaults it to Local, which some clouds' load balancers
-    reject (Nebius returns SyncLoadBalancerFailed and never assigns an
-    external IP). Cluster is accepted by every cloud Modelplane runs on, and
-    neither gateway needs client source-IP preservation. A CKS webhook sets
-    Local regardless, which CKS's load balancers accept.
+    reject, returning SyncLoadBalancerFailed and never assigning an
+    external IP. Neither gateway needs client source-IP preservation.
     """
     return Manifests(
         key="gateway-proxy",

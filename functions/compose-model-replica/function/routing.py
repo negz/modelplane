@@ -611,7 +611,7 @@ def _epp_objects(
         "containers": [picker],
         # Spread the pickers across nodes where there's room, and share a node
         # where there isn't, as on a single system node. Not across zones: on
-        # a cloud whose nodes carry no zone label, such as Civo or Vultr, the
+        # a cluster whose nodes carry no zone label, as on some clouds, the
         # scheduler scores every constraint 0, the hostname one included.
         # pod-template-hash leaves the old ReplicaSet's pickers out of the
         # count during a rollout, so the new pickers spread against each other.

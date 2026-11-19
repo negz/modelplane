@@ -25,6 +25,7 @@ here needs the operator's target allocator either.
 """
 
 import hashlib
+import re
 from typing import Any
 
 import yaml
@@ -139,8 +140,9 @@ def _relabel_pod_identity() -> list[dict[str, Any]]:
 def _gpu_exporter_selector(action: str) -> dict[str, Any]:
     """Match a GPU exporter, whichever vendor's and however it was packaged.
 
-    NVIDIA's DCGM exporters spell it differently - gke-managed-dcgm-exporter
-    and dcgm-exporter - and put the name on different labels depending on who
+    NVIDIA's DCGM exporters spell it differently - a cloud's managed
+    exporter may be named for the cloud, others plain dcgm-exporter - and put
+    the name on different labels depending on who
     packaged it, so both labels are read and the match is on what they share.
     The AMD GPU operator names its device-metrics-exporter pods
     app.kubernetes.io/name: metrics-exporter, which the same pattern's second
@@ -236,18 +238,23 @@ def _in_flight_relabels() -> list[dict[str, Any]]:
     ]
 
 
-def _scrape_configs() -> list[dict[str, Any]]:
+def _scrape_configs(ignored_namespaces: list[str]) -> list[dict[str, Any]]:
     """What to scrape on an inference cluster.
 
     Jobs over disjoint sets of pods, so nothing is scraped twice: the engines
     Modelplane runs, the gateways in front of them, the GPU exporter the
     cluster came with, and everything else the serving stack installs.
 
+    No job scrapes a pod in ignored_namespaces. A cluster provider names a
+    namespace there when the cloud runs a GPU exporter of its own beside the
+    one the provider's device stack installs, so the job that keeps every GPU
+    exporter doesn't collect every GPU series twice.
+
     The front door needs two of them. Envoy publishes its own statistics on its
     admin port, and the GenAI metrics a caller's experience is measured by come
     from the AI gateway's ext-proc on a different port, at a different path.
     """
-    return [
+    jobs: list[dict[str, Any]] = [
         {
             "job_name": "modelplane-engines",
             "scrape_interval": _SCRAPE_INTERVAL,
@@ -330,19 +337,14 @@ def _scrape_configs() -> list[dict[str, Any]]:
             "kubernetes_sd_configs": [{"role": "pod"}],
             "relabel_configs": [
                 # A job of its own because nobody annotates a GPU exporter
-                # for scraping: GKE runs a managed DCGM in
-                # gke-managed-system, the NVIDIA GPU operator installs its
-                # own elsewhere, Nebius and CoreWeave get the standalone
-                # dcgm-exporter chart, the AMD GPU operator Modelplane installs on
-                # Existing runs AMD's device-metrics-exporter, and the
-                # substrate job sees none of them. Without this every
+                # for scraping: a cloud may run a managed DCGM of its own,
+                # the NVIDIA GPU operator installs its own, a provider's
+                # device stack may install the standalone dcgm-exporter
+                # chart, the AMD GPU operator Modelplane installs on Existing
+                # runs AMD's device-metrics-exporter, and the substrate job
+                # sees none of them. Without this every
                 # modelplane_gpu_* series is empty.
                 _gpu_exporter_selector("keep"),
-                # CKS runs its own DCGM exporter in cw-exporters, which can't
-                # attribute DRA-allocated GPUs to pods. The serving stack
-                # installs one that can, and scraping both would collect
-                # every GPU series twice.
-                {"source_labels": ["__meta_kubernetes_namespace"], "action": "drop", "regex": "cw-exporters"},
                 # The exporters name their metrics port differently: DCGM's
                 # is metrics, the AMD operator's is exporter-port.
                 {
@@ -410,6 +412,14 @@ def _scrape_configs() -> list[dict[str, Any]]:
             "metric_relabel_configs": [{"source_labels": ["__name__"], "regex": _IN_FLIGHT, "action": "drop"}],
         },
     ]
+    if ignored_namespaces:
+        regex = "|".join(re.escape(ns) for ns in sorted(ignored_namespaces))
+        for job in jobs:
+            # A dict per job: one shared between jobs renders as YAML anchors.
+            job["relabel_configs"].insert(
+                0, {"source_labels": ["__meta_kubernetes_namespace"], "action": "drop", "regex": regex}
+            )
+    return jobs
 
 
 # Taking a part of a histogram is a function that mints a new metric beside it,
@@ -631,6 +641,7 @@ def config(
     mappings: list[mmv1alpha1.MetricMapping],
     sinks: list[tdv1alpha1.Sink],
     extensions: dict[str, Any],
+    ignored_namespaces: list[str],
 ) -> str:
     """The collector's configuration, as YAML.
 
@@ -703,7 +714,7 @@ def config(
         },
     }
     cfg: dict[str, Any] = {
-        "receivers": {"prometheus": {"config": {"scrape_configs": _scrape_configs()}}},
+        "receivers": {"prometheus": {"config": {"scrape_configs": _scrape_configs(ignored_namespaces)}}},
         "processors": processors,
         "exporters": sink_exporters,
         "service": service,
@@ -726,6 +737,7 @@ def objects(
     mappings: list[mmv1alpha1.MetricMapping],
     sinks: list[tdv1alpha1.Sink],
     extensions: dict[str, Any],
+    ignored_namespaces: list[str],
 ) -> list[tuple[str, dict[str, Any], str | None]]:
     """The collector as (key, manifest, readiness CEL) triples.
 
@@ -739,7 +751,7 @@ def objects(
     permissions on clusters running no collector.
     """
     labels = {"app.kubernetes.io/name": NAME, "app.kubernetes.io/managed-by": "modelplane"}
-    rendered = config(cluster, mappings, sinks, extensions)
+    rendered = config(cluster, mappings, sinks, extensions, ignored_namespaces)
     volumes: list[dict[str, Any]] = [{"name": "config", "configMap": {"name": NAME}}]
     mounts: list[dict[str, Any]] = [{"name": "config", "mountPath": "/conf"}]
     env_from: list[dict[str, Any]] = []
