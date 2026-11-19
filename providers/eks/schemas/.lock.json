@@ -1,0 +1,27 @@
+{
+  "packages": {
+    "fs://apis": "4129f419bce34bebc1e35db1973ec7355c455ea7f6d9be109c9943eeb239f8db",
+    "git://https://github.com/crossplane/crossplane/cluster/crds": "14c53aac914d393b5bcc00962fbc90d4be5d35bc",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-class@sha256:eabe017443101f349ef3282942b3007a945471ea7322730aeb18cec27b05a373": "sha256:eabe017443101f349ef3282942b3007a945471ea7322730aeb18cec27b05a373",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-cluster@sha256:f33fb47d4ff50219edae554443c2ebce5d565657f7677b0914812528c2183ae9": "sha256:f33fb47d4ff50219edae554443c2ebce5d565657f7677b0914812528c2183ae9",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-gateway@sha256:3f3694c87af9dfe8d81641677ac6171b0efc3bd43fe5bfac852072c6fc67af40": "sha256:3f3694c87af9dfe8d81641677ac6171b0efc3bd43fe5bfac852072c6fc67af40",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-metric-mapping@sha256:ed5a5f1fb8ed3b0fce84630957f2ee6c8cce5de72359b2dcdb949c6b53e46203": "sha256:ed5a5f1fb8ed3b0fce84630957f2ee6c8cce5de72359b2dcdb949c6b53e46203",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-cache@sha256:c67480e99aab3c39a29e484fbc2a08e44fc656b8a77b3ecadb69e7ff38dc19fd": "sha256:c67480e99aab3c39a29e484fbc2a08e44fc656b8a77b3ecadb69e7ff38dc19fd",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-deployment@sha256:62908f023b7269d15f7ce47ed40eca6ad89f1d819f0cb4634fcf584b640495aa": "sha256:62908f023b7269d15f7ce47ed40eca6ad89f1d819f0cb4634fcf584b640495aa",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-endpoint@sha256:38f348d5271d6099757d7770b5fc74eab8a668270d1a4edb33921ec0f6283e34": "sha256:38f348d5271d6099757d7770b5fc74eab8a668270d1a4edb33921ec0f6283e34",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-replica@sha256:7578f01ac171d68bb53ebe50e6d28b82bf7b9911b976950e1e775298c6f6a2e5": "sha256:7578f01ac171d68bb53ebe50e6d28b82bf7b9911b976950e1e775298c6f6a2e5",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-route@sha256:16c27a9f8a2b0c05a9a384180f474c18aa9c8579932810e5a440459bb5e7b68d": "sha256:16c27a9f8a2b0c05a9a384180f474c18aa9c8579932810e5a440459bb5e7b68d",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-service@sha256:a603a95e3f7e7c0feffd8219b96fa2ec5eb8929914973b865dfc6c2d218c449c": "sha256:a603a95e3f7e7c0feffd8219b96fa2ec5eb8929914973b865dfc6c2d218c449c",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-serving-stack@sha256:1852ac6f45fa97b8a52f0ffb4bb8f34b3a9bf03d68a4b6008933c16789f4fbdf": "sha256:1852ac6f45fa97b8a52f0ffb4bb8f34b3a9bf03d68a4b6008933c16789f4fbdf",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-telemetry-destination@sha256:448e107f6db296d2e6fef1b38493e9e63155ec5eb282fc8c2b2db95a09937e10": "sha256:448e107f6db296d2e6fef1b38493e9e63155ec5eb282fc8c2b2db95a09937e10",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-usages@sha256:dc69fbf199f17be5a6fd7bf9b597004653781dfc75603364f13845b5783f992a": "sha256:dc69fbf199f17be5a6fd7bf9b597004653781dfc75603364f13845b5783f992a",
+    "xpkg://xpkg.upbound.io/modelplane/modelplane:v0.0.0-dev.1795075263": "sha256:3c35c517aadf6fb0297e1c765cbd9466a6c151f463b4484c53b3b16d374d3af9",
+    "xpkg://xpkg.upbound.io/upbound/provider-aws-ec2:v2.9.4": "sha256:7a0febdfb8da2d59a9fdcdbc2d476811f00566fcb941880313fc2034b0ca6177",
+    "xpkg://xpkg.upbound.io/upbound/provider-aws-efs:v2.9.4": "sha256:46bc928b63c2ab10c673f8872270e0cfcfce529a0d16deb48d0078f936aebe51",
+    "xpkg://xpkg.upbound.io/upbound/provider-aws-eks:v2.9.4": "sha256:0d182a7bfced789e274cc0b2e94e4286d912f13ee70b9dab3e7e0caca2611d8f",
+    "xpkg://xpkg.upbound.io/upbound/provider-aws-iam:v2.9.4": "sha256:3e61fc4b0d76f4d0e960f7f39822d0a165f35f3ae2cc39a96d2edb99e553fc44",
+    "xpkg://xpkg.upbound.io/upbound/provider-family-aws:v2.9.4": "sha256:bbaac0fedaf80e088d7536ccc3936a998bbd006ca676c434344e8b761e388441",
+    "xpkg://xpkg.upbound.io/upbound/provider-helm:v1.5.1": "sha256:31d6e45ffa2e12c2a848d0d454f85482e97427eec3d4f9e47339e10bdc567e62",
+    "xpkg://xpkg.upbound.io/upbound/provider-kubernetes:v1.4.4": "sha256:17d28017040fe77f369c02dd1ff36c19fab76abeee2e7fdc70b0d8765adff398"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "packages": {
+    "fs://apis": "912c8a453796694e94321a29292d4a3300826fb59893d8067585b86518564c55",
+    "git://https://github.com/crossplane/crossplane/cluster/crds": "14c53aac914d393b5bcc00962fbc90d4be5d35bc",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-class@sha256:db35295f5d8c637c88c5224b6c5ba39e52c832c681221443018f72215f06a8a5": "sha256:db35295f5d8c637c88c5224b6c5ba39e52c832c681221443018f72215f06a8a5",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-cluster@sha256:e1100e55763141ff54c635a6b0a5108d86724932dca4c85750854399ebc18ca7": "sha256:e1100e55763141ff54c635a6b0a5108d86724932dca4c85750854399ebc18ca7",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-inference-gateway@sha256:86c9ae1b90f28bef823ea4bcb74378ec1d999d8aa9f4a06e77e964b52cec897b": "sha256:86c9ae1b90f28bef823ea4bcb74378ec1d999d8aa9f4a06e77e964b52cec897b",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-metric-mapping@sha256:7e8f68fd15670c67fbaa08a6e4873b819ba679ef5a0b1eabd2c40cbeaf8e88c2": "sha256:7e8f68fd15670c67fbaa08a6e4873b819ba679ef5a0b1eabd2c40cbeaf8e88c2",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-cache@sha256:0b73c8b732fa84fee36a4ddd590231b205410d45dadcf94471ef4662911ac588": "sha256:0b73c8b732fa84fee36a4ddd590231b205410d45dadcf94471ef4662911ac588",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-deployment@sha256:cb85805af276aa429f7bd3006f04a28465541e9fabdc2835bb7e2cb3e08dda8a": "sha256:cb85805af276aa429f7bd3006f04a28465541e9fabdc2835bb7e2cb3e08dda8a",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-endpoint@sha256:433f00b7702152b7c57c1a424625d85fdeeefa5868d79f9ae48fed3517e0c6b6": "sha256:433f00b7702152b7c57c1a424625d85fdeeefa5868d79f9ae48fed3517e0c6b6",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-replica@sha256:c5f83e492f160dcd086a2245242d16f5766ca0a0e6cbad52a8b30830a7b6eb1d": "sha256:c5f83e492f160dcd086a2245242d16f5766ca0a0e6cbad52a8b30830a7b6eb1d",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-route@sha256:e115f6cbe7a7e36716c4bd7f0653dd1544a70a6ca1cc43c6db6bf39d5f290edc": "sha256:e115f6cbe7a7e36716c4bd7f0653dd1544a70a6ca1cc43c6db6bf39d5f290edc",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-model-service@sha256:1fe5b6b0621286842d522d077bb6f5523d7c53edbc2f70372b8f7d99c0b9bcd2": "sha256:1fe5b6b0621286842d522d077bb6f5523d7c53edbc2f70372b8f7d99c0b9bcd2",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-serving-stack@sha256:df79028411b0187557278d830532ea74a4995554910d7692e0a598e8a224dd16": "sha256:df79028411b0187557278d830532ea74a4995554910d7692e0a598e8a224dd16",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-telemetry-destination@sha256:d5427aae26ec2695e5197f2a44068873d0fbe8f914696c427417458197532ce2": "sha256:d5427aae26ec2695e5197f2a44068873d0fbe8f914696c427417458197532ce2",
+    "xpkg://localhost:5000/modelplane/modelplane_compose-usages@sha256:96c632badc25828fcd87b3e21a09e5a0409d77c468112e008a47405ab756b7d1": "sha256:96c632badc25828fcd87b3e21a09e5a0409d77c468112e008a47405ab756b7d1",
+    "xpkg://xpkg.upbound.io/modelplane/modelplane:v0.0.0-dev.1795078942": "sha256:4fd690a68dfb42dfc7ceb4f0d4719cbd7591a0ac7da19d2f2626f1f61a76b8a8",
+    "xpkg://xpkg.upbound.io/upbound/provider-helm:v1.5.1": "sha256:31d6e45ffa2e12c2a848d0d454f85482e97427eec3d4f9e47339e10bdc567e62",
+    "xpkg://xpkg.upbound.io/upbound/provider-kubernetes:v1.4.4": "sha256:17d28017040fe77f369c02dd1ff36c19fab76abeee2e7fdc70b0d8765adff398",
+    "xpkg://xpkg.upbound.io/upbound/provider-vultr:v1.0.1": "sha256:d4f2bfcc09710010af2ab59f3941b850a5160064b3cd7544fcb10816b36149ce"
+  }
+}
