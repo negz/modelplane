@@ -13,8 +13,9 @@ against this capacity without knowing which cluster it runs on.
 
 ## Prerequisites
 
-This step needs a running control plane. If you haven't [installed
-Modelplane]({{< ref "/install" >}}) yet, do that first.
+This step needs a running control plane with your cloud's cluster provider. If
+you haven't [installed Modelplane and the cluster provider]({{< ref
+"/install" >}}) yet, do that first.
 
 You also need an account with one of these providers:
 
@@ -220,8 +221,10 @@ who can read Secrets there.
 
 ## Publish hardware and register the cluster
 
-The `InferenceClass` describes a hardware profile and how to provision it. The
-`InferenceCluster` registers a cluster that offers it. Apply both:
+The `InferenceClass` describes a hardware profile, and names a node class that
+says how to provision it. The `InferenceCluster` registers a cluster that offers
+it, and names a cluster config that says where to create the cluster. Apply all
+four:
 
 {{< tabs >}}
 {{< tab "EKS">}}

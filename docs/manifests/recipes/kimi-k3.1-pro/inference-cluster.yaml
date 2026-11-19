@@ -1,7 +1,14 @@
 # EKS InferenceCluster with one 8x B300 node. p6-b300.48xlarge capacity is
-# scarce on demand. To use an EC2 Capacity Block, register it as a
-# CapacityReservation and set the pool's reservationRef, as
+# scarce on demand. To use an EC2 Capacity Block, register it as an
+# EKSCapacityReservation and set the pool's reservationRef, as
 # qwen3-coder/inference-cluster.yaml does.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-west-2
+spec:
+  region: us-west-2
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -11,9 +18,12 @@ metadata:
     modelplane.ai/region: us-west
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: us-west-2
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-west-2
   nodePools:
   - name: gpu-b300-8x
     className: eks-b300-8x-p6

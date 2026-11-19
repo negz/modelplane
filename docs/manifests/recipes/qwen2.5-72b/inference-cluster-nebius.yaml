@@ -1,6 +1,12 @@
 # Nebius InferenceCluster with one H100 node pool that scales from zero: no
 # minNodeCount, so the autoscaling floor defaults to nodeCount (0) and the GPU
 # node only appears when a deployment's pod goes Pending.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusClusterConfig
+metadata:
+  name: eu-north1
+spec: {}
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -9,8 +15,12 @@ metadata:
     modelplane.ai/region: eu-north
 spec:
   cluster:
-    source: Nebius
-    nebius: {}
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: nebius.modelplane.ai/v1alpha1
+        kind: NebiusClusterConfig
+        name: eu-north1
   nodePools:
   - name: gpu-h100
     className: nebius-h100-1x-sxm

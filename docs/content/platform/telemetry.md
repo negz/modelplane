@@ -499,10 +499,10 @@ either by its pod - an `app` or `app.kubernetes.io/name` label containing
 
 Where the exporter comes from depends on the cluster:
 
-- **A cluster Modelplane provisions** runs one already: the serving stack
+- **A cluster Modelplane provisions** runs one already: its cluster provider
   installs an exporter on clouds that don't run their own. CoreWeave runs one,
-  but it can't attribute DRA-allocated GPUs to pods. On CoreWeave the serving
-  stack installs a second exporter, and the collector skips CoreWeave's.
+  but it can't attribute DRA-allocated GPUs to pods. On CoreWeave the provider
+  installs a second exporter, and the collector skips CoreWeave's.
 - **An existing cluster provides its own DCGM exporter**, as
   [Requirements for an existing
   cluster]({{< ref "/platform/inference-cluster.md#requirements-for-an-existing-cluster" >}})

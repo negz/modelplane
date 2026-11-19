@@ -28,9 +28,12 @@ the current API wouldn't accept. The flip side: if the model generator ever
 dropped a field the API still has, a valid manifest using it would fail here and
 flag the gap, which is the behaviour we want.
 
-Only Modelplane's own API groups have generated models, so resources from other
-groups (provider ClusterProviderConfigs, core Namespaces, RBAC, Crossplane
-packages) are skipped — they aren't ours to validate here.
+Modelplane's own API groups and its cluster providers' have generated models,
+so resources from other groups (Crossplane providers' ClusterProviderConfigs,
+core Namespaces, RBAC, Crossplane packages) are skipped — they aren't ours to
+validate here. A cluster provider's models come from the generated tree under
+its directory, providers/<name>/schemas/python, for its group
+<name>.modelplane.ai.
 
 An engine in a recipe is also checked against what the built-in MetricMappings
 read: a pinned engine version or a missing flag that leaves the engine's
@@ -42,6 +45,7 @@ that don't depend on the version.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import re
 import sys
 from collections.abc import Iterator
@@ -107,15 +111,47 @@ def _harden(module: ModuleType) -> None:
             break
 
 
+def _provider_module(group: str, kind: str, version: str) -> ModuleType | None:
+    """Return a cluster provider's generated module for a kind, or None if group is no provider's.
+
+    Each provider generates a models package of its own, so its modules can't
+    be imported beside Modelplane's under one name. A provider's module is
+    loaded from its file instead. It imports only the shared Kubernetes and
+    Crossplane types, which Modelplane's package also has.
+    """
+    name = group.removesuffix(".modelplane.ai")
+    if name == group or not (REPO / "providers" / name).is_dir():
+        return None
+    path = REPO / "providers" / name / "schemas" / "python" / "models" / "ai" / "modelplane" / name
+    path = path / kind.lower() / f"{version}.py"
+    if not path.is_file():
+        msg = f"no generated model at {path.relative_to(REPO)}"
+        raise ModuleNotFoundError(msg)
+    # Named for where it sits in the provider's models package, so its relative
+    # imports of the shared types resolve to Modelplane's copies of them.
+    module = f"models.ai.modelplane.{name}.{kind.lower()}.{version}"
+    if module in sys.modules:
+        return sys.modules[module]
+    spec = importlib.util.spec_from_file_location(module, path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def model_for(api_version: str, kind: str) -> type[pydantic.BaseModel] | None:
-    """Return the Pydantic model class for a Modelplane kind, or None to skip."""
+    """Return the Pydantic model class for a Modelplane or cluster provider kind, or None to skip."""
     group = api_version.rsplit("/", 1)[0] if "/" in api_version else ""
     version = api_version.rsplit("/", 1)[1] if "/" in api_version else api_version
     pkg = MODELPLANE_GROUPS.get(group)
-    if pkg is None:
+    if pkg is not None:
+        mod = importlib.import_module(f"models.{pkg}.{kind.lower()}.{version}")
+    else:
+        mod = _provider_module(group, kind, version)
+    if mod is None:
         return None
-    module = f"models.{pkg}.{kind.lower()}.{version}"
-    mod = importlib.import_module(module)
     if mod.__name__ not in _hardened:
         _harden(mod)
         _hardened.add(mod.__name__)

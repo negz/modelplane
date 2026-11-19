@@ -2,20 +2,27 @@
 # fit one A100's VRAM, but llama.cpp offloads the expert tensors to host RAM
 # (see the ModelDeployment's --n-cpu-moe), so the GPU only holds the active path
 # + KV cache. One A100, not a multi-GPU node.
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKENodeClass
+metadata:
+  name: a2-highgpu-1g-a100-200gb
+spec:
+  machineType: a2-highgpu-1g
+  diskSizeGb: 200
+  accelerator:
+    type: nvidia-tesla-a100
+    count: 1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: gke-a100-40-1x
 spec:
   description: "GKE a2-highgpu-1g, 1x NVIDIA A100 40GB"
-  provisioning:
-    provider: GKE
-    gke:
-      machineType: a2-highgpu-1g
-      diskSizeGb: 200
-      accelerator:
-        type: nvidia-tesla-a100
-        count: 1
+  nodeClassRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKENodeClass
+    name: a2-highgpu-1g-a100-200gb
   devices:
   - name: gpu
     claim: DRA

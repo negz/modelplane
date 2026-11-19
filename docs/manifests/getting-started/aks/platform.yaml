@@ -1,19 +1,25 @@
+apiVersion: aks.modelplane.ai/v1alpha1
+kind: AKSNodeClass
+metadata:
+  name: standard-nv36ads-a10-v5
+spec:
+  # verify: Azure has no L4 SKU; NVadsA10v5 is the small-GPU option (>=20Gi).
+  # Confirm it runs the DRA / GPU-operator path in your subscription.
+  vmSize: Standard_NV36ads_A10_v5
+  diskSizeGb: 100
+  accelerator:
+    type: nvidia-a10
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: a10-1x
 spec:
   description: "AKS Standard_NV36ads_A10_v5, 1x NVIDIA A10 24GB"
-  provisioning:
-    provider: AKS
-    aks:
-      # verify: Azure has no L4 SKU; NVadsA10v5 is the small-GPU option (>=20Gi).
-      # Confirm it runs the DRA / GPU-operator path in your subscription.
-      vmSize: Standard_NV36ads_A10_v5
-      diskSizeGb: 100
-      accelerator:
-        type: nvidia-a10
-        count: 1
+  nodeClassRef:
+    apiVersion: aks.modelplane.ai/v1alpha1
+    kind: AKSNodeClass
+    name: standard-nv36ads-a10-v5
   devices:
   - name: gpu
     claim: DRA
@@ -26,6 +32,13 @@ spec:
     capacity:
       memory: { value: "24564Mi" }   # verify: A10 reported VRAM (~24GB)
 ---
+apiVersion: aks.modelplane.ai/v1alpha1
+kind: AKSClusterConfig
+metadata:
+  name: westeurope
+spec:
+  location: westeurope
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -34,9 +47,12 @@ metadata:
     modelplane.ai/region: westeurope
 spec:
   cluster:
-    source: AKS
-    aks:
-      location: westeurope
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: aks.modelplane.ai/v1alpha1
+        kind: AKSClusterConfig
+        name: westeurope
   nodePools:
   - name: gpua10
     className: a10-1x

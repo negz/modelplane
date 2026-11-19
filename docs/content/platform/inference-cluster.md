@@ -11,10 +11,10 @@ serving. Platform teams create these to provide GPU capacity.
 
 Each cluster has:
 
-- A **cluster source**: `GKE`, `EKS`, `AKS`, `Nebius`, `Vultr`, `Civo` or `CoreWeave` (Modelplane
-  provisions the full cluster) or `Existing` (bring a cluster you manage yourself). See
-  [Supported Providers]({{< ref "platform/providers.md" >}}) for the clouds and
-  neoclouds Modelplane runs on.
+- A **cluster source**: `Provisioned` (Modelplane provisions the full cluster)
+  or `Existing` (bring a cluster you manage yourself). See [Supported
+  Providers]({{< ref "platform/providers.md" >}}) for the clouds and neoclouds
+  Modelplane runs on.
 - One or more **node pools**, each referencing an `InferenceClass` for its
   hardware capabilities and provisioning recipe.
 - **Labels** for organizational metadata: tier, region, provider. These are the
@@ -40,8 +40,10 @@ cluster](#requirements-for-an-existing-cluster) sets out.
 
 The `cluster.source` discriminator picks one of two models:
 
-- **Provisioned (`GKE`, `EKS`, `AKS`, `Nebius`, `Vultr`, `Civo`, `CoreWeave`).** Modelplane creates the cluster and its GPU node
-  pools from each pool's `InferenceClass`, labels the pool's nodes so the
+- **Provisioned (`Provisioned`).** `cluster.provisioned.configRef` names a
+  cluster config, such as a `GKEClusterConfig`, that says where to create the
+  cluster. Modelplane creates the cluster and its GPU node pools, each from the
+  node class its `InferenceClass` names. It labels the pool's nodes so the
   scheduler's placement is enforced, and provisions the storage class for model
   weights. It also injects a non-GPU **system pool** with opinionated defaults to
   run the inference stack, so you only declare the GPU pools you want.
@@ -50,6 +52,25 @@ The `cluster.source` discriminator picks one of two models:
   provision infrastructure, and each pool's `InferenceClass` provides hardware
   capabilities for scheduling only. You're responsible for the cluster meeting
   [Modelplane's requirements](#requirements-for-an-existing-cluster).
+
+## Cluster providers
+
+Modelplane provisions each cloud's clusters through that cloud's cluster
+provider, a package you [install]({{< ref
+"/install#install-a-cluster-provider" >}}) beside Modelplane. A provider adds a
+cluster config kind and a node class kind. Several `InferenceCluster`s can share
+a cluster config, and `InferenceClass`es on the same machine type can share a
+node class. The GKE and EKS providers also add a capacity reservation kind.
+[Supported Providers]({{< ref "platform/providers.md#cluster-providers" >}})
+lists each provider's kinds.
+
+Providers differ in the node pool fields they support. A pool's `zones` work on
+GKE, EKS and AKS, and its `reservationRef` on GKE and EKS. Modelplane checks
+what the provider supports before it provisions anything, and reports a field
+the provider can't honor in the `InferenceCluster`'s conditions.
+
+A cluster config's kind and API group are immutable, so moving a cluster to
+another cloud means creating a new `InferenceCluster`.
 
 ## Requirements for an existing cluster
 
@@ -151,8 +172,8 @@ is planned.
 
 Large GPU machines are often only available through a capacity reservation. On
 GKE and EKS a node pool can consume one you've already bought. Register the
-reservation as a `CapacityReservation`, then reference it from the pool's
-`reservationRef`:
+reservation as a `GKECapacityReservation` or `EKSCapacityReservation`, then
+reference it from the pool's `reservationRef`:
 
 {{< manifests path="concepts/capacity-reservation-gke.yaml" apply="false" >}}
 
@@ -162,18 +183,19 @@ reserved instance count. On GKE, restrict the pool's `zones` to the
 reservation's zone. On EKS, restrict them to the reservation's Availability
 Zone.
 
-A `CapacityReservation` describes any GKE reservation, including a future
-reservation in calendar mode once its reservation period starts. On EKS it
-describes a Capacity Block for ML (`type: CapacityBlock`) or an On-Demand
-Capacity Reservation (`type: OnDemand`). Modelplane doesn't create, change, or
-delete the reservation itself. It blocks deleting a `CapacityReservation`, or an
-`InferenceClass`, while a node pool references it.
+A `GKECapacityReservation` describes any GKE reservation, including a future
+reservation in calendar mode once its reservation period starts. An
+`EKSCapacityReservation` describes a Capacity Block for ML
+(`type: CapacityBlock`) or an On-Demand Capacity Reservation
+(`type: OnDemand`). Modelplane doesn't create, change, or delete the
+reservation itself. It blocks deleting a reservation, or an `InferenceClass`,
+while a node pool references it.
 
 When a Capacity Block or a calendar-mode reservation ends, the cloud removes
 the nodes that consume it. A pool's reservation can't change, and neither can
-a `CapacityReservation`'s. To move to a new reservation, add a node pool that
-references it, ideally before the old reservation ends, then remove the old
-pool.
+the fields of a `GKECapacityReservation` or `EKSCapacityReservation`. To move to
+a new reservation, add a node pool that references it, ideally before the old
+reservation ends, then remove the old pool.
 
 ## Examples
 
@@ -208,21 +230,21 @@ pool.
 
 A [ModelCache]({{< ref "/models/model-cache.md" >}}) stages model weights on a
 `ReadWriteMany` (RWX) StorageClass on the workload cluster. Where that comes from
-depends on the source:
+depends on the cluster:
 
 <!-- vale Google.Acronyms = NO -->
-- **`GKE`** (Filestore Enterprise), **`EKS`** (EFS), **`AKS`** (Azure Files),
-  **`Nebius`** (shared filesystem), and **`CoreWeave`** (Distributed File
-  Storage): auto-provisioned. Those classes are fixed; nothing for the admin
-  to do.
-- **`Vultr`** and **`Civo`**: none. VKE's built-in RWX class (Vultr File
+- **GKE** (Filestore Enterprise), **EKS** (EFS), **AKS** (Azure Files),
+  **Nebius** (shared filesystem), and **CoreWeave** (Distributed File
+  Storage): the cluster provider provisions it. Those classes are fixed;
+  nothing for the admin to do.
+- **Vultr** and **Civo**: none. VKE's built-in RWX class (Vultr File
   System) isn't usable on GPU nodes, Civo's `civo-volume` class is
   `ReadWriteOnce` only, and Modelplane doesn't provision an alternative
   on either. Deploy single-node engines without a `ModelCache` and let
   them pull weights directly from the model source.
-- **`Existing`**: bring your own. Create an RWX StorageClass on the cluster, with
-  any backend that supports automatic PVC provisioning (WekaIO, NetApp Trident,
-  `FSx` for NetApp, and similar), and name it in
+- **An existing cluster**: bring your own. Create an RWX StorageClass on the
+  cluster, with any backend that supports automatic PVC provisioning (WekaIO,
+  NetApp Trident, `FSx` for NetApp, and similar), and name it in
   `cluster.existing.cache.storageClassName`.
 <!-- vale Google.Acronyms = YES -->
 

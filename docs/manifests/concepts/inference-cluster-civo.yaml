@@ -1,15 +1,17 @@
 # An InferenceCluster backed by a Civo Kubernetes (k3s) cluster.
 #
-# Modelplane provisions the full cluster (network, firewall, control plane,
-# system + GPU node pools) and installs the inference stack (cert-manager,
-# Envoy Gateway, NVIDIA GPU Operator, LeaderWorkerSet, Gateway
-# API). Civo's default Traefik ingress is removed at creation - Envoy
-# Gateway is the stack's ingress - while the built-in metrics-server stays.
+# The Civo cluster provider provisions the full cluster (network,
+# firewall, control plane, system + GPU node pools, NVIDIA GPU Operator)
+# from the CivoClusterConfig the InferenceCluster names, and Modelplane
+# installs the inference stack (cert-manager, Envoy Gateway,
+# LeaderWorkerSet, Gateway API). Civo's default Traefik ingress is removed
+# at creation - Envoy Gateway is the stack's ingress - while the built-in
+# metrics-server stays.
 #
 # The system node pool that hosts control-plane components is provisioned
 # automatically and is not declared here. Only GPU node pools - each
-# referencing an InferenceClass that describes the hardware shape and how
-# to provision it - need to be declared.
+# referencing an InferenceClass that describes the hardware shape and
+# names the node class to provision it from - need to be declared.
 #
 # Unlike most clouds, Civo GPU node images ship no NVIDIA driver (only the
 # container toolkit), so the inference stack's GPU Operator installs the
@@ -41,6 +43,13 @@
 # cluster until the stack is uninstalled. Background deletion (the
 # kubectl default) tears everything down at once and can orphan cloud
 # resources.
+apiVersion: civo.modelplane.ai/v1alpha1
+kind: CivoClusterConfig
+metadata:
+  name: nyc1
+spec:
+  region: NYC1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -49,9 +58,12 @@ metadata:
     modelplane.ai/region: nyc1
 spec:
   cluster:
-    source: Civo
-    civo:
-      region: NYC1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: civo.modelplane.ai/v1alpha1
+        kind: CivoClusterConfig
+        name: nyc1
 
   nodePools:
     - name: gpu-l40s

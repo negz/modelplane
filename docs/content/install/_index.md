@@ -82,6 +82,44 @@ Wait for the configuration to become `Healthy`:
 kubectl wait configuration/modelplane --for=condition=Healthy --timeout=5m
 ```
 
+## Install a cluster provider
+
+Modelplane provisions clusters on each cloud through that cloud's cluster
+provider, a Configuration of its own. Install one for each cloud you want
+Modelplane to provision clusters on. It adds the kinds that describe that
+cloud's clusters and node pools, and the Crossplane providers for the cloud's
+API. To only register clusters you already run, skip this step.
+
+{{< tabs >}}
+{{< tab "EKS" >}}
+{{< manifests "install/cluster-provider-eks.yaml" >}}
+{{< /tab >}}
+{{< tab "GKE" >}}
+{{< manifests "install/cluster-provider-gke.yaml" >}}
+{{< /tab >}}
+{{< tab "AKS" >}}
+{{< manifests "install/cluster-provider-aks.yaml" >}}
+{{< /tab >}}
+{{< tab "Nebius" >}}
+{{< manifests "install/cluster-provider-nebius.yaml" >}}
+{{< /tab >}}
+{{< tab "Vultr" >}}
+{{< manifests "install/cluster-provider-vultr.yaml" >}}
+{{< /tab >}}
+{{< tab "Civo" >}}
+{{< manifests "install/cluster-provider-civo.yaml" >}}
+{{< /tab >}}
+{{< tab "CoreWeave" >}}
+{{< manifests "install/cluster-provider-coreweave.yaml" >}}
+{{< /tab >}}
+{{< /tabs >}}
+
+Wait for every configuration to become `Healthy`:
+
+```bash
+kubectl wait configuration --all --for=condition=Healthy --timeout=5m
+```
+
 ## Next step
 
 If you're taking the tour, continue to [Build the platform]({{< ref

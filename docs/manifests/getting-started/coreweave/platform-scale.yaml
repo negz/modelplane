@@ -1,5 +1,6 @@
-# A second cluster of the same class in the same zone. The tier label
-# lets a ModelDeployment's clusterSelector pick it.
+# A second cluster of the same class in the same zone, sharing the first
+# cluster's CoreWeaveClusterConfig. The tier label lets a ModelDeployment's
+# clusterSelector pick it.
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -9,9 +10,12 @@ metadata:
     modelplane.ai/tier: b
 spec:
   cluster:
-    source: CoreWeave
-    coreweave:
-      zone: US-EAST-04A
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: coreweave.modelplane.ai/v1alpha1
+        kind: CoreWeaveClusterConfig
+        name: us-east-04a
   nodePools:
   - name: gpu-rtxp6000
     className: rtxp6000-8x

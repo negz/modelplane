@@ -1,13 +1,14 @@
 # An InferenceCluster backed by a Vultr Kubernetes Engine (VKE) cluster.
 #
-# Modelplane provisions the full VKE cluster (VPC, control plane, system + GPU
-# node pools) and installs the inference stack (cert-manager, Envoy Gateway,
-# LeaderWorkerSet, Gateway API).
+# The Vultr cluster provider provisions the full VKE cluster (VPC, control
+# plane, system + GPU node pools) from the VultrClusterConfig the
+# InferenceCluster names, and Modelplane installs the inference stack
+# (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway API).
 #
 # The system node pool that hosts control-plane components is provisioned
 # automatically and is not declared here. Only GPU node pools - each
-# referencing an InferenceClass that describes the hardware shape and how
-# to provision it - need to be declared.
+# referencing an InferenceClass that describes the hardware shape and
+# names the node class to provision it from - need to be declared.
 #
 # The VKE kubeconfig embeds static client certificates, so Modelplane needs
 # nothing beyond it to authenticate to the cluster. The Vultr API key on
@@ -41,6 +42,16 @@
 # cluster until the stack is uninstalled. Background deletion (the
 # kubectl default) tears everything down at once and can orphan cloud
 # resources.
+apiVersion: vultr.modelplane.ai/v1alpha1
+kind: VultrClusterConfig
+metadata:
+  name: ewr
+spec:
+  region: ewr
+  # VKE accepts only the exact versions it currently offers; list them
+  # with vultr-cli kubernetes versions.
+  kubernetesVersion: "v1.36.6+1"
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -49,10 +60,12 @@ metadata:
     modelplane.ai/region: ewr
 spec:
   cluster:
-    source: Vultr
-    vultr:
-      region: ewr
-      kubernetesVersion: "v1.36.6+1"
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: vultr.modelplane.ai/v1alpha1
+        kind: VultrClusterConfig
+        name: ewr
 
   nodePools:
     - name: gpu-l40s

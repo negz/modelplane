@@ -1,0 +1,9 @@
+# The Modelplane cluster provider for AKS. Installing it adds the
+# AKSClusterConfig and AKSNodeClass kinds, and the Crossplane providers it
+# provisions clusters through.
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: modelplane-aks
+spec:
+  package: xpkg.upbound.io/modelplane/modelplane-aks:v0.7.0

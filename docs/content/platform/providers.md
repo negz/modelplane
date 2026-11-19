@@ -12,15 +12,16 @@ A provider can show up here in three ways:
 
 {{< hint "note" >}}
 - **Provisioning supported.** Modelplane creates and manages the whole cluster
-  from an `InferenceCluster`, selected through `cluster.source`. GKE, EKS, AKS,
-  Nebius mk8s, Vultr VKE, Civo K3s, CoreWeave CKS work this way today.
+  from an `InferenceCluster`, through the cloud's [cluster
+  provider](#cluster-providers). GKE, EKS, AKS, Nebius mk8s, Vultr VKE, Civo
+  K3s, CoreWeave CKS work this way today.
 - **Bring your own supported.** Register a cluster you already run with
   `source: Existing`. This works on any provider whose Kubernetes meets
   Modelplane's requirements (Dynamic Resource Allocation and a recent Kubernetes
   version), so you can run on the providers below now, ahead of native
   provisioning.
 - **Crossplane provider exists.** A Crossplane provider is published for the
-  cloud. Native provisioning would build on that provider, so it marks where
+  cloud. A cluster provider for the cloud would build on it, so it marks where
   Modelplane can grow next.
 {{< /hint >}}
 
@@ -77,6 +78,30 @@ Don't see your cloud or neocloud, or want to be added?
 [Open an issue](https://github.com/modelplaneai/modelplane/issues/new) and we'll
 track it.
 {{< /hint >}}
+
+## Cluster providers
+
+Modelplane provisions each cloud's clusters through a cluster provider, a
+Crossplane Configuration you [install]({{< ref
+"/install#install-a-cluster-provider" >}}) beside Modelplane. A control plane
+that only registers existing clusters needs none. Each provider adds the kinds a
+provisioned `InferenceCluster` and its `InferenceClass`es name:
+
+{{< table >}}
+| Cloud | Package | Cluster config | Node class | Capacity reservation |
+|---|---|---|---|---|
+| AWS (EKS) | `modelplane-eks` | `EKSClusterConfig` | `EKSNodeClass` | `EKSCapacityReservation` |
+| Civo | `modelplane-civo` | `CivoClusterConfig` | `CivoNodeClass` | None |
+| CoreWeave (CKS) | `modelplane-coreweave` | `CoreWeaveClusterConfig` | `CoreWeaveNodeClass` | None |
+| Google Cloud (GKE) | `modelplane-gke` | `GKEClusterConfig` | `GKENodeClass` | `GKECapacityReservation` |
+| Microsoft Azure (AKS) | `modelplane-aks` | `AKSClusterConfig` | `AKSNodeClass` | None |
+| Nebius (mk8s) | `modelplane-nebius` | `NebiusClusterConfig` | `NebiusNodeClass` | None |
+| Vultr (VKE) | `modelplane-vultr` | `VultrClusterConfig` | `VultrNodeClass` | None |
+{{< /table >}}
+
+Modelplane publishes each package as `xpkg.upbound.io/modelplane/<package>`,
+with its kinds in the API group `<cloud>.modelplane.ai/v1alpha1`, such as
+`gke.modelplane.ai/v1alpha1`.
 
 {{< cardgroup cols="2" >}}
 {{< card title="Register a Cluster" href="/platform/inference-cluster/" >}}

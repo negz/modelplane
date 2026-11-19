@@ -1,17 +1,23 @@
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: g6e-xlarge
+spec:
+  instanceType: g6e.xlarge
+  diskSizeGb: 100
+  accelerator:
+    type: nvidia-l40s
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: l40s-1x-g6e
 spec:
   description: "EKS g6e.xlarge, 1x NVIDIA L40S"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: g6e.xlarge
-      diskSizeGb: 100
-      accelerator:
-        type: nvidia-l40s
-        count: 1
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: g6e-xlarge
   devices:
   - name: gpu
     claim: DRA
@@ -25,6 +31,13 @@ spec:
 ---
 # g6e.xlarge is available in us-east-1, us-west-2, and eu-central-1.
 # eu-west-1 does NOT have g6e.xlarge.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-west-2
+spec:
+  region: us-west-2
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -33,9 +46,12 @@ metadata:
     modelplane.ai/region: us-west
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: us-west-2
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-west-2
   nodePools:
   - name: gpu-l40s
     className: l40s-1x-g6e
@@ -45,6 +61,13 @@ spec:
     zones:
     - us-west-2a
 ---
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: eu-central-1
+spec:
+  region: eu-central-1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -53,9 +76,12 @@ metadata:
     modelplane.ai/region: eu-central
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: eu-central-1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: eu-central-1
   nodePools:
   - name: gpu-l40s
     className: l40s-1x-g6e

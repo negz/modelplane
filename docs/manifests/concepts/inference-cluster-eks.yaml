@@ -1,17 +1,18 @@
 # An InferenceCluster backed by an EKS cluster.
 #
-# Modelplane provisions the full EKS cluster (VPC, subnets, internet
-# gateway, IAM roles for the cluster and nodes, system + GPU node
-# groups, vpc-cni / kube-proxy / coredns addons) and installs the
-# inference stack (cert-manager, Envoy Gateway,
-# LeaderWorkerSet, Gateway API).
+# The EKS cluster provider provisions the full EKS cluster (VPC, subnets,
+# internet gateway, IAM roles for the cluster and nodes, system + GPU node
+# groups, vpc-cni / kube-proxy / coredns addons) from the EKSClusterConfig
+# the InferenceCluster names, and Modelplane installs the inference stack
+# (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway API).
 #
 # The system node group that hosts control-plane components is
 # provisioned automatically and is not declared here. Only GPU node
 # groups - each referencing an InferenceClass that describes the
-# hardware shape and how to provision it - need to be declared.
+# hardware shape and names the node class to provision it from - need to
+# be declared.
 #
-# Modelplane provisions EFS RWX storage for ModelCache on EKS: an
+# The provider provisions EFS RWX storage for ModelCache on EKS: an
 # Elastic-throughput file system, mount targets, the EFS CSI driver, and
 # a 'modelplane-rwx-efs' StorageClass pinned to it. The admin does
 # nothing, and provisioned EKS clusters take no StorageClass override.
@@ -29,6 +30,19 @@
 # deletion holds the cluster until the stack is uninstalled. Background
 # deletion (the kubectl default) tears everything down at once and can
 # orphan cloud resources.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-west-2
+spec:
+  region: us-west-2
+  # The AWS ClusterProviderConfig that provisions the cluster. Modelplane
+  # also authenticates to the cluster as its principal. This is the
+  # default, so it can be omitted.
+  credentials:
+    type: ClusterProviderConfig
+    name: default
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -37,9 +51,12 @@ metadata:
     modelplane.ai/region: us-west
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: us-west-2
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-west-2
 
   nodePools:
   - name: gpu-l4

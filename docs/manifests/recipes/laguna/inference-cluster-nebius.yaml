@@ -14,6 +14,12 @@
 # the cluster:
 #   kubectl delete modeldeployment,modelservice,modelcache laguna -n ml-team --cascade=foreground
 #   kubectl delete inferencecluster nebius-eu-north --cascade=foreground
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusClusterConfig
+metadata:
+  name: eu-north1
+spec: {}
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -22,8 +28,12 @@ metadata:
     modelplane.ai/region: eu-north
 spec:
   cluster:
-    source: Nebius
-    nebius: {}
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: nebius.modelplane.ai/v1alpha1
+        kind: NebiusClusterConfig
+        name: eu-north1
 
   nodePools:
   - name: gpu-h100

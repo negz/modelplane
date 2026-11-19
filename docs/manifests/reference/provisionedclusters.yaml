@@ -1,0 +1,20 @@
+apiVersion: infrastructure.modelplane.ai/v1alpha1
+kind: ProvisionedCluster
+metadata:
+  name: west-gke
+spec:
+  configRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKEClusterConfig
+    name: us-central1
+  draDrivers: [gpu.nvidia.com]
+  nodePools:
+    - name: l4-pool
+      role: Accelerator
+      nodeClassRef:
+        apiVersion: gke.modelplane.ai/v1alpha1
+        kind: GKENodeClass
+        name: g2-standard-8-l4
+      nodeCount: 2
+      maxNodeCount: 10
+      zones: [us-central1-a]

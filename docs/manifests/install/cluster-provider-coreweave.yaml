@@ -1,0 +1,9 @@
+# The Modelplane cluster provider for CoreWeave CKS. Installing it adds the
+# CoreWeaveClusterConfig and CoreWeaveNodeClass kinds, and the Crossplane
+# providers it provisions clusters through.
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: modelplane-coreweave
+spec:
+  package: xpkg.upbound.io/modelplane/modelplane-coreweave:v0.7.0

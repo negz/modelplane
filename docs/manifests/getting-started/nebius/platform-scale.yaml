@@ -1,19 +1,25 @@
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusNodeClass
+metadata:
+  name: gpu-h100-sxm-1gpu
+spec:
+  platform: gpu-h100-sxm
+  preset: 1gpu-16vcpu-200gb
+  diskSizeGb: 100
+  driversPreset: cuda13.0
+  accelerator:
+    type: nvidia-h100
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: h100-1x
 spec:
   description: "Nebius gpu-h100-sxm, 1x NVIDIA H100 80GB"
-  provisioning:
-    provider: Nebius
-    nebius:
-      platform: gpu-h100-sxm
-      preset: 1gpu-16vcpu-200gb
-      diskSizeGb: 100
-      driversPreset: cuda13.0
-      accelerator:
-        type: nvidia-h100
-        count: 1
+  nodeClassRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusNodeClass
+    name: gpu-h100-sxm-1gpu
   devices:
   - name: gpu
     claim: DRA
@@ -26,9 +32,11 @@ spec:
     capacity:
       memory: { value: "81559Mi" }   # H100's real reported VRAM (not the nominal 80GB)
 ---
-# Nebius projects are bound to one region, so this cluster runs in the same
-# region as the base cluster. The fleet scales by GPU tier (L40S -> H100), not
-# geography. To add a region, create another project + ClusterProviderConfig.
+# Nebius projects are bound to one region, so this cluster shares the base
+# cluster's NebiusClusterConfig and runs in the same region. The fleet scales
+# by GPU tier (L40S -> H100), not geography. To add a region, create another
+# project, a ClusterProviderConfig for it, and a NebiusClusterConfig whose
+# credentials name that ClusterProviderConfig.
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -38,8 +46,12 @@ metadata:
     modelplane.ai/tier: h100
 spec:
   cluster:
-    source: Nebius
-    nebius: {}
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: nebius.modelplane.ai/v1alpha1
+        kind: NebiusClusterConfig
+        name: eu-north1
   nodePools:
   - name: gpu-h100
     className: h100-1x

@@ -4,7 +4,9 @@ metadata:
   name: west-gke-stack
   namespace: platform
 spec:
-  cloud: GKE
+  # The GKE cluster provider installs the cluster's device stacks.
+  deviceStacks: External
+  draDrivers: [gpu.nvidia.com]
   secrets:
     - type: Kubeconfig
       name: west-gke-kubeconfig

@@ -3,22 +3,28 @@
 # instance type; gpu-h100-sxm + 8gpu-128vcpu-1600gb is one 8x H100 SXM
 # node. The devices block describes the hardware DRA-style; it is what
 # the Laguna ModelDeployment's nodeSelector matches on.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusNodeClass
+metadata:
+  name: gpu-h100-sxm-8gpu-200gb
+spec:
+  platform: gpu-h100-sxm
+  preset: 8gpu-128vcpu-1600gb
+  diskSizeGb: 200
+  driversPreset: cuda13.0
+  accelerator:
+    type: nvidia-h100
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: nebius-h100-8x
 spec:
   description: "Nebius gpu-h100-sxm, 8x NVIDIA H100 80GB"
-  provisioning:
-    provider: Nebius
-    nebius:
-      platform: gpu-h100-sxm
-      preset: 8gpu-128vcpu-1600gb
-      diskSizeGb: 200
-      driversPreset: cuda13.0
-      accelerator:
-        type: nvidia-h100
-        count: 8
+  nodeClassRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusNodeClass
+    name: gpu-h100-sxm-8gpu-200gb
   devices:
   - name: gpu
     claim: DRA

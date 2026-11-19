@@ -1,0 +1,9 @@
+# The Modelplane cluster provider for GKE. Installing it adds the
+# GKEClusterConfig, GKENodeClass and GKECapacityReservation kinds, and the
+# Crossplane providers it provisions clusters through.
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: modelplane-gke
+spec:
+  package: xpkg.upbound.io/modelplane/modelplane-gke:v0.7.0

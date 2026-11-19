@@ -2,20 +2,26 @@
 # Standard_NC24ads_A100_v4. The GPU is declared as a DRA device: the scheduler
 # matches a ModelDeployment's nodeSelector against this capacity, then DRA
 # binds the physical GPU to the serving pod.
+apiVersion: aks.modelplane.ai/v1alpha1
+kind: AKSNodeClass
+metadata:
+  name: standard-nc24ads-a100-v4-200gb
+spec:
+  vmSize: Standard_NC24ads_A100_v4
+  diskSizeGb: 200
+  accelerator:
+    type: nvidia-a100
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: aks-a100-1x-nc24ads
 spec:
   description: "AKS Standard_NC24ads_A100_v4, 1x NVIDIA A100 80GB"
-  provisioning:
-    provider: AKS
-    aks:
-      vmSize: Standard_NC24ads_A100_v4
-      diskSizeGb: 200
-      accelerator:
-        type: nvidia-a100
-        count: 1
+  nodeClassRef:
+    apiVersion: aks.modelplane.ai/v1alpha1
+    kind: AKSNodeClass
+    name: standard-nc24ads-a100-v4-200gb
   devices:
   - name: gpu
     claim: DRA

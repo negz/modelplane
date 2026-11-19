@@ -1,5 +1,5 @@
 # Points the GCP provider at the credentials Secret you created. Named default,
-# so InferenceClusters with a GKE source use it without further configuration.
+# so GKEClusterConfigs use it without further configuration.
 apiVersion: gcp.m.upbound.io/v1beta1
 kind: ClusterProviderConfig
 metadata:

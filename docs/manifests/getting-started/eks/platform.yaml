@@ -1,17 +1,23 @@
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: g6-xlarge-50gb
+spec:
+  instanceType: g6.xlarge
+  diskSizeGb: 50
+  accelerator:
+    type: nvidia-l4
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: l4-1x-g6
 spec:
   description: "EKS g6.xlarge, 1x NVIDIA L4"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: g6.xlarge
-      diskSizeGb: 50
-      accelerator:
-        type: nvidia-l4
-        count: 1
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: g6-xlarge-50gb
   devices:
   - name: gpu
     claim: DRA
@@ -23,6 +29,13 @@ spec:
     capacity:
       memory: { value: "23034Mi" }   # L4's real reported VRAM (not the nominal 24GB)
 ---
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-east-1
+spec:
+  region: us-east-1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -31,9 +44,12 @@ metadata:
     modelplane.ai/region: us-east
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: us-east-1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-east-1
   nodePools:
   - name: gpu-l4
     className: l4-1x-g6

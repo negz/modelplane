@@ -24,10 +24,10 @@ AMD serving path, not the model. The class claims the GPU through DRA
 when a class claims that driver, against the amdgpu kernel driver the node
 image already carries. The engine is AMD's ROCm vLLM.
 
-`source: Existing` is the one cloud source that installs the AMD stack today.
-Bring the cluster with the amdgpu driver on its GPU nodes, label the pool's
-nodes `modelplane.ai/pool=gpu-mi325x`, and apply the platform side first, then
-the ML side.
+No cluster provider installs the AMD stack today, so it runs only on an
+existing cluster. Bring the cluster with the amdgpu driver on its GPU nodes,
+label the pool's nodes `modelplane.ai/pool=gpu-mi325x`, and apply the platform
+side first, then the ML side.
 
 ## Validated deployments
 

@@ -1,5 +1,5 @@
 # Points the AWS provider at the credentials Secret you created. Named default,
-# so InferenceClusters with an EKS source use it without further configuration.
+# so EKSClusterConfigs use it without further configuration.
 apiVersion: aws.m.upbound.io/v1beta1
 kind: ClusterProviderConfig
 metadata:

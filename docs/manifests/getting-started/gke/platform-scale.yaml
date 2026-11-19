@@ -1,17 +1,24 @@
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKENodeClass
+metadata:
+  name: a2-highgpu-1g-a100-200gb
+spec:
+  machineType: a2-highgpu-1g
+  diskSizeGb: 200
+  accelerator:
+    type: nvidia-tesla-a100
+    count: 1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: gke-a100-40-1x
 spec:
   description: "GKE a2-highgpu-1g, 1x NVIDIA A100 40GB"
-  provisioning:
-    provider: GKE
-    gke:
-      machineType: a2-highgpu-1g
-      diskSizeGb: 200
-      accelerator:
-        type: nvidia-tesla-a100
-        count: 1
+  nodeClassRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKENodeClass
+    name: a2-highgpu-1g-a100-200gb
   devices:
   - name: gpu
     claim: DRA
@@ -26,6 +33,13 @@ spec:
       # so it reliably clears the L4 (24Gi) without hitting the boundary.
       memory: { value: "40960Mi" }
 ---
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKEClusterConfig
+metadata:
+  name: us-west1
+spec:
+  region: us-west1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -34,9 +48,12 @@ metadata:
     modelplane.ai/region: us-west
 spec:
   cluster:
-    source: GKE
-    gke:
-      region: us-west1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: gke.modelplane.ai/v1alpha1
+        kind: GKEClusterConfig
+        name: us-west1
   nodePools:
   - name: gpu-a100
     className: gke-a100-40-1x
@@ -46,6 +63,13 @@ spec:
     zones:
     - us-west1-b
 ---
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKEClusterConfig
+metadata:
+  name: us-east1
+spec:
+  region: us-east1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -54,9 +78,12 @@ metadata:
     modelplane.ai/region: us-east
 spec:
   cluster:
-    source: GKE
-    gke:
-      region: us-east1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: gke.modelplane.ai/v1alpha1
+        kind: GKEClusterConfig
+        name: us-east1
   nodePools:
   - name: gpu-a100
     className: gke-a100-40-1x

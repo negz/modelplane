@@ -1,8 +1,8 @@
 # Registers the bring-your-own cluster and installs the serving stack onto
 # it through the kubeconfig Secret. The composed ServingStack gets
 # draDrivers: [gpu.amd.com], so the AMD GPU operator (DRA mode) installs and
-# the NVIDIA and CPU device stacks stay out. Existing is the one cloud that
-# installs the AMD stack today.
+# the NVIDIA and CPU device stacks stay out. No cluster provider installs the
+# AMD stack today, so it runs only on an existing cluster.
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:

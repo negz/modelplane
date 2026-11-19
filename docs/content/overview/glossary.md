@@ -22,6 +22,13 @@ A GPU cluster in the fleet where serving engines run and tokens are produced.
 Modelplane can provision inference clusters on EKS, GKE, and other providers, or
 you can bring your own through an `InferenceCluster` with `source: Existing`.
 
+## Cluster provider
+
+A package, installed beside Modelplane, that provisions inference clusters on
+one cloud. It adds the cloud's cluster config and node class kinds, which an
+`InferenceCluster` and an `InferenceClass` reference. See [Supported
+Providers]({{< ref "/platform/providers.md#cluster-providers" >}}).
+
 ## Fleet
 
 All inference clusters managed by one Modelplane control cluster.

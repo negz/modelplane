@@ -1,7 +1,7 @@
 # An InferenceClass describing a BYO 8x AMD Instinct MI325X node pool.
 #
-# No provisioning block: this class describes hardware that already exists on
-# a bring-your-own cluster whose node images carry the amdgpu kernel driver.
+# No nodeClassRef: this class describes hardware that already exists on a
+# bring-your-own cluster whose node images carry the amdgpu kernel driver.
 # When a cluster references it, the serving stack installs the AMD GPU
 # operator in DRA mode (driver management off), whose DRA driver publishes
 # the GPUs as gpu.amd.com ResourceSlices. Label the pool's nodes

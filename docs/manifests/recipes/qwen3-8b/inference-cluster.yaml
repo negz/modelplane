@@ -1,5 +1,12 @@
 # An EKS InferenceCluster with one L4 node pool, labeled for the
 # ModelDeployment's clusterSelector to target.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-west-2
+spec:
+  region: us-west-2
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -8,9 +15,12 @@ metadata:
     modelplane.ai/region: us
 spec:
   cluster:
-    source: EKS
-    eks:
-      region: us-west-2
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-west-2
   nodePools:
   - name: gpu-l4
     className: eks-l4-1x-g6

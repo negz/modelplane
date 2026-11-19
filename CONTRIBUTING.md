@@ -124,10 +124,12 @@ gateway routing, a live request — with no cloud credentials. Add `-- --verify`
 and it runs the pytest suite in `e2e/tests/`, exiting non-zero if a test fails. That
 verify command is what the label-gated `E2E` workflow runs on CI (add the
 `test-e2e` label to a PR), so a green local `--verify` and a green CI run mean
-the same thing. `-- --cloud <cloud>` instead installs one cloud's serving
-stack onto KWOK-faked device pools and audits placement, still with no
-credentials; its per-cloud CI matrix (the `E2E Clouds` workflow) runs on pull
-requests touching the serving stack or `e2e/`. See `e2e/README.md`.
+the same thing. `-- --cloud <provider>` instead installs Modelplane and one
+cluster provider, installs the provider's device stack onto KWOK-faked device
+pools, audits placement, and checks the provider honours the provisioning
+contract, still with no credentials. This is the provider conformance suite;
+its per-provider CI matrix (the `E2E Clouds` workflow) runs on pull requests
+touching the serving stack, a provider, or `e2e/`. See `e2e/README.md`.
 
 ## Submitting changes
 
@@ -255,11 +257,14 @@ the gRPC service that wires `Composer` to the SDK's runtime. Functions use
 generated Pydantic models (in `schemas/python/`) for type-safe access to XR
 specs and status.
 
-Each function is self-contained; there is no shared library. Common patterns
-like setting conditions, updating status, and building child resource names are
-provided by the [Crossplane Python Function
+Common patterns like setting conditions, updating status, and building child
+resource names are provided by the [Crossplane Python Function
 SDK](https://github.com/crossplane/function-sdk-python). Helpers specific to a
 single function live in that function's `function/` package alongside `fn.py`.
+Code that both core functions and cluster providers need lives in the
+Modelplane SDK, `sdk/python/modelplane_sdk/`. It's a library for providers, so
+add to it only what a provider needs; a helper only core uses belongs in the
+core function that uses it.
 
 The Pydantic models in `schemas/python/` are generated from the XRDs under
 `apis/` and the project's dependency CRDs. They're committed to git so tests and
@@ -415,56 +420,106 @@ are Linux images assembled entirely from data — a prebuilt Python interpreter
 and dependency wheels plus our own source — so there's no cross-compilation. The
 same is true of `nix run .#build`.
 
+## Working on cluster providers
+
+Modelplane's core knows no cloud. Each cloud's support is a cluster provider
+under `providers/<name>/`, a Crossplane project of its own that depends on
+Modelplane's package. See design/cluster-providers.md for the contract a
+provider implements. `providers/coreweave/` is a good reference to model a new
+provider on.
+
+```
+providers/<name>/
+  crossplane-project.yaml  # depends on xpkg.upbound.io/modelplane/modelplane
+  conformance.yaml         # what the conformance suite applies and expects
+  apis/                    # its own XRDs (cluster config, node class, device
+                           # stack, internal kinds), its ProvisionedCluster
+                           # Composition, and its MRAP
+  functions/
+    compose-provisioned-cluster/  # implements the ProvisionedCluster contract
+    compose-<name>-cluster/       # provisions the cloud's cluster
+    compose-device-stack/         # the cloud's device stack
+  schemas/                 # models generated from the XRDs above
+  pyproject.toml, uv.lock  # the provider's own uv workspace
+```
+
+A provider imports only the Modelplane SDK, its own models, and the contract's
+models. `nix flake check` enforces that with `hack/check_boundaries.py`, which
+also fails if core or the SDK names a cloud. It runs every provider's unit
+tests, type checks and lints, and checks each provider's declarations with
+`python -m modelplane_sdk.check`.
+
+The flake finds providers and their functions by directory, so adding one
+touches nothing outside `providers/<name>/`. Build a provider with `nix run
+.#build-<name>`. A provider's build resolves Modelplane's package from a
+registry, so the app builds core, pushes it to a local registry at
+`localhost:5000`, and builds the provider against it. Run a provider's function
+tests with `nix run .#test -- <name>/<function>`. Run its conformance suite
+with `nix run .#e2e -- --cloud <name>` after building it, because the suite
+installs what the build produced.
+
 ## Bumping aicr
 
-The serving stack's EKS, AKS and GKE component lists are generated from
-NVIDIA AICR recipes by `functions/compose-serving-stack/generate.py`
-(`nix run .#stacks`), pinned to one aicr release. A bump changes the
-components and versions every managed cluster runs on the next
-Modelplane release, so it lands as a reviewed stack change, never as an
-auto-merged dependency update. aicr releases about every two weeks and
-its schemas are still `v1alpha*`, so expect the generator's fail-closed
-checks to trip. In order:
+The EKS, AKS and GKE providers' device stacks are generated from NVIDIA
+AICR recipes (`nix run .#stacks`), pinned to one aicr release. The
+engine and the tables every cloud shares are `modelplane_sdk.aicr`, in
+`sdk/python/modelplane_sdk/aicr/`; each provider's
+`functions/compose-device-stack/generate.py` declares its cloud and
+writes its `function/generated/aicr/`. A bump changes the components
+and versions every managed cluster runs on the next Modelplane release,
+so it lands as a reviewed stack change, never as an auto-merged
+dependency update. aicr releases about every two weeks and its schemas
+are still `v1alpha*`, so expect the generator's fail-closed checks to
+trip. In order:
 
-1. Update `AICR_PIN` in generate.py and `version` in `nix/aicr.nix`
-   together, with hashes from the release's `aicr_checksums.txt`. The
-   two must move in lockstep; the generator refuses a mismatched aicr.
-2. Re-sync the embedded gke-cos fork (`GKE_COS_OVERLAY` in generate.py):
-   diff it against the new tag's `recipes/overlays/gke-cos.yaml` and
-   re-apply the changes marked "Modelplane fork" (the `dra` profile
-   value, the 1.35 floor, and the DRA selector paths on the stock values
-   for union totality). The file is high-churn upstream. The profile-only
-   `--data` patch aicr 1.0.0 added (NVIDIA/aicr#2985) cannot replace the
-   fork: a patched-in value must own exactly the embedded path set, and
-   `dra` owns the DRA selector paths the upstream values don't. The fork
-   is deleted the day NVIDIA/aicr#2517 lands.
+1. Update `AICR_PIN` in the SDK's `aicr/tables.py`, each provider's
+   `aicr=` in generate.py, and `version` in `nix/aicr.nix` together,
+   with hashes from the release's `aicr_checksums.txt`. They must move
+   in lockstep; the generator refuses a mismatched aicr or Cloud.
+2. Re-sync the GKE provider's embedded gke-cos fork (`GKE_COS_OVERLAY`
+   in its generate.py): diff it against the new tag's
+   `recipes/overlays/gke-cos.yaml` and re-apply the changes marked
+   "Modelplane fork" (the `dra` profile value, the 1.35 floor, and the
+   DRA selector paths on the stock values for union totality). The file
+   is high-churn upstream. The profile-only `--data` patch aicr 1.0.0
+   added (NVIDIA/aicr#2985) cannot replace the fork: a patched-in value
+   must own exactly the embedded path set, and `dra` owns the DRA
+   selector paths the upstream values don't. The fork is deleted the
+   day NVIDIA/aicr#2517 lands.
 3. Expect `ALLOW`/`DROP` to fail closed on any component the new catalog
-   adds; classify it with a reason. An `ALLOW` entry also names the DRA
-   drivers whose device stacks the component belongs to (empty for a
-   component every cluster needs) - deciding that is part of classifying
-   it; see design/multi-accelerator.md.
+   adds; classify it with a reason, in the SDK if every cloud carries it
+   or in the provider's `allow`/`drop` if only its cloud does. An
+   `ALLOW` entry also names the DRA drivers whose device stacks the
+   component belongs to (empty for a component every cluster needs) -
+   deciding that is part of classifying it; see
+   design/multi-accelerator.md.
 4. Expect `check_namespace_holds` to fail closed if the catalog moved a
    component's chart namespace: Helm can't move a release across
    namespaces, so existing clusters would wedge on a fresh-install
-   ownership error. Pin the old namespace in `NAMESPACE_PINS`, or land
-   the move as a documented migration.
+   ownership error. Pin the old namespace in the provider's
+   `namespace_pins`, or land the move as a documented migration.
 5. Expect the managed-path assertions to fail closed if a values path
    moved or a `--set` stopped landing; re-derive the path from the new
    chart before loosening anything. `MODELPLANE_VALUES` fails closed too
    if a new recipe starts carrying one of its paths - decide whose value
    wins and move the path to the right table.
-6. Both embedded catalog documents carry an apiVersion that can move in
-   any release.
-7. The Kubernetes floor union re-checks against `k8s_default` in
-   `CLOUDS`, which must track the cloud cluster XRD defaults.
-8. `nix run .#stacks`, run twice to confirm no diff, and review the
+6. Expect the DCGM check to fail closed if the recipe's exporter
+   metrics CSV moved; update `sdk/python/modelplane_sdk/stacks/dcgm.py`
+   to match, which moves the hand-written device stacks with it.
+7. The registry and every provider's catalog overlay carry an
+   apiVersion that can move in any release.
+8. The Kubernetes floor union re-checks against each provider's
+   `k8s_default`, which must track its cluster XRD's default.
+9. `nix run .#stacks`, run twice to confirm no diff, and review the
    generated diff as the release's stack change. The `stacks-current`
    flake check regenerates in the sandbox and fails CI on a stale or
    hand-edited generated file.
 
-Where a bumped component also exists in the hand-written cloud halves
-(`function/stacks/clouds/`), mirror the shared pins there so one review
-moves both.
+Where a bumped component also exists in a hand-written device stack
+(a provider's `function/stack.py`, or `modelplane_sdk.stacks.nvidia`),
+mirror the shared pins there so one review moves both. The
+`provider-declarations` flake check fails any provider whose NVIDIA
+components don't match the pins in `modelplane_sdk.stacks.nvidia`.
 
 ## Working on the docs site
 

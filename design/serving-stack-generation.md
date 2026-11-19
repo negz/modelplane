@@ -4,6 +4,11 @@
 **Date:** September 2026
 **Authors:** Nic Cope (@negz), Christopher Haar (@haarchri)
 
+The layout this design describes has since moved. The generator is
+`modelplane_sdk.aicr` in `sdk/python/`, and each cloud's stack lives in its
+cluster provider under `providers/`, as described in
+[cluster providers](cluster-providers.md).
+
 ## Summary
 
 A `ServingStack` installs a fixed set of Helm charts and raw manifests on a

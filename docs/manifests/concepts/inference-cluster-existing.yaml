@@ -33,7 +33,7 @@ spec:
 
   # Each pool's nodes must be labeled modelplane.ai/pool=<name> (here
   # modelplane.ai/pool=gpu-h100). The scheduler pins a worker to its pool by
-  # this label; Modelplane provisions and labels EKS/GKE pools itself, but on a
+  # this label; a cluster provider labels the pools it provisions, but on a
   # BYO cluster you label the nodes. Without it worker pods stay Pending.
   nodePools:
   - name: gpu-h100

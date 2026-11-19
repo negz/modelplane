@@ -1,17 +1,30 @@
 # An InferenceCluster backed by a GKE cluster.
 #
-# Modelplane provisions the full GKE cluster (VPC, subnet, system pool,
-# GPU pools, service account, IAM bindings) and installs the inference
-# stack (cert-manager, Envoy Gateway, LeaderWorkerSet,
-# Gateway API).
+# The GKE cluster provider provisions the full GKE cluster (VPC, subnet,
+# system pool, GPU pools, service account, IAM bindings) from the
+# GKEClusterConfig the InferenceCluster names, and Modelplane installs the
+# inference stack (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway
+# API). Every InferenceCluster in a region can share one GKEClusterConfig.
 #
 # The system pool that hosts control-plane components is provisioned
 # automatically and is not declared here. Only GPU pools - each
 # referencing an InferenceClass that describes the hardware shape and
-# how to provision it - need to be declared.
+# names the node class to provision it from - need to be declared.
 #
 # Add labels to this InferenceCluster to control which deployments land on it
 # via a ModelDeployment's clusterSelector.
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKEClusterConfig
+metadata:
+  name: us-central1
+spec:
+  region: us-central1
+  # The GCP ClusterProviderConfig that provisions the cluster. This is the
+  # default, so it can be omitted.
+  credentials:
+    type: ClusterProviderConfig
+    name: default
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -20,9 +33,12 @@ metadata:
     modelplane.ai/region: us-central
 spec:
   cluster:
-    source: GKE
-    gke:
-      region: us-central1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: gke.modelplane.ai/v1alpha1
+        kind: GKEClusterConfig
+        name: us-central1
 
   nodePools:
   - name: gpu-l4

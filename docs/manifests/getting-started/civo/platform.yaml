@@ -1,3 +1,13 @@
+apiVersion: civo.modelplane.ai/v1alpha1
+kind: CivoNodeClass
+metadata:
+  name: an-g1-l40s-kube-x1
+spec:
+  size: an.g1.l40s.kube.x1
+  accelerator:
+    type: nvidia-l40s
+    count: 1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
@@ -7,13 +17,10 @@ spec:
   # your account offers with `civo kubernetes size` before picking
   # another size.
   description: "Civo an.g1.l40s.kube.x1, 1x NVIDIA L40S 48GB"
-  provisioning:
-    provider: Civo
-    civo:
-      size: an.g1.l40s.kube.x1
-      accelerator:
-        type: nvidia-l40s
-        count: 1
+  nodeClassRef:
+    apiVersion: civo.modelplane.ai/v1alpha1
+    kind: CivoNodeClass
+    name: an-g1-l40s-kube-x1
   devices:
   - name: gpu
     claim: DRA
@@ -26,6 +33,13 @@ spec:
     capacity:
       memory: { value: "46068Mi" }   # L40S's real reported VRAM (not the nominal 48GB)
 ---
+apiVersion: civo.modelplane.ai/v1alpha1
+kind: CivoClusterConfig
+metadata:
+  name: nyc1
+spec:
+  region: NYC1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -34,9 +48,12 @@ metadata:
     modelplane.ai/region: nyc1
 spec:
   cluster:
-    source: Civo
-    civo:
-      region: NYC1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: civo.modelplane.ai/v1alpha1
+        kind: CivoClusterConfig
+        name: nyc1
   nodePools:
   - name: gpu-l40s
     className: l40s-1x

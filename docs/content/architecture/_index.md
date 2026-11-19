@@ -148,12 +148,13 @@ flowchart TD
     mr2 --> wl2
 ```
 
-The platform resources compose the same way. An `InferenceCluster` composes a
-`GKECluster` or `EKSCluster` (the cloud infrastructure, via the cloud providers)
-and a `ServingStack` (the per-cluster software install, via provider-helm and
-provider-kubernetes). Engines bind GPUs through DRA: each `claim: DRA` device in a
-member's `nodeSelector` becomes a request in the `ResourceClaim` the serving pods
-claim through.
+The platform resources compose the same way. A provisioned `InferenceCluster`
+composes a `ProvisionedCluster`, which its cloud's cluster provider composes
+into the cloud infrastructure. Every `InferenceCluster` composes a `ServingStack`
+(the per-cluster software install, via provider-helm and provider-kubernetes).
+Engines bind GPUs through DRA: each `claim: DRA` device in a member's
+`nodeSelector` becomes a request in the `ResourceClaim` the serving pods claim
+through.
 
 ## The request path
 

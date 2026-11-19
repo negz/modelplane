@@ -1,5 +1,5 @@
 # Points the Vultr provider at the API key Secret you created. Named
-# default, so InferenceClusters with a Vultr source use it without further
+# default, so VultrClusterConfigs use it without further
 # configuration. The API key only provisions clusters - VKE kubeconfigs
 # embed static client certificates, so consumers never need it to reach
 # the clusters Modelplane provisions.

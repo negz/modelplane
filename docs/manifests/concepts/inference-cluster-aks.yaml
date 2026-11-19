@@ -1,14 +1,17 @@
 # An InferenceCluster backed by an Azure AKS cluster.
 #
-# Modelplane provisions the full AKS cluster (a dedicated resource group,
-# virtual network and subnet, control plane with a system-assigned managed
-# identity, system + GPU node pools) and installs the inference stack
-# (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway API).
+# The AKS cluster provider provisions the full AKS cluster (a dedicated
+# resource group, virtual network and subnet, control plane with a
+# system-assigned managed identity, system + GPU node pools) from the
+# AKSClusterConfig the InferenceCluster names, and Modelplane installs the
+# inference stack (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway
+# API).
 #
 # The system node pool that hosts control-plane components is
 # provisioned automatically and is not declared here. Only GPU node
 # pools - each referencing an InferenceClass that describes the
-# hardware shape and how to provision it - need to be declared. AKS
+# hardware shape and names the node class to provision it from - need
+# to be declared. AKS
 # caps pool names at 12 lowercase alphanumeric characters.
 #
 # The cluster's kubeconfig embeds a client certificate for a
@@ -34,6 +37,13 @@
 # cluster until the stack is uninstalled. Background deletion (the
 # kubectl default) tears everything down at once and can orphan cloud
 # resources.
+apiVersion: aks.modelplane.ai/v1alpha1
+kind: AKSClusterConfig
+metadata:
+  name: westeurope
+spec:
+  location: westeurope
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -42,9 +52,12 @@ metadata:
     modelplane.ai/region: westeurope
 spec:
   cluster:
-    source: AKS
-    aks:
-      location: westeurope
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: aks.modelplane.ai/v1alpha1
+        kind: AKSClusterConfig
+        name: westeurope
 
   nodePools:
   - name: gpuh100

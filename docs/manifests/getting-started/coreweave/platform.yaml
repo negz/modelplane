@@ -1,3 +1,12 @@
+apiVersion: coreweave.modelplane.ai/v1alpha1
+kind: CoreWeaveNodeClass
+metadata:
+  name: rtxp6000-8x
+spec:
+  instanceType: rtxp6000-8x
+  accelerator:
+    type: nvidia-rtx-pro-6000
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
@@ -6,13 +15,10 @@ spec:
   # An 8x RTX PRO 6000 bare-metal instance type. CKS instance types vary by
   # zone.
   description: "CoreWeave rtxp6000-8x, 8x NVIDIA RTX PRO 6000 Blackwell 96GB"
-  provisioning:
-    provider: CoreWeave
-    coreweave:
-      instanceType: rtxp6000-8x
-      accelerator:
-        type: nvidia-rtx-pro-6000
-        count: 8
+  nodeClassRef:
+    apiVersion: coreweave.modelplane.ai/v1alpha1
+    kind: CoreWeaveNodeClass
+    name: rtxp6000-8x
   devices:
   - name: gpu
     claim: DRA
@@ -25,6 +31,13 @@ spec:
     capacity:
       memory: { value: "97887Mi" }   # RTX PRO 6000's real reported VRAM
 ---
+apiVersion: coreweave.modelplane.ai/v1alpha1
+kind: CoreWeaveClusterConfig
+metadata:
+  name: us-east-04a
+spec:
+  zone: US-EAST-04A
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -33,9 +46,12 @@ metadata:
     modelplane.ai/region: us-east-04
 spec:
   cluster:
-    source: CoreWeave
-    coreweave:
-      zone: US-EAST-04A
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: coreweave.modelplane.ai/v1alpha1
+        kind: CoreWeaveClusterConfig
+        name: us-east-04a
   nodePools:
   - name: gpu-rtxp6000
     className: rtxp6000-8x

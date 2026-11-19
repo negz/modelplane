@@ -1,20 +1,26 @@
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusNodeClass
+metadata:
+  name: gpu-l40s-a-1gpu
+spec:
+  # gpu-l40s-a (L40S PCIe, Intel Ice Lake) is available in eu-north1.
+  platform: gpu-l40s-a
+  preset: 1gpu-8vcpu-32gb
+  diskSizeGb: 100
+  driversPreset: cuda13.0
+  accelerator:
+    type: nvidia-l40s
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: l40s-1x
 spec:
   description: "Nebius gpu-l40s-a, 1x NVIDIA L40S 48GB"
-  provisioning:
-    provider: Nebius
-    nebius:
-      # gpu-l40s-a (L40S PCIe, Intel Ice Lake) is available in eu-north1.
-      platform: gpu-l40s-a
-      preset: 1gpu-8vcpu-32gb
-      diskSizeGb: 100
-      driversPreset: cuda13.0
-      accelerator:
-        type: nvidia-l40s
-        count: 1
+  nodeClassRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusNodeClass
+    name: gpu-l40s-a-1gpu
   devices:
   - name: gpu
     claim: DRA
@@ -27,6 +33,14 @@ spec:
     capacity:
       memory: { value: "46068Mi" }   # L40S reported VRAM (48GB nominal)
 ---
+# A Nebius cluster runs in the region of the project its credentials'
+# ClusterProviderConfig names, so the config needs no region.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusClusterConfig
+metadata:
+  name: eu-north1
+spec: {}
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -35,8 +49,12 @@ metadata:
     modelplane.ai/region: eu-north
 spec:
   cluster:
-    source: Nebius
-    nebius: {}
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: nebius.modelplane.ai/v1alpha1
+        kind: NebiusClusterConfig
+        name: eu-north1
   nodePools:
   - name: gpu-l40s
     className: l40s-1x

@@ -3,20 +3,27 @@
 # One NVIDIA L4 on a g2-standard-8. The GPU is declared as a DRA device: the
 # scheduler matches a ModelDeployment's nodeSelector against this capacity, then
 # DRA binds the physical GPU to the serving pod.
+apiVersion: gke.modelplane.ai/v1alpha1
+kind: GKENodeClass
+metadata:
+  name: g2-standard-8-l4
+spec:
+  machineType: g2-standard-8
+  diskSizeGb: 100
+  accelerator:
+    type: nvidia-l4
+    count: 1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: gke-l4-1x-g2
 spec:
   description: "GKE g2-standard-8, 1x NVIDIA L4"
-  provisioning:
-    provider: GKE
-    gke:
-      machineType: g2-standard-8
-      diskSizeGb: 100
-      accelerator:
-        type: nvidia-l4
-        count: 1
+  nodeClassRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKENodeClass
+    name: g2-standard-8-l4
   devices:
   - name: gpu
     claim: DRA

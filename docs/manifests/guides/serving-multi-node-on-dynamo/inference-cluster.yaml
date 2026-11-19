@@ -3,6 +3,13 @@
 # Scheduler, which gang-schedule the leader and worker together and compose them
 # as a Grove PodCliqueSet, and ModelExpress, which serves cached weights to the
 # gang and moves them between replicas peer-to-peer.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSClusterConfig
+metadata:
+  name: us-east-1
+spec:
+  region: us-east-1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -13,9 +20,12 @@ metadata:
 spec:
   stack: Dynamo
   cluster:
-    source: EKS
-    eks:
-      region: us-east-1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: eks.modelplane.ai/v1alpha1
+        kind: EKSClusterConfig
+        name: us-east-1
   nodePools:
   - name: gpu-l4
     className: l4-1x-g6-8xlarge

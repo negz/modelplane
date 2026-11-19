@@ -3,22 +3,33 @@
 #
 # Both the GPU and the EFA fabric are claim: DRA devices. A multi-node gang's
 # nodeSelector requests both, so the scheduler co-schedules the whole gang on a
-# pool that has them and DRA binds 8 GPUs + 16 EFA interfaces per pod. The EFA
-# device is installed by the EFA DRA driver (DRANET) in the serving stack.
+# pool that has them and DRA binds 8 GPUs + 16 EFA interfaces per pod.
+#
+# The node class's fabric: EFA attaches Elastic Fabric Adapter interfaces to
+# each node, and has the EKS cluster provider install the EFA DRA driver
+# (DRANET) that publishes them. Without it multi-node NCCL falls back to TCP,
+# which is slow and unstable.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: p5en-48xlarge-1024gb-efa
+spec:
+  instanceType: p5en.48xlarge
+  diskSizeGb: 1024
+  accelerator:
+    type: nvidia-h200
+  fabric: EFA
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: eks-h200-8x-p5en
 spec:
   description: "EKS p5en.48xlarge, 8x NVIDIA H200, EFA"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: p5en.48xlarge
-      diskSizeGb: 1024
-      accelerator:
-        type: nvidia-h200
-        count: 8
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: p5en-48xlarge-1024gb-efa
   devices:
   - name: gpu
     claim: DRA

@@ -1,28 +1,35 @@
 # An InferenceClass describing Nebius gpu-h100-sxm with 8x NVIDIA H100.
 #
-# The provisioning block tells Modelplane how to create a node group of
-# this class on Nebius mk8s. Nebius sizes nodes by platform + preset
-# rather than an instance type; the preset determines the GPU, vCPU,
-# and memory shape of each node. The devices block describes what
-# hardware a node of this class has, DRA-style - used by the scheduler
-# to match models to clusters, and to form DRA ResourceClaims for
-# claim: DRA devices.
+# The nodeClassRef names a NebiusNodeClass, which says how to create a
+# node group of this class on Nebius mk8s. The Nebius cluster provider
+# adds the NebiusNodeClass kind. Nebius sizes nodes by platform + preset
+# rather than an instance type; the preset determines the GPU, vCPU, and
+# memory shape of each node. The devices block describes what hardware a
+# node of this class has, DRA-style - used by the scheduler to match
+# models to clusters, and to form DRA ResourceClaims for claim: DRA
+# devices.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusNodeClass
+metadata:
+  name: gpu-h100-sxm-8gpu-200gb
+spec:
+  platform: gpu-h100-sxm
+  preset: 8gpu-128vcpu-1600gb
+  diskSizeGb: 200
+  driversPreset: cuda13.0
+  accelerator:
+    type: nvidia-h100
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: nebius-h100-8x
 spec:
   description: "Nebius gpu-h100-sxm, 8x NVIDIA H100 80GB"
-  provisioning:
-    provider: Nebius
-    nebius:
-      platform: gpu-h100-sxm
-      preset: 8gpu-128vcpu-1600gb
-      diskSizeGb: 200
-      driversPreset: cuda13.0
-      accelerator:
-        type: nvidia-h100
-        count: 8
+  nodeClassRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusNodeClass
+    name: gpu-h100-sxm-8gpu-200gb
   devices:
   - name: gpu
     claim: DRA

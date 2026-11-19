@@ -13,12 +13,20 @@ An `InferenceClass` is a tested recipe for a GPU or CPU node pool. It bundles:
   style devices, each with a driver, count, typed attributes, and capacity. The
   scheduler matches a member's `nodeSelector` against these devices, and GPUs
   bind to pods through DRA.
-- **Provisioning** (optional): how to create a node pool of this class on a
-  specific cloud. Classes without provisioning are for existing clusters where
-  the pool already exists.
+- **Node class** (optional): `nodeClassRef` names a node class, such as a
+  `GKENodeClass`, that says how to create a node pool of this class on one
+  cloud. A [cluster provider]({{< ref
+  "platform/inference-cluster.md#cluster-providers" >}}) adds the node class
+  kind. Classes without a node class are for existing clusters where the pool
+  already exists.
 
 Different clouds and GPU types imply different classes. A GKE L4 pool is
-`gke-l4-1x-g2`. A bare-metal H100 pool is `h100-8x-byo` (no provisioning).
+`gke-l4-1x-g2`. A bare-metal H100 pool is `h100-8x-byo` (no node class).
+
+A node class's `accelerator` describes the machine's GPU. A pool whose class
+claims a DRA driver other than `dra.cpu` needs one, and a node class for a CPU
+pool must omit it. The provider rejects a node class that gets this wrong
+when a cluster provisions a pool from it.
 
 ## Describing devices
 

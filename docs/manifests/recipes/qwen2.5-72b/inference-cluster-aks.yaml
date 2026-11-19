@@ -1,6 +1,13 @@
 # AKS InferenceCluster with one A100 node pool in swedencentral. No
 # clusterSelector targets it; the ModelDeployment matches on device capacity
 # alone, so it lands here or on any other compatible cluster in the fleet.
+apiVersion: aks.modelplane.ai/v1alpha1
+kind: AKSClusterConfig
+metadata:
+  name: swedencentral
+spec:
+  location: swedencentral
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -9,9 +16,12 @@ metadata:
     modelplane.ai/region: swedencentral
 spec:
   cluster:
-    source: AKS
-    aks:
-      location: swedencentral
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: aks.modelplane.ai/v1alpha1
+        kind: AKSClusterConfig
+        name: swedencentral
   nodePools:
   - name: gpua100
     className: aks-a100-1x-nc24ads

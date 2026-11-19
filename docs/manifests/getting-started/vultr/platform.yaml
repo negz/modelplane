@@ -1,3 +1,12 @@
+apiVersion: vultr.modelplane.ai/v1alpha1
+kind: VultrNodeClass
+metadata:
+  name: vcg-a16-6c-60g-16vram
+spec:
+  plan: vcg-a16-6c-60g-16vram
+  accelerator:
+    type: nvidia-a16
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
@@ -7,13 +16,10 @@ spec:
   # region offers with the /v2/regions/<region>/availability API before
   # picking another plan.
   description: "Vultr vcg-a16-6c-60g-16vram, 1x NVIDIA A16 16GB"
-  provisioning:
-    provider: Vultr
-    vultr:
-      plan: vcg-a16-6c-60g-16vram
-      accelerator:
-        type: nvidia-a16
-        count: 1
+  nodeClassRef:
+    apiVersion: vultr.modelplane.ai/v1alpha1
+    kind: VultrNodeClass
+    name: vcg-a16-6c-60g-16vram
   devices:
   - name: gpu
     claim: DRA
@@ -26,6 +32,16 @@ spec:
     capacity:
       memory: { value: "16384Mi" }
 ---
+apiVersion: vultr.modelplane.ai/v1alpha1
+kind: VultrClusterConfig
+metadata:
+  name: ewr
+spec:
+  region: ewr
+  # VKE accepts only the exact versions it currently offers; list them
+  # with vultr-cli kubernetes versions.
+  kubernetesVersion: "v1.36.6+1"
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -34,12 +50,12 @@ metadata:
     modelplane.ai/region: ewr
 spec:
   cluster:
-    source: Vultr
-    vultr:
-      region: ewr
-      # VKE accepts only the exact versions it currently offers; list them
-      # with vultr-cli kubernetes versions.
-      kubernetesVersion: "v1.36.6+1"
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: vultr.modelplane.ai/v1alpha1
+        kind: VultrClusterConfig
+        name: ewr
   nodePools:
   - name: gpu-a16
     className: a16-1x

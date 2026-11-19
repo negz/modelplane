@@ -1,16 +1,22 @@
+apiVersion: vultr.modelplane.ai/v1alpha1
+kind: VultrNodeClass
+metadata:
+  name: vcg-a40-24c-120g-48vram
+spec:
+  plan: vcg-a40-24c-120g-48vram
+  accelerator:
+    type: nvidia-a40
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: a40-1x
 spec:
   description: "Vultr vcg-a40-24c-120g-48vram, 1x NVIDIA A40 48GB"
-  provisioning:
-    provider: Vultr
-    vultr:
-      plan: vcg-a40-24c-120g-48vram
-      accelerator:
-        type: nvidia-a40
-        count: 1
+  nodeClassRef:
+    apiVersion: vultr.modelplane.ai/v1alpha1
+    kind: VultrNodeClass
+    name: vcg-a40-24c-120g-48vram
   devices:
   - name: gpu
     claim: DRA
@@ -25,6 +31,16 @@ spec:
 ---
 # Vultr GPU plans are region-gated: the A40 plan is offered in lax and syd,
 # while the A16 regions carry only A16 plans.
+apiVersion: vultr.modelplane.ai/v1alpha1
+kind: VultrClusterConfig
+metadata:
+  name: lax
+spec:
+  region: lax
+  # VKE accepts only the exact versions it currently offers; list them
+  # with vultr-cli kubernetes versions.
+  kubernetesVersion: "v1.36.6+1"
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -33,12 +49,12 @@ metadata:
     modelplane.ai/region: lax
 spec:
   cluster:
-    source: Vultr
-    vultr:
-      region: lax
-      # VKE accepts only the exact versions it currently offers; list them
-      # with vultr-cli kubernetes versions.
-      kubernetesVersion: "v1.36.6+1"
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: vultr.modelplane.ai/v1alpha1
+        kind: VultrClusterConfig
+        name: lax
   nodePools:
   - name: gpu-a40
     className: a40-1x

@@ -1,5 +1,5 @@
 # Points the Azure providers at the credentials Secret you created. Named
-# default, so InferenceClusters with an AKS source use it without further
+# default, so AKSClusterConfigs use it without further
 # configuration. The Secret carries a service principal JSON with
 # clientId, clientSecret, subscriptionId, and tenantId.
 apiVersion: azure.m.upbound.io/v1beta1

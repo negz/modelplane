@@ -6,22 +6,28 @@
 # scheduler to match models to clusters, and to form DRA ResourceClaims for
 # claim: DRA devices. An 8B model needs a fraction of an H100, so this shape has
 # ample headroom; a single L40S (gpu-l40s-a) is the economical alternative.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusNodeClass
+metadata:
+  name: gpu-h100-sxm-1gpu-200gb
+spec:
+  platform: gpu-h100-sxm
+  preset: 1gpu-16vcpu-200gb
+  diskSizeGb: 200
+  driversPreset: cuda13.0
+  accelerator:
+    type: nvidia-h100
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: h100-1x
 spec:
   description: "Nebius gpu-h100-sxm, 1x NVIDIA H100 80GB"
-  provisioning:
-    provider: Nebius
-    nebius:
-      platform: gpu-h100-sxm
-      preset: 1gpu-16vcpu-200gb
-      diskSizeGb: 200
-      driversPreset: cuda13.0
-      accelerator:
-        type: nvidia-h100
-        count: 1
+  nodeClassRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusNodeClass
+    name: gpu-h100-sxm-1gpu-200gb
   devices:
   - name: gpu
     claim: DRA

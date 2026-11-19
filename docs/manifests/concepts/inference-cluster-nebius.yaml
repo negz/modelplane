@@ -1,15 +1,17 @@
 # An InferenceCluster backed by a Nebius mk8s cluster.
 #
-# Modelplane provisions the full mk8s cluster (VPC network and subnet,
-# control plane with a public endpoint, system + GPU node groups, GPU
-# clusters for InfiniBand fabrics) and installs the inference stack
-# (cert-manager, Envoy Gateway, LeaderWorkerSet, Gateway
-# API).
+# The Nebius cluster provider provisions the full mk8s cluster (VPC
+# network and subnet, control plane with a public endpoint, system + GPU
+# node groups, GPU clusters for InfiniBand fabrics) from the
+# NebiusClusterConfig the InferenceCluster names, and Modelplane installs
+# the inference stack (cert-manager, Envoy Gateway, LeaderWorkerSet,
+# Gateway API).
 #
 # The system node group that hosts control-plane components is
 # provisioned automatically and is not declared here. Only GPU node
 # pools - each referencing an InferenceClass that describes the
-# hardware shape and how to provision it - need to be declared.
+# hardware shape and names the node class to provision it from - need
+# to be declared.
 #
 # Nebius authenticates every Kubernetes client through Nebius IAM: the
 # mk8s kubeconfig carries only the cluster endpoint and CA certificate,
@@ -36,6 +38,14 @@
 # cluster until the stack is uninstalled. Background deletion (the
 # kubectl default) tears everything down at once and can orphan cloud
 # resources.
+# A Nebius cluster runs in the region of the project its credentials'
+# ClusterProviderConfig names, so the config needs no region.
+apiVersion: nebius.modelplane.ai/v1alpha1
+kind: NebiusClusterConfig
+metadata:
+  name: eu-north1
+spec: {}
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -44,8 +54,12 @@ metadata:
     modelplane.ai/region: eu-north
 spec:
   cluster:
-    source: Nebius
-    nebius: {}
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: nebius.modelplane.ai/v1alpha1
+        kind: NebiusClusterConfig
+        name: eu-north1
 
   nodePools:
   - name: gpu-h100

@@ -3,20 +3,26 @@
 # One NVIDIA L4 on a g6.2xlarge. The GPU is declared as a DRA device: the
 # scheduler matches a ModelDeployment's nodeSelector against this capacity, then
 # DRA binds the physical GPU to the serving pod.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: g6-2xlarge
+spec:
+  instanceType: g6.2xlarge
+  diskSizeGb: 100
+  accelerator:
+    type: nvidia-l4
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: eks-l4-1x-g6
 spec:
   description: "EKS g6.2xlarge, 1x NVIDIA L4"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: g6.2xlarge
-      diskSizeGb: 100
-      accelerator:
-        type: nvidia-l4
-        count: 1
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: g6-2xlarge
   devices:
   - name: gpu
     claim: DRA

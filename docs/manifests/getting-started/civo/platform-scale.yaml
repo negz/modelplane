@@ -1,3 +1,13 @@
+apiVersion: civo.modelplane.ai/v1alpha1
+kind: CivoNodeClass
+metadata:
+  name: an-g1-a100sxm-kube-x1
+spec:
+  size: an.g1.a100sxm.kube.x1
+  accelerator:
+    type: nvidia-a100
+    count: 1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
@@ -7,13 +17,10 @@ spec:
   # offers A100 and H100. List a region's sizes with the
   # /v2/sizes?region=<region> API before picking another size.
   description: "Civo an.g1.a100sxm.kube.x1, 1x NVIDIA A100 SXM 80GB"
-  provisioning:
-    provider: Civo
-    civo:
-      size: an.g1.a100sxm.kube.x1
-      accelerator:
-        type: nvidia-a100
-        count: 1
+  nodeClassRef:
+    apiVersion: civo.modelplane.ai/v1alpha1
+    kind: CivoNodeClass
+    name: an-g1-a100sxm-kube-x1
   devices:
   - name: gpu
     claim: DRA
@@ -26,6 +33,13 @@ spec:
     capacity:
       memory: { value: "81920Mi" }
 ---
+apiVersion: civo.modelplane.ai/v1alpha1
+kind: CivoClusterConfig
+metadata:
+  name: lon1
+spec:
+  region: LON1
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -34,9 +48,12 @@ metadata:
     modelplane.ai/region: lon1
 spec:
   cluster:
-    source: Civo
-    civo:
-      region: LON1
+    source: Provisioned
+    provisioned:
+      configRef:
+        apiVersion: civo.modelplane.ai/v1alpha1
+        kind: CivoClusterConfig
+        name: lon1
   nodePools:
   - name: gpu-a100
     className: a100-1x

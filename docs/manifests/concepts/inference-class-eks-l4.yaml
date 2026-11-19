@@ -1,23 +1,30 @@
 # An InferenceClass describing EKS g6.xlarge with one NVIDIA L4 GPU.
 #
-# The provisioning block tells Modelplane how to create a node group of
-# this class on EKS. The devices block describes what hardware a node of
+# The nodeClassRef names an EKSNodeClass, which says how to create a node
+# group of this class on EKS. The EKS cluster provider adds the
+# EKSNodeClass kind. The devices block describes what hardware a node of
 # this class has, DRA-style - used by the scheduler to match models to
 # clusters, and to form DRA ResourceClaims for claim: DRA devices.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: g6-xlarge
+spec:
+  instanceType: g6.xlarge
+  diskSizeGb: 100
+  accelerator:
+    type: nvidia-l4
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: eks-l4-1x-g6
 spec:
   description: "EKS g6.xlarge, 1x NVIDIA L4"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: g6.xlarge
-      diskSizeGb: 100
-      accelerator:
-        type: nvidia-l4
-        count: 1
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: g6-xlarge
   devices:
   - name: gpu
     claim: DRA

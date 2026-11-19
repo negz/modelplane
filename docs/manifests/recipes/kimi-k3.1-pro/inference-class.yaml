@@ -2,20 +2,26 @@
 # The GPUs are DRA devices; the Kimi K3.1 Pro ModelDeployment's nodeSelector
 # matches eight Blackwell GPUs with at least the 250Gi each this class
 # advertises, so it can't land on an 8x B200 node, where the weights don't fit.
+apiVersion: eks.modelplane.ai/v1alpha1
+kind: EKSNodeClass
+metadata:
+  name: p6-b300-48xlarge-200gb
+spec:
+  instanceType: p6-b300.48xlarge
+  diskSizeGb: 200
+  accelerator:
+    type: nvidia-b300
+---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
   name: eks-b300-8x-p6
 spec:
   description: "EKS p6-b300.48xlarge, 8x NVIDIA B300 288GB"
-  provisioning:
-    provider: EKS
-    eks:
-      instanceType: p6-b300.48xlarge
-      diskSizeGb: 200
-      accelerator:
-        type: nvidia-b300
-        count: 8
+  nodeClassRef:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSNodeClass
+    name: p6-b300-48xlarge-200gb
   devices:
   - name: gpu
     claim: DRA

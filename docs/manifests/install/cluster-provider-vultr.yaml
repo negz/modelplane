@@ -1,0 +1,9 @@
+# The Modelplane cluster provider for Vultr VKE. Installing it adds the
+# VultrClusterConfig and VultrNodeClass kinds, and the Crossplane providers it
+# provisions clusters through.
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: modelplane-vultr
+spec:
+  package: xpkg.upbound.io/modelplane/modelplane-vultr:v0.7.0
