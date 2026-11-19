@@ -56,6 +56,13 @@ class ClientCA(BaseModel):
     """
 
 
+class Service(BaseModel):
+    annotations: dict[str, constr(max_length=1024)] | None = Field(None, max_length=16)
+    """
+    Annotations the cloud's load balancer controller reads.
+    """
+
+
 class Gateway(BaseModel):
     className: constr(min_length=1, max_length=63) | None = 'envoy'
     """
@@ -70,23 +77,9 @@ class Gateway(BaseModel):
     """
     The name this cluster's gateway is reached by, projected from the InferenceCluster. The gateway serves a certificate for it, so an InferenceGateway can originate TLS and know it reached the right cluster.
     """
-
-
-class Pool(BaseModel):
-    disableNvLink: bool | None = False
+    service: Service | None = None
     """
-    Load this pool's NVIDIA driver with NVLink disabled (NVreg_NvLinkDisable=1). Set for pools of single-H100 nodes on Civo: a lone H100 SXM has NVLink links but no peer, so link bring-up fails and the driver never becomes ready.
-    """
-    name: constr(min_length=1, max_length=40)
-    """
-    Name of the node pool.
-    """
-
-
-class Gpu(BaseModel):
-    pools: list[Pool] | None = Field(None, max_length=8)
-    """
-    GPU node pools that need a driver configuration of their own, keyed by the pool name the cluster composition labels the pool's nodes with (modelplane.ai/pool). Pools absent from this list run the stack's default driver configuration.
+    Settings for every gateway's LoadBalancer Service, a subset of Envoy Gateway's KubernetesServiceSpec, projected from the ProvisionedCluster's status.
     """
 
 
@@ -103,27 +96,31 @@ class Secret(BaseModel):
     """
     Namespace of the Secret, when it isn't this ServingStack's namespace. Set on cloud identity entries whose credential is the Secret the cloud provider's ProviderConfig references.
     """
-    type: Literal[
-        'Kubeconfig',
-        'GoogleApplicationCredentials',
-        'AWSWebIdentityCredentials',
-        'NebiusServiceAccountCredentials',
-    ]
+    type: constr(min_length=1, max_length=63)
     """
-    The type of credential this secret contains. Kubeconfig is required. Any other value is a cloud identity type; when present, the serving stack authenticates to the cluster as that identity instead of using the kubeconfig's embedded credentials.
+    The type of credential this secret contains. Kubeconfig is required. Any other value is a provider-kubernetes and provider-helm identity type; when present, the serving stack authenticates to the cluster as that identity instead of using the kubeconfig's embedded credentials.
+    """
+
+
+class IgnoredNamespace(RootModel[constr(min_length=1, max_length=63)]):
+    root: constr(min_length=1, max_length=63)
+
+
+class Telemetry(BaseModel):
+    ignoredNamespaces: list[IgnoredNamespace] | None = Field(None, max_length=8)
+    """
+    Namespaces the collector doesn't scrape.
     """
 
 
 class Spec(BaseModel):
-    cloud: Literal[
-        'GKE', 'EKS', 'AKS', 'Nebius', 'Vultr', 'Civo', 'CoreWeave', 'Existing'
-    ]
-    """
-    The cloud the target cluster runs on. Selects the fixed set of components and versions this stack installs there, which is resolved per cloud at build time and changes only with a Modelplane release. Mirrors InferenceCluster.spec.cluster.source; the cluster composition sets it.
-    """
     crossplane: Crossplane | None = None
     """
     Configures how Crossplane will reconcile this composite resource
+    """
+    deviceStacks: Literal['Managed', 'External']
+    """
+    Who installs the device stacks for the DRA drivers in draDrivers. Managed, for an Existing cluster, installs them here. External, for a provisioned cluster, leaves them to the cluster's provider, so this stack installs only the device stacks Modelplane runs on every cluster, such as dra-driver-cpu. The cluster composition sets it.
     """
     draDrivers: list[DraDriver] | None = Field(None, max_length=16)
     """
@@ -133,17 +130,17 @@ class Spec(BaseModel):
     """
     Configuration for the cluster's inference traffic gateway.
     """
-    gpu: Gpu | None = None
-    """
-    GPU driver configuration for the stack's GPU Operator install, projected from the InferenceCluster's node pools by the cluster composition.
-    """
     secrets: list[Secret] = Field(..., max_length=8, min_length=1)
     """
-    Secrets used to authenticate to the target cluster. Typically sourced from a GKECluster's status.secrets. Secrets are in the same namespace as this ServingStack unless an entry says otherwise. A Kubeconfig secret is required. If a cloud identity secret is present, the serving stack authenticates as that identity instead of relying on the kubeconfig's embedded credentials.
+    Secrets used to authenticate to the target cluster, from the InferenceCluster's existing cluster or its ProvisionedCluster's status.secrets. Secrets are in the same namespace as this ServingStack unless an entry says otherwise. A Kubeconfig secret is required. If a cloud identity secret is present, the serving stack authenticates as that identity instead of relying on the kubeconfig's embedded credentials.
     """
     stack: Literal['Standard', 'Dynamo'] | None = 'Standard'
     """
     Which serving stack this installs. Standard (the default) is the Modelplane-composed serving layer: a Deployment or LeaderWorkerSet, Gateway API, and the endpoint picker. Dynamo swaps in NVIDIA's components: Grove with the KAI Scheduler for multi-node gang scheduling, and a shared ModelExpress server for weight distribution. Propagated from the InferenceCluster.
+    """
+    telemetry: Telemetry | None = None
+    """
+    Configuration for the cluster's telemetry collector, projected from the ProvisionedCluster's status.
     """
 
 

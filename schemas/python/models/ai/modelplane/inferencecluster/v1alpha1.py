@@ -5,76 +5,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, Field, conint, constr
+from pydantic import AwareDatetime, BaseModel, Field, RootModel, conint, constr
 
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
-
-
-class Credentials(BaseModel):
-    name: constr(min_length=1, max_length=253) | None = 'default'
-    type: Literal['ProviderConfig', 'ClusterProviderConfig'] | None = (
-        'ClusterProviderConfig'
-    )
-
-
-class Aks(BaseModel):
-    credentials: Credentials | None = None
-    """
-    Azure ProviderConfig or ClusterProviderConfig used to authenticate to the Azure API. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: str | None = '1.34'
-    """
-    AKS cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available. A CPU pool needs 1.36 or newer: its cores are claimed as consumable capacity, which Kubernetes enables by default from 1.36 (DRAConsumableCapacity).
-    """
-    location: constr(min_length=1, max_length=32)
-    """
-    Azure region for the cluster (e.g. westeurope, eastus2).
-    """
-
-
-class Civo(BaseModel):
-    credentials: Credentials | None = None
-    """
-    Civo ProviderConfig or ClusterProviderConfig used to authenticate to the Civo API. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: constr(min_length=1, max_length=32) | None = None
-    """
-    Civo Kubernetes (k3s) version. Civo requires an exact version string including the k3s build suffix; list current versions with civo kubernetes versions. Choose 1.34 or newer so Dynamic Resource Allocation (how devices bind to pods) is generally available, and 1.36 or newer for a CPU pool: its cores are claimed as consumable capacity, which Kubernetes enables by default from 1.36 (DRAConsumableCapacity). Defaults to Civo's current default version, which may be older than a CPU pool needs.
-    """
-    region: constr(min_length=1, max_length=32)
-    """
-    Civo region for the cluster (e.g. LON1, NYC1, FRA1). GPU sizes vary by region.
-    """
-
-
-class Coreweave(BaseModel):
-    credentials: Credentials | None = None
-    """
-    CoreWeave ProviderConfig or ClusterProviderConfig used to authenticate to the CoreWeave API. Its API access token also authenticates Modelplane to the cluster. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: constr(pattern=r'^[0-9]+\.[0-9]+$') | None = None
-    """
-    CKS Kubernetes minor version, in the form X.Y. CKS applies patch versions itself.
-    """
-    zone: constr(min_length=1, max_length=32)
-    """
-    CoreWeave Availability Zone for the cluster (e.g. US-EAST-04A). Instance types vary by zone.
-    """
-
-
-class Eks(BaseModel):
-    credentials: Credentials | None = None
-    """
-    AWS ProviderConfig or ClusterProviderConfig used to authenticate to the AWS API. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: str | None = '1.36'
-    """
-    EKS cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available.
-    """
-    region: constr(min_length=1, max_length=32)
-    """
-    AWS region for the cluster (e.g. us-west-2).
-    """
 
 
 class Cache(BaseModel):
@@ -120,82 +53,36 @@ class Existing(BaseModel):
     """
 
 
-class Gke(BaseModel):
-    credentials: Credentials | None = None
+class ConfigRef(BaseModel):
+    apiVersion: constr(
+        pattern=r'^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?/v[a-z0-9]+$', max_length=80
+    )
     """
-    GCP ProviderConfig or ClusterProviderConfig used to authenticate to the GCP API. Defaults to the ClusterProviderConfig named default.
+    The kind's API group and version, such as example.modelplane.ai/v1alpha1.
     """
-    kubernetesVersion: str | None = '1.35'
-    """
-    GKE cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available. A CPU pool needs 1.36 or newer: its cores are claimed as consumable capacity, which Kubernetes enables by default from 1.36 (DRAConsumableCapacity).
-    """
-    region: constr(min_length=1, max_length=32)
+    kind: constr(min_length=1, max_length=63)
+    name: constr(min_length=1, max_length=253)
 
 
-class Nebius(BaseModel):
-    credentials: Credentials | None = None
+class Provisioned(BaseModel):
+    configRef: ConfigRef
     """
-    Nebius ProviderConfig or ClusterProviderConfig used to authenticate to the Nebius API. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: str | None = '1.34'
-    """
-    mk8s cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (DRA) is generally available. A CPU pool needs 1.36 or newer: its cores are claimed as consumable capacity, which Kubernetes enables by default from 1.36 (DRAConsumableCapacity).
-    """
-
-
-class Vultr(BaseModel):
-    credentials: Credentials | None = None
-    """
-    Vultr ProviderConfig or ClusterProviderConfig used to authenticate to the Vultr API. Defaults to the ClusterProviderConfig named default.
-    """
-    kubernetesVersion: str
-    """
-    VKE cluster Kubernetes version. VKE requires an exact version string including the build suffix and accepts only the versions it currently offers; list them with vultr-cli kubernetes versions. Use a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available.
-    """
-    region: constr(min_length=1, max_length=32)
-    """
-    Vultr region for the cluster (e.g. ewr, fra). GPU plans and Vultr File System availability vary by region.
+    The cluster config to provision the cluster from, such as a GKEClusterConfig. Its kind selects the cluster provider, which must be installed. A config holds what a provider needs beyond the node pools, like the region and credentials, and several clusters can share one. The kind can't change; to move a cluster to another provider, create a new InferenceCluster.
     """
 
 
 class Cluster(BaseModel):
-    aks: Aks | None = None
-    """
-    AKS cluster configuration. Required when source is AKS.
-    """
-    civo: Civo | None = None
-    """
-    Civo Kubernetes (k3s) cluster configuration. Required when source is Civo.
-    """
-    coreweave: Coreweave | None = None
-    """
-    CoreWeave Kubernetes Service (CKS) cluster configuration. Required when source is CoreWeave.
-    """
-    eks: Eks | None = None
-    """
-    EKS cluster configuration. Required when source is EKS.
-    """
     existing: Existing | None = None
     """
     Bring-your-own cluster configuration. Required when source is Existing. Modelplane manages the inference stack on the cluster but does not provision the cluster itself.
     """
-    gke: Gke | None = None
+    provisioned: Provisioned | None = None
     """
-    GKE cluster configuration. Required when source is GKE.
+    How to provision the cluster. Required when source is Provisioned.
     """
-    nebius: Nebius | None = None
+    source: Literal['Existing', 'Provisioned']
     """
-    Nebius mk8s cluster configuration. Required when source is Nebius; may be empty, since every field has a default. The cluster is created in the project the referenced ProviderConfig or ClusterProviderConfig sets as its projectID; Nebius projects are bound to a region, so the project also determines where the cluster runs.
-    """
-    source: Literal[
-        'GKE', 'EKS', 'AKS', 'Nebius', 'Vultr', 'Civo', 'CoreWeave', 'Existing'
-    ]
-    """
-    Cluster provisioning method.
-    """
-    vultr: Vultr | None = None
-    """
-    Vultr Kubernetes Engine (VKE) cluster configuration. Required when source is Vultr.
+    How Modelplane gets the cluster. Existing registers a cluster you already run. Provisioned has a cluster provider create it, from the cluster config provisioned.configRef names. Immutable: changing it would delete a provisioned cluster.
     """
 
 
@@ -231,29 +118,19 @@ class Crossplane(BaseModel):
     resourceRefs: list[ResourceRef] | None = None
 
 
-class Infiniband(BaseModel):
-    fabric: constr(min_length=1, max_length=63)
-    """
-    Identifier of the physical InfiniBand fabric to join (e.g. fabric-2). This selects existing Nebius infrastructure, not a name for a new resource: fabrics are per-region - see https://docs.nebius.com/compute/clusters/gpu#fabrics - and multi-node GPU capacity is allocated on specific fabrics, so use the fabric your capacity lives on.
-    """
-
-
-class Fabric(BaseModel):
-    infiniband: Infiniband | None = None
-    """
-    InfiniBand fabric configuration. Required when type is InfiniBand and the cluster source is Nebius; not used on AKS.
-    """
-    type: Literal['None', 'EFA', 'InfiniBand'] | None = 'None'
-    """
-    Fabric technology. None uses standard VPC networking (TCP). EFA attaches Elastic Fabric Adapter interfaces to each node for GPUDirect RDMA across nodes; EKS only, and only useful on EFA-capable instance types (e.g. p5en.48xlarge). When any pool sets EFA, Modelplane installs the EFA DRA driver on the cluster and the gang's pods claim EFA devices alongside their GPUs. InfiniBand places the pool's nodes on a physical InfiniBand fabric for GPUDirect RDMA across nodes; Nebius and AKS only, and only useful on InfiniBand-capable shapes (e.g. gpu-h100-sxm on Nebius, Standard_ND96isr_H100_v5 on AKS). On Nebius the pool joins the fabric named in infiniband.fabric; on AKS the pool's VM Scale Set placement group lands its nodes on one fabric, and Modelplane installs the NVIDIA network operator on the cluster.
-    """
-
-
 class ReservationRef(BaseModel):
+    apiVersion: constr(
+        pattern=r'^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?/v[a-z0-9]+$', max_length=80
+    )
+    """
+    The kind's API group and version, such as example.modelplane.ai/v1alpha1.
+    """
+    kind: constr(min_length=1, max_length=63)
     name: constr(min_length=1, max_length=253)
-    """
-    Name of the CapacityReservation.
-    """
+
+
+class Zone(RootModel[constr(min_length=1, max_length=63)]):
+    root: constr(min_length=1, max_length=63)
 
 
 class NodePool(BaseModel):
@@ -261,27 +138,23 @@ class NodePool(BaseModel):
     """
     Name of the InferenceClass describing this pool's hardware.
     """
-    fabric: Fabric | None = None
-    """
-    High-performance node-to-node fabric for multi-node engines, so a gang's tensor-parallel traffic isn't capped by TCP. Omit for standard VPC networking. Ignored on CoreWeave, where a CKS instance type either includes InfiniBand or doesn't.
-    """
-    maxNodeCount: conint(ge=1) | None = None
+    maxNodeCount: conint(ge=1, le=1000) | None = None
     """
     Maximum node count for autoscaling. Omit for fixed-size pools.
     """
-    minNodeCount: conint(ge=0) | None = None
+    minNodeCount: conint(ge=0, le=1000) | None = None
     name: constr(pattern=r'^[a-z0-9]([-a-z0-9]*[a-z0-9])?$', max_length=40)
     """
     Name of the pool. Its nodes carry it as the value of the modelplane.ai/pool label, and the cluster agent observes the pool through an object of this name.
     """
-    nodeCount: conint(ge=0) | None = 1
+    nodeCount: conint(ge=0, le=1000) | None = 1
     reservationRef: ReservationRef | None = None
     """
-    CapacityReservation backing this node pool. GKE and EKS only. The pool only uses the referenced reservation, and never falls back to on-demand capacity, so nodeCount must not exceed the reserved instance count. The reservation's provider must match the cluster's source. On GKE the pool's zones must be exactly the reservation's zone; on EKS they must be the reservation's Availability Zone. Immutable, because neither cloud can move an existing node pool onto or off a reservation. Omit for on-demand pools.
+    The capacity reservation backing this node pool, such as a GKECapacityReservation. The pool only uses the referenced reservation, and never falls back to on-demand capacity, so nodeCount must not exceed the reserved instance count. The reservation must be one the cluster's provider owns, and the provider must support reservations. Immutable, because a cloud can't move an existing node pool onto or off a reservation. Omit for on-demand pools.
     """
-    zones: list[str] | None = None
+    zones: list[Zone] | None = Field(None, max_length=16)
     """
-    Zones to restrict this node pool to. Required for provisioned pools because not all zones in a region have every GPU type.
+    Zones to restrict this node pool to, because not every zone in a region has every GPU type. Only on a provisioned cluster whose provider supports zones.
     """
 
 
@@ -314,7 +187,7 @@ class Spec(BaseModel):
     """
     nodePools: list[NodePool] | None = Field(None, max_length=8, min_length=1)
     """
-    Inference node pools available on this cluster. Each pool references an InferenceClass that describes the hardware shape and (for provisioned clusters) how to create the pool. System pools for control-plane components are provisioned automatically.
+    Inference node pools available on this cluster. Each pool references an InferenceClass that describes the hardware shape and, for a provisioned cluster, the node class to create the pool from. A provisioned cluster also gets a system pool for Modelplane's own components.
     """
     placement: Placement | None = None
     """

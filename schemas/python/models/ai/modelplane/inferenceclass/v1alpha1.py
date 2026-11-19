@@ -90,157 +90,15 @@ class Device(BaseModel):
     """
 
 
-class Accelerator(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
+class NodeClassRef(BaseModel):
+    apiVersion: constr(
+        pattern=r'^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?/v[a-z0-9]+$', max_length=80
+    )
     """
-    GPU accelerator type (e.g. nvidia-a100, nvidia-h100). Informational - reported on the consuming InferenceCluster's status.
+    The kind's API group and version, such as example.modelplane.ai/v1alpha1.
     """
-
-
-class Aks(BaseModel):
-    accelerator: Accelerator | None = None
-    """
-    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU pool: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    diskSizeGb: conint(ge=10) | None = 100
-    vmSize: constr(min_length=1)
-    """
-    Azure VM size (e.g. Standard_NC24ads_A100_v4, Standard_ND96isr_H100_v5). The VM size determines the GPU model and count, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the pool is provisioned as a GPU or a CPU pool.
-    """
-
-
-class AcceleratorModel(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type (e.g. nvidia-l40s, nvidia-a100). Informational - reported on the consuming InferenceCluster's status.
-    """
-
-
-class Civo(BaseModel):
-    accelerator: AcceleratorModel | None = None
-    """
-    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU pool: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    size: constr(min_length=1, max_length=63)
-    """
-    Civo Kubernetes size ID (e.g. an.g1.l40s.kube.x1). The size determines the GPU model and count, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the pool is provisioned as a GPU or a CPU pool.
-    """
-
-
-class AcceleratorModel1(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type (e.g. nvidia-h100, nvidia-l40s). Informational - reported on the consuming InferenceCluster's status.
-    """
-
-
-class Coreweave(BaseModel):
-    accelerator: AcceleratorModel1 | None = None
-    """
-    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU pool: the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    instanceType: constr(min_length=1, max_length=63)
-    """
-    CKS instance type (e.g. rtxp6000-8x, turin-gp). The instance type determines the GPU model and count, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the pool is provisioned as a GPU or a CPU pool.
-    """
-
-
-class AcceleratorModel2(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type (e.g. nvidia-a10g, nvidia-h100). Informational - reported on the consuming InferenceCluster's status.
-    """
-
-
-class Eks(BaseModel):
-    accelerator: AcceleratorModel2 | None = None
-    """
-    GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU group: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    diskSizeGb: conint(ge=10) | None = 100
-    instanceType: constr(min_length=1)
-    """
-    EC2 instance type (e.g. g6.xlarge, p4d.24xlarge). The instance family determines the GPU model, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the group is provisioned as a GPU or a CPU pool.
-    """
-
-
-class AcceleratorModel3(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type passed to GCP (e.g. nvidia-l4, nvidia-h100-80gb).
-    """
-
-
-class Gke(BaseModel):
-    accelerator: AcceleratorModel3 | None = None
-    """
-    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block, so count here is the GCP machine's GPU count and need not be restated in devices. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU pool: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    diskSizeGb: conint(ge=10) | None = 100
-    machineType: constr(min_length=1)
-
-
-class AcceleratorModel4(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type (e.g. nvidia-h100, nvidia-l40s). Informational - reported on the consuming InferenceCluster's status.
-    """
-
-
-class Nebius(BaseModel):
-    accelerator: AcceleratorModel4 | None = None
-    """
-    GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU group: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    diskSizeGb: conint(ge=10) | None = 100
-    driversPreset: constr(min_length=1, max_length=63) | None = 'cuda13.0'
-    """
-    NVIDIA driver stack mk8s preinstalls on the pool's nodes (e.g. cuda12.4, cuda13.0). Valid values depend on the platform and Kubernetes version, and mk8s validates them, so new presets work without a Modelplane update. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
-    """
-    platform: constr(min_length=1, max_length=63)
-    """
-    Nebius compute platform (e.g. gpu-h100-sxm, gpu-l40s-a). Together with preset this determines the GPU model and count, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the group is provisioned as a GPU or a CPU pool.
-    """
-    preset: constr(min_length=1, max_length=63)
-    """
-    Resource preset within the platform (e.g. 8gpu-128vcpu-1600gb). Determines the GPU, vCPU, and memory shape of each node.
-    """
-
-
-class AcceleratorModel5(BaseModel):
-    count: conint(ge=1, le=16)
-    type: constr(min_length=1, max_length=63)
-    """
-    GPU accelerator type (e.g. nvidia-l40s, nvidia-a100). Informational - reported on the consuming InferenceCluster's status.
-    """
-
-
-class Vultr(BaseModel):
-    accelerator: AcceleratorModel5 | None = None
-    """
-    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block. Set this when and only when a device claims a DRA driver other than dra.cpu; the API rejects a mismatch. Omitted, Modelplane provisions a CPU pool: a standard node image, the modelplane.ai/cpu label and taint, and no GPU stack.
-    """
-    plan: constr(min_length=1, max_length=63)
-    """
-    Vultr plan ID (e.g. vcg-l40s-16c-180g-48vram). The plan determines the GPU model and count, if any. The accelerator block below doesn't change the hardware, but whether it's set decides whether the pool is provisioned as a GPU or a CPU pool.
-    """
-
-
-class Provisioning(BaseModel):
-    aks: Aks | None = None
-    civo: Civo | None = None
-    coreweave: Coreweave | None = None
-    eks: Eks | None = None
-    gke: Gke | None = None
-    nebius: Nebius | None = None
-    provider: Literal['GKE', 'EKS', 'AKS', 'Nebius', 'Vultr', 'Civo', 'CoreWeave']
-    vultr: Vultr | None = None
+    kind: constr(min_length=1, max_length=63)
+    name: constr(min_length=1, max_length=253)
 
 
 class Spec(BaseModel):
@@ -255,11 +113,11 @@ class Spec(BaseModel):
     devices: list[Device] = Field(..., max_length=16, min_length=1)
     """
     Devices a node of this class has, following DRA's model (KEP-4381). Each entry describes one kind of device with a count, mirroring what a DRA driver publishes in a ResourceSlice (one entry per kind rather than per physical device). ModelDeployment.nodeSelector matches against these, and claim: DRA devices are emitted as requests in a DRA ResourceClaim when scheduling a worker to this pool.
-    A scheduled worker pod is pinned to its pool with a nodeSelector on the modelplane.ai/pool node label. Modelplane-provisioned (EKS, GKE) pools carry this label automatically. On a BYO (Existing) cluster Modelplane doesn't provision the nodes, so the operator must label the pool's nodes modelplane.ai/pool=<nodePools[].name> themselves, or worker pods for this class will stay Pending.
+    A scheduled worker pod is pinned to its pool with a nodeSelector on the modelplane.ai/pool node label. Pools a cluster provider provisions carry this label automatically. On a BYO (Existing) cluster Modelplane doesn't provision the nodes, so the operator must label the pool's nodes modelplane.ai/pool=<nodePools[].name> themselves, or worker pods for this class will stay Pending.
     """
-    provisioning: Provisioning | None = None
+    nodeClassRef: NodeClassRef | None = None
     """
-    How to provision a node pool of this class. Omit for classes that describe BYO node pools that already exist.
+    The node class to provision a pool of this class from, such as a GKENodeClass. It belongs to a cluster provider and holds that cloud's machine shape, like an instance type, so it must be one the provider of each cluster using this class owns. A pool whose class claims a DRA driver other than dra.cpu is provisioned as an accelerator pool, and any other pool as a CPU pool, which carries the modelplane.ai/cpu label and taint. Omit for classes that describe bring-your-own node pools that already exist.
     """
 
 
