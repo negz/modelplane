@@ -33,7 +33,7 @@ from kubernetes import client
 from e2e import clouds, kube, wait
 
 # Pods expected to carry the NVIDIA GPU toleration and land on the fake GPU
-# nodes: the GPU-reaching DaemonSets from generate.py's TOLERATIONS table -
+# nodes: the GPU-reaching DaemonSets from modelplane_sdk.aicr's TOLERATIONS -
 # the NFD worker, DRA kubelet plugin, gpu-operator operands and nvsentinel's
 # node monitors (platform-connectors runs on every node; the health monitors
 # select on labels nvsentinel's labeler applies at runtime).

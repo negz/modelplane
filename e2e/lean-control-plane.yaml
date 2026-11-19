@@ -1,19 +1,16 @@
-# Trim the control plane to what the BYO (source: Existing) scenario actually
-# uses. The Configuration depends on ~10 cloud providers (AWS/GCP/Azure/Nebius)
-# that only exist to *provision* clusters; here the workload cluster already
-# exists, so the compositions use only provider-kubernetes and provider-helm.
+# Replace the Helm chart's default catch-all MRAP (activate: ["*"]) with one
+# that activates only provider-kubernetes and provider-helm, the managed
+# resources Modelplane's own compositions use, as the install guide's empty
+# default activation does.
 #
 # Bring-up feeds this via `crossplane project run --init-resources`, which
-# applies it BEFORE the Configuration's dependencies install, so the cloud
-# providers never activate their managed resources or run their controllers.
-#
-# Replace the Helm chart's default catch-all MRAP (activate: ["*"]) with one
-# that activates only the managed resources the BYO compositions use. The cloud
-# providers' managed resources stay inactive, and since those providers declare
-# the safe-start capability, Crossplane scales their controllers to zero until
-# something activates one. The compositions run provider-helm/kubernetes v2,
-# whose MRs are namespaced (.m.crossplane.io) - the same forms the shipped
-# apis/mrap.yaml activates - so the cluster-scoped variants aren't needed here.
+# applies it BEFORE the Configuration's dependencies install. On a provider's
+# leg the provider's cloud providers then stay inactive, and since they
+# declare the safe-start capability, Crossplane scales their controllers to
+# zero, until the provider's ProvisionedCluster activates the kinds it
+# composes. The compositions run provider-helm/kubernetes v2, whose MRs are
+# namespaced (.m.crossplane.io) - the same forms the shipped apis/mrap.yaml
+# activates - so the cluster-scoped variants aren't needed here.
 apiVersion: apiextensions.crossplane.io/v1alpha1
 kind: ManagedResourceActivationPolicy
 metadata:

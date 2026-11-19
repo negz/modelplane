@@ -57,7 +57,13 @@ class Cluster:
         self.custom = client.CustomObjectsApi(api)
 
     def modelplane(
-        self, plural: str, name: str, namespace: str | None, *, group: str = "modelplane.ai"
+        self,
+        plural: str,
+        name: str,
+        namespace: str | None,
+        *,
+        group: str = "modelplane.ai",
+        version: str = "v1alpha1",
     ) -> dict[str, typing.Any] | None:
         """Return a Modelplane resource, or None if it doesn't exist.
 
@@ -67,10 +73,10 @@ class Cluster:
         try:
             if namespace is None:
                 return self.custom.get_cluster_custom_object(
-                    group, "v1alpha1", plural, name, _request_timeout=TIMEOUT_SECONDS
+                    group, version, plural, name, _request_timeout=TIMEOUT_SECONDS
                 )
             return self.custom.get_namespaced_custom_object(
-                group, "v1alpha1", namespace, plural, name, _request_timeout=TIMEOUT_SECONDS
+                group, version, namespace, plural, name, _request_timeout=TIMEOUT_SECONDS
             )
         except client.ApiException as e:
             if e.status == 404:

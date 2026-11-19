@@ -12,30 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The cloud legs of the serving-stack e2e matrix. See e2e/README.md.
+"""The legs of the device stack e2e matrix. See e2e/README.md.
 
-Each leg shapes fake, KWOK-managed Nodes the way its cloud's cluster
-composition (or platform) shapes real ones - labels and taint - and
-names the DaemonSets the serving stack must fan out to them. A leg
-carries one pool per device stack its classes would claim: an NVIDIA
-GPU pool and a CPU pool on every cloud, plus an AMD GPU pool on
-Existing, the one cloud that installs the AMD stack. The ServingStack
-under test names those stacks' DRA drivers in spec.draDrivers, the way
-compose-inference-cluster stamps them, so the legs exercise the filter:
-each device stack must reach its own pool and stay off the others'.
-Those legs claim every stack their cloud carries, which only one side
-of the filter can fail; the existing-filtered leg keeps the AMD pool
-but leaves gpu.amd.com unclaimed, so a join that ignored the filter
-fails its absence check rather than passing every leg.
-Everything cloud-specific lives here, so adding fidelity for a cloud
-means editing its leg, not a copy of the test.
+Each leg shapes fake, KWOK-managed Nodes the way a cluster provider (or a
+BYO cluster's operator) shapes real ones - labels and taint - and names
+the DaemonSets the device stacks must fan out to them. A leg carries one
+pool per device stack its classes would claim: an NVIDIA GPU pool and a
+CPU pool on every leg, plus an AMD GPU pool on Existing, the one leg
+whose serving stack installs the AMD stack.
+
+There are two kinds of leg. The Existing legs apply a ServingStack that
+installs the device stacks itself (spec.deviceStacks: Managed). A
+provider's leg applies a ServingStack that leaves them to the provider
+(External) and the provider's own device stack XR beside it, which
+depends on the ServingStack's cert-manager. Its data is the provider's
+conformance.yaml, so the provider owns what its pools look like and what
+must land on them, and the suite stays generic.
+
+Each leg names the drivers its classes claim, the way
+compose-inference-cluster stamps them, so the legs exercise the driver
+filter: each device stack must reach its own pool and stay off the
+others'. The existing-filtered leg keeps the AMD pool but leaves
+gpu.amd.com unclaimed, so a join that ignored the filter fails its
+absence check rather than passing every leg.
 """
 
 import dataclasses
+import os
+import pathlib
 import typing
 
-# Where bring-up applies the ServingStack under test, on the control plane.
+import yaml
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
+# Where bring-up applies the ServingStack and device stack under test, on the
+# control plane. They're named apart, as an InferenceCluster's are, because
+# each composes ProviderConfigs named for it in the same namespace.
 SERVING_STACK = "e2e-cloud"
+DEVICE_STACK = "e2e-devices"
 NAMESPACE = "modelplane-system"
 
 # Two fake nodes per pool, so per-node DaemonSet fan-out is visible.
@@ -53,10 +68,10 @@ AMD_TAINT = {"key": "amd.com/gpu", "value": "true", "effect": "NoSchedule"}
 
 @dataclasses.dataclass(frozen=True)
 class Cloud:
-    """One cloud's leg: its fake device pools' shapes, and what must land on them."""
+    """One leg: its fake device pools' shapes, and what must land on them."""
 
     cloud: str
-    """The ServingStack's spec.cloud."""
+    """The leg's name: Existing, or the provider's directory under providers/."""
 
     labels: dict[str, str]
     """The cloud's own NVIDIA GPU node labels, stamped on the fake GPU nodes.
@@ -109,6 +124,15 @@ class Cloud:
     NFD labels, because nothing real runs on a KWOK node.
     """
 
+    directory: pathlib.Path | None = None
+    """The provider's directory, holding its project and conformance.yaml. None on the Existing legs."""
+
+    device_stack: tuple[str, str, str] | None = None
+    """The provider's device stack XR, as (apiVersion, kind, plural). None on the Existing legs."""
+
+    provisioning: dict[str, typing.Any] | None = None
+    """The provider's cluster config and node classes, for the provisioning test."""
+
     absent_daemonsets: tuple[str, ...] = ()
     """DaemonSets that must not exist at all: namespace/name of an unclaimed stack's operands.
 
@@ -119,238 +143,41 @@ class Cloud:
     """
 
 
+def _provider(directory: pathlib.Path) -> Cloud:
+    """The leg of the provider in directory, read from its conformance.yaml."""
+    leg = yaml.safe_load((directory / "conformance.yaml").read_text())
+    # The device stack's plural, from the provider's XRD for it.
+    plural = next(
+        xrd["spec"]["names"]["plural"]
+        for xrd in (yaml.safe_load(p.read_text()) for p in sorted(directory.glob("apis/*/definition.yaml")))
+        if xrd["spec"]["names"]["kind"] == leg["deviceStack"]["kind"]
+    )
+    return Cloud(
+        cloud=directory.name,
+        directory=directory,
+        labels=leg["pools"]["gpu"]["labels"],
+        taint_value=leg["pools"]["gpu"]["taintValue"],
+        cpu_labels=leg["pools"]["cpu"]["labels"],
+        dra_drivers=tuple(leg["draDrivers"]),
+        expected_daemonsets=leg["daemonSets"],
+        gpu_workloads=tuple(leg.get("gpuWorkloads", [])),
+        device_stack=(leg["deviceStack"]["apiVersion"], leg["deviceStack"]["kind"], plural),
+        provisioning=leg["provisioning"],
+    )
+
+
+# The providers under providers/, and any others the
+# MODELPLANE_CONFORMANCE_PROVIDERS environment variable lists by directory,
+# separated by the platform's path separator: a provider in a repository of
+# its own runs the suite against itself this way.
+_DIRECTORIES = {p.parent.name: p.parent for p in (ROOT / "providers").glob("*/conformance.yaml")} | {
+    pathlib.Path(d).resolve().name: pathlib.Path(d).resolve()
+    for d in os.environ.get("MODELPLANE_CONFORMANCE_PROVIDERS", "").split(os.pathsep)
+    if d
+}
+PROVIDERS = sorted(_DIRECTORIES)
+
 CLOUDS: dict[str, Cloud] = {
-    # The labels mirror what compose-eks-cluster stamps on GPU node groups
-    # (modelplane.ai/*). The taint is the one compose-eks-cluster applies.
-    "eks": Cloud(
-        cloud="EKS",
-        labels={
-            "node.kubernetes.io/instance-type": "p5.48xlarge",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "h100",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # EKS GPU AMIs are AL2023.
-            "feature.node.kubernetes.io/system-os_release.ID": "amzn",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "2023",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "m6i.4xlarge",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-            "node-feature-discovery/mp-node-feature-discovery-worker": 3,
-        },
-    ),
-    # The taint VALUE is load-bearing here: the AKS stack's accelerated
-    # tolerations are operator: Equal, value: "true" (AKS admission rejects
-    # wildcards), so any other value would wrongly exclude them.
-    # kubernetes.azure.com/accelerator is AKS's own GPU pool label; the
-    # stack's nvidia-toolkit-hardening DaemonSet node-affines to it. AKS is
-    # the one cloud whose stack enables nvsentinel's NIC health monitor, so
-    # its pods belong on the GPU pool too.
-    "aks": Cloud(
-        cloud="AKS",
-        labels={
-            "node.kubernetes.io/instance-type": "Standard_ND96isr_H100_v5",
-            "kubernetes.azure.com/accelerator": "nvidia",
-            "modelplane.ai/pool": "gpufake",
-            "modelplane.ai/gpu": "h100",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # AKS GPU pools run Ubuntu 22.04.
-            "feature.node.kubernetes.io/system-os_release.ID": "ubuntu",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "22.04",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "Standard_D8s_v5",
-            "modelplane.ai/pool": "cpufake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-            "node-feature-discovery/mp-node-feature-discovery-worker": 3,
-            "gpu-operator/nvidia-toolkit-hardening": 2,
-        },
-        gpu_workloads=("^nvidia-toolkit-hardening", "^nic-health-monitor"),
-    ),
-    # Carries the pool labels the dra gpuStack profile requires
-    # (gke-no-default-nvidia-gpu-device-plugin disables GKE's managed device
-    # plugin; cloud.google.com/gke-nvidia-gpu-dra-driver is what the
-    # autoscaler models DRA ResourceSlices from). The taint is the one
-    # compose-gke-cluster applies, valued "present" like GKE's own GPU taint;
-    # the GKE stack tolerates it with operator: Exists, so the value only
-    # matters for fidelity. GKE is the one cloud whose stack enables the GPU
-    # operator's container toolkit (COS's driver installer ships none), so
-    # its daemonset belongs on the GPU pool - hence the extra expected
-    # DaemonSet and gpu_workloads pattern.
-    "gke": Cloud(
-        cloud="GKE",
-        labels={
-            "node.kubernetes.io/instance-type": "a3-highgpu-8g",
-            "cloud.google.com/gke-accelerator": "nvidia-h100-80gb",
-            "cloud.google.com/gke-nvidia-gpu-dra-driver": "true",
-            "gke-no-default-nvidia-gpu-device-plugin": "true",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "h100",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # GKE GPU pools run Container-Optimized OS; VERSION_ID is the
-            # COS milestone.
-            "feature.node.kubernetes.io/system-os_release.ID": "cos",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "121",
-        },
-        taint_value="present",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "e2-standard-8",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-            "node-feature-discovery/mp-node-feature-discovery-worker": 3,
-            "gpu-operator/nvidia-container-toolkit-daemonset": 2,
-        },
-        gpu_workloads=("^nvidia-container-toolkit",),
-    ),
-    # The hand-written Civo half (stacks/clouds/civo.py) keeps its charts'
-    # default names, like Nebius's. Unlike every other cloud it installs the
-    # GPU operator's containerized driver (Civo GPU node images ship none),
-    # whose operand DaemonSet lands on the GPU pool - hence the extra
-    # gpu_workloads pattern. The labels and taint mirror what
-    # compose-civo-cluster stamps on GPU node pools; no spec.gpu.pools on the
-    # ServingStack, so the NVLink transform stays out of the way.
-    "civo": Cloud(
-        cloud="Civo",
-        labels={
-            "node.kubernetes.io/instance-type": "an.g1.l40s.kube.x1",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "nvidia-l40s",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # Civo GPU node images are Ubuntu 22.04.
-            "feature.node.kubernetes.io/system-os_release.ID": "ubuntu",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "22.04",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "g4s.kube.large",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-            "node-feature-discovery/mp-node-feature-discovery-worker": 3,
-        },
-        gpu_workloads=("^nvidia-driver-daemonset",),
-    ),
-    # The hand-written Nebius half (stacks/clouds/nebius.py) has no
-    # gpu-operator or nvsentinel, and its charts keep default names, so the
-    # DaemonSet names differ from the generated clouds. The labels and taint
-    # mirror what compose-nebius-cluster stamps on GPU node groups.
-    "nebius": Cloud(
-        cloud="Nebius",
-        labels={
-            "node.kubernetes.io/instance-type": "gpu-h100-sxm",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "h100",
-            "nvidia.com/gpu.present": "true",
-            # NFD labels real Nebius GPU nodes pci-0302_10de, not pci-10de.
-            "feature.node.kubernetes.io/pci-0302_10de.present": "true",
-            # Nebius GPU node groups run Ubuntu 22.04.
-            "feature.node.kubernetes.io/system-os_release.ID": "ubuntu",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "22.04",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "cpu-d3",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-            "node-feature-discovery/mp-node-feature-discovery-worker": 3,
-            "dcgm-exporter/mp-dcgm-exporter": 2,
-        },
-    ),
-    # The hand-written Vultr half (stacks/clouds/vultr.py) has no NFD: Vultr
-    # pre-installs the NVIDIA GPU Operator (and with it NFD) on every VKE GPU
-    # cluster, so the stack must not run a second instance. That platform
-    # add-on would set the NFD GPU labels on real nodes; here they are
-    # pre-set like the other clouds. nvidia.com/gpu.deploy.device-plugin:
-    # "false" is the label compose-vultr-cluster stamps so the platform
-    # operator's device plugin stands down and the DRA driver is the sole
-    # allocator.
-    "vultr": Cloud(
-        cloud="Vultr",
-        labels={
-            "node.kubernetes.io/instance-type": "vcg-a16-3c-32g-8vram",
-            "nvidia.com/gpu.deploy.device-plugin": "false",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "a16",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # VKE GPU nodes run Ubuntu 22.04; the platform's NFD would set
-            # these like the GPU labels above.
-            "feature.node.kubernetes.io/system-os_release.ID": "ubuntu",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "22.04",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "vc2-6c-16gb",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-        },
-    ),
-    # CoreWeave's half of the stack doesn't install NFD, because CoreWeave
-    # runs its own on every CKS cluster. Its NFD would set the GPU labels on
-    # real nodes, and here they're set up front as on the other clouds. The
-    # device-plugin label is the one compose-coreweave-cluster sets to keep
-    # CoreWeave's device plugin off GPU nodes.
-    "coreweave": Cloud(
-        cloud="CoreWeave",
-        labels={
-            "node.kubernetes.io/instance-type": "rtxp6000-8x",
-            "nvidia.com/gpu.deploy.device-plugin": "false",
-            "modelplane.ai/pool": "gpu-fake",
-            "modelplane.ai/gpu": "nvidia-rtx-pro-6000",
-            "nvidia.com/gpu.present": "true",
-            "feature.node.kubernetes.io/pci-10de.present": "true",
-            # CKS GPU nodes run Ubuntu 24.04, and CoreWeave's NFD sets these.
-            "feature.node.kubernetes.io/system-os_release.ID": "ubuntu",
-            "feature.node.kubernetes.io/system-os_release.VERSION_ID": "24.04",
-        },
-        taint_value="true",
-        cpu_labels={
-            "node.kubernetes.io/instance-type": "turin-gp",
-            "modelplane.ai/pool": "cpu-fake",
-            "modelplane.ai/cpu": "true",
-        },
-        dra_drivers=("dra.cpu", "gpu.nvidia.com"),
-        expected_daemonsets={
-            "nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin": 2,
-            "dra-driver-cpu/mp-dra-driver-cpu": 2,
-        },
-    ),
     # The model e2e already installs the Existing stack, but on an untainted
     # single node - this leg adds what it can't check: tainted GPU pools, so
     # the placement and toleration audits have teeth. Modelplane doesn't
@@ -430,6 +257,7 @@ CLOUDS: dict[str, Cloud] = {
         ),
     ),
 }
+CLOUDS |= {name: _provider(_DIRECTORIES[name]) for name in PROVIDERS}
 
 
 def _node(name: str, labels: dict[str, str], taint: dict[str, str]) -> dict[str, typing.Any]:
@@ -461,8 +289,8 @@ def _node(name: str, labels: dict[str, str], taint: dict[str, str]) -> dict[str,
 def nodes(cloud: Cloud) -> list[dict[str, typing.Any]]:
     """Return the fake Nodes of a cloud's leg, for the workload cluster.
 
-    One tainted pool per device stack the leg claims: the cloud's NVIDIA GPU
-    pool, its CPU pool, and - where the leg declares one - an AMD GPU pool.
+    One tainted pool per device stack the leg claims: the NVIDIA GPU pool,
+    the CPU pool, and - where the leg declares one - an AMD GPU pool.
     """
     gpu_taint = {"key": "nvidia.com/gpu", "value": cloud.taint_value, "effect": "NoSchedule"}
     fake = [_node(name, cloud.labels, gpu_taint) for name in FAKE_NODES]
@@ -475,27 +303,112 @@ def nodes(cloud: Cloud) -> list[dict[str, typing.Any]]:
 def serving_stack(cloud: Cloud) -> dict[str, typing.Any]:
     """Return the ServingStack under test, for the control plane.
 
-    Applied directly rather than composed by an InferenceCluster: source:
-    Existing hard-wires cloud: Existing, and a test-only override field isn't
-    worth the API surface. The kubeconfig Secret is the one bring-up registers
-    for the model e2e, so the stack installs onto the workload kind cluster,
-    whose KWOK nodes are shaped like this cloud's GPU pools. The gateway
-    hostname mirrors the shape compose-inference-cluster projects; with no
-    clientCAs the gateway serves nothing, but its readiness needs only the
-    LoadBalancer address MetalLB hands out.
+    Applied directly rather than composed by an InferenceCluster, which would
+    need a cluster to register or provision. The kubeconfig Secret is the one
+    bring-up registers for the model e2e, so the stack installs onto the
+    workload kind cluster, whose KWOK nodes are shaped like the leg's pools.
+    On a provider's leg it leaves the device stacks to the provider's device
+    stack XR. The gateway hostname mirrors the shape compose-inference-cluster
+    projects; with no clientCAs the gateway serves nothing, but its readiness
+    needs only the LoadBalancer address MetalLB hands out.
     """
     return {
         "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
         "kind": "ServingStack",
         "metadata": {"name": SERVING_STACK, "namespace": NAMESPACE},
         "spec": {
-            "cloud": cloud.cloud,
+            "deviceStacks": "Managed" if cloud.device_stack is None else "External",
             "stack": "Standard",
             # What compose-inference-cluster would stamp from the leg's
             # classes: the join filters the stack's tagged device stacks to
             # exactly these, so each pool gets its stack and no other's.
             "draDrivers": list(cloud.dra_drivers),
             "gateway": {"hostname": f"gateway-{SERVING_STACK}.{NAMESPACE}.svc.cluster.local"},
-            "secrets": [{"type": "Kubeconfig", "name": "local-cluster-kubeconfig", "key": "kubeconfig"}],
+            "secrets": [KUBECONFIG],
         },
     }
+
+
+# The workload cluster's kubeconfig, which bring-up registers on the control
+# plane.
+KUBECONFIG = {"type": "Kubeconfig", "name": "local-cluster-kubeconfig", "key": "kubeconfig"}
+
+
+def device_stack(cloud: Cloud) -> dict[str, typing.Any]:
+    """Return a provider's device stack XR under test, for the control plane.
+
+    What the provider's ProvisionedCluster composes once its cluster is
+    reachable, applied directly against the workload kind cluster, so the
+    device stack installs there beside the ServingStack whose cert-manager it
+    depends on.
+    """
+    if cloud.device_stack is None:
+        raise ValueError(f"the {cloud.cloud} leg has no device stack")
+    api_version, kind, _ = cloud.device_stack
+    return {
+        "apiVersion": api_version,
+        "kind": kind,
+        "metadata": {"name": DEVICE_STACK, "namespace": NAMESPACE},
+        "spec": {"draDrivers": list(cloud.dra_drivers), "secrets": [KUBECONFIG]},
+    }
+
+
+# The InferenceClasses and InferenceCluster the provisioning test applies with
+# a provider's cluster config and node classes.
+PROVISIONED = "conformance"
+
+
+def provisioned(cloud: Cloud) -> list[dict[str, typing.Any]]:
+    """Return the objects of a provider's provisioning test, for the control plane.
+
+    Anything the provider's leg needs in place first, such as a cloud
+    ProviderConfig its cluster composition reads, then the provider's cluster
+    config and node classes, an InferenceClass of each
+    role, and an InferenceCluster with a pool of each, restricted to the
+    zones the provider's leg names, for a provider whose pools need them. The
+    GPU class claims an NVIDIA GPU, which every provider supports today.
+    """
+    if cloud.provisioning is None:
+        raise ValueError(f"the {cloud.cloud} leg has no provisioning test")
+    config = cloud.provisioning["config"]
+    classes = cloud.provisioning["nodeClasses"]
+    zones = {"zones": cloud.provisioning["zones"]} if "zones" in cloud.provisioning else {}
+
+    def ref(obj: dict[str, typing.Any]) -> dict[str, str]:
+        return {"apiVersion": obj["apiVersion"], "kind": obj["kind"], "name": obj["metadata"]["name"]}
+
+    def inference_class(name: str, node_class: dict[str, typing.Any], device: dict[str, typing.Any]) -> dict:
+        return {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceClass",
+            "metadata": {"name": name},
+            "spec": {"nodeClassRef": ref(node_class), "devices": [device]},
+        }
+
+    return [
+        *cloud.provisioning.get("prerequisites", []),
+        config,
+        *classes.values(),
+        inference_class(
+            f"{PROVISIONED}-gpu",
+            classes["accelerator"],
+            {"name": "gpu", "driver": "gpu.nvidia.com", "deviceClassName": "gpu.nvidia.com", "count": 1},
+        ),
+        inference_class(
+            f"{PROVISIONED}-cpu",
+            classes["cpu"],
+            {"name": "cpu", "driver": "dra.cpu", "deviceClassName": "dra.cpu", "count": 1},
+        ),
+        {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceCluster",
+            "metadata": {"name": PROVISIONED},
+            "spec": {
+                "cluster": {"source": "Provisioned", "provisioned": {"configRef": ref(config)}},
+                "nodePools": [
+                    {"name": "gpu", "className": f"{PROVISIONED}-gpu", "nodeCount": 1, **zones},
+                    {"name": "cpu", "className": f"{PROVISIONED}-cpu", "nodeCount": 1, **zones},
+                ],
+            },
+        },
+    ]

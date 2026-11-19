@@ -19,9 +19,11 @@ control plane runs Crossplane and the Configuration, managed by `crossplane
 project run`, and registers the workload cluster as InferenceCluster local with
 source: Existing. See README.md.
 
-With --cloud the workload cluster plays a cloud's tainted GPU pool instead:
-KWOK fakes the GPU nodes, and that cloud's ServingStack goes in rather than
-the model manifests. The tests in e2e/clouds/ then audit placement.
+With --cloud the workload cluster plays a leg's tainted device pools instead:
+KWOK fakes the nodes, and the leg's ServingStack goes in rather than the model
+manifests. A provider's leg also installs the provider's package and applies
+its device stack, and the objects of an InferenceCluster it provisions. The
+tests in e2e/clouds/ then audit placement and provisioning.
 
     python -m e2e.environment up [--no-apply] [--cloud <cloud>]
     python -m e2e.environment down
@@ -36,6 +38,8 @@ import pathlib
 import shlex
 import subprocess
 import tempfile
+
+import yaml
 
 from e2e import clouds
 
@@ -64,9 +68,17 @@ CROSSPLANE_VERSION = "2.4.0"
 # mark the pods scheduled onto them Running.
 KWOK_URL = "https://github.com/kubernetes-sigs/kwok/releases/download/v0.8.0"
 
-# The functions the ServingStack pipeline calls (see
-# apis/servingstacks/composition.yaml). A cloud leg parks the rest.
+# The functions of Modelplane's own a leg calls: the ServingStack pipeline's
+# (see apis/servingstacks/composition.yaml), and on a provider's leg those that
+# compose its InferenceCluster. A leg parks the rest of Modelplane's, and none
+# of the provider's.
 SERVING_STACK_FUNCTIONS = ("compose-serving-stack", "compose-usages")
+PROVISIONING_FUNCTIONS = ("compose-inference-cluster", "compose-inference-class")
+
+# Where nix run .#build-<provider> pushes Modelplane's package, which a
+# provider's build fetches to generate its models from.
+LOCAL_REGISTRY = "localhost:5000/modelplane/modelplane"
+MODELPLANE_PACKAGE = "xpkg.upbound.io/modelplane/modelplane"
 
 MANIFESTS = ROOT / "e2e" / "manifests"
 
@@ -84,8 +96,10 @@ def up(*, apply_manifests: bool, cloud: clouds.Cloud | None = None) -> None:
     """
     up_workload(cloud=cloud)
     up_control_plane()
+    if cloud is not None and cloud.directory is not None:
+        up_provider(cloud.directory)
     if cloud is not None:
-        park_unused_functions()
+        park_unused_functions(cloud)
     if not apply_manifests:
         what = MANIFESTS if cloud is None else f"the {cloud.cloud} ServingStack"
         log.info("Control plane ready. Skipped applying %s", what)
@@ -109,6 +123,12 @@ def up(*, apply_manifests: bool, cloud: clouds.Cloud | None = None) -> None:
     for stale in sorted({node["metadata"]["name"] for node in json.loads(observed)["items"]} - wanted):
         kubectl(WORKLOAD_CONTEXT, "delete", "node", stale)
     kubectl(CONTROL_PLANE_CONTEXT, "apply", "--filename=-", stdin=json.dumps(clouds.serving_stack(cloud)))
+    if cloud.device_stack is None:
+        return
+    log.info("Applying the %s device stack and the objects of a cluster it provisions", cloud.cloud)
+    kubectl(CONTROL_PLANE_CONTEXT, "apply", "--filename=-", stdin=json.dumps(clouds.device_stack(cloud)))
+    objects = {"apiVersion": "v1", "kind": "List", "items": clouds.provisioned(cloud)}
+    kubectl(CONTROL_PLANE_CONTEXT, "apply", "--filename=-", stdin=json.dumps(objects))
 
 
 def up_workload(*, cloud: clouds.Cloud | None = None) -> None:
@@ -332,11 +352,75 @@ def up_control_plane() -> None:
     kubectl(CONTROL_PLANE_CONTEXT, "apply", "--filename=-", stdin=json.dumps(secret))
 
 
-def park_unused_functions() -> None:
-    """Scale the composition functions the ServingStack pipeline doesn't call to zero.
+def up_provider(project: pathlib.Path) -> None:
+    """Install a provider's package on the control plane, beside Modelplane's.
 
-    A cloud leg composes exactly one XR, so parking the other functions gives
-    the serving-stack install the runner's memory. A Deployment with zero
+    crossplane project run builds the provider, sideloads its packages into the
+    control plane's registry, and installs it. Its build packages the function
+    images the provider built into its _output/functions, and fetches
+    Modelplane's package to generate the provider's models from, from the
+    local registry at LOCAL_REGISTRY. It reads them through a copy of the
+    provider's project file that points there and relaxes the provider's
+    constraint on Modelplane's version to admit a dev build. For a provider
+    under providers/, nix run .#build-<provider> does both.
+
+    In the cluster the provider's dependency on Modelplane resolves to the
+    package the first run installed. Both runs share one control plane, and
+    the CLI rewrites package references to its registry with one ImageConfig,
+    which the first run created for Modelplane's repository and the second
+    leaves alone. So this adds one for the provider's repository.
+    """
+    hint = f"nix run .#build-{project.name}" if project.parent == ROOT / "providers" else "build the provider"
+    if not (project / "_output" / "functions").exists():
+        msg = f"no functions in {project / '_output' / 'functions'}; {hint}"
+        raise BringUpError(msg)
+    try:
+        output("curl", "--fail", "--silent", f"http://{LOCAL_REGISTRY.replace('/', '/v2/', 1)}/tags/list")
+    except subprocess.CalledProcessError as e:
+        msg = f"no Modelplane package at {LOCAL_REGISTRY}, which the provider's build reads; {hint}"
+        raise BringUpError(msg) from e
+    spec = yaml.safe_load((project / "crossplane-project.yaml").read_text())
+    spec["spec"]["imageConfigs"] = [
+        {
+            "metadata": {"name": "local-modelplane"},
+            "spec": {
+                "matchImages": [{"type": "Prefix", "prefix": MODELPLANE_PACKAGE}],
+                "rewriteImage": {"prefix": LOCAL_REGISTRY},
+            },
+        }
+    ]
+    for dep in spec["spec"]["dependencies"]:
+        if dep.get("xpkg", {}).get("package") == MODELPLANE_PACKAGE:
+            dep["xpkg"]["version"] = ">=v0.0.0-0"
+    local = project / ".crossplane-project.local.yaml"
+    local.write_text(yaml.safe_dump(spec, sort_keys=False))
+    repository = spec["spec"]["repository"]
+    image_config = {
+        "apiVersion": "pkg.crossplane.io/v1beta1",
+        "kind": "ImageConfig",
+        "metadata": {"name": f"local-{project.name}"},
+        "spec": {
+            "matchImages": [{"type": "Prefix", "prefix": repository}],
+            "rewriteImage": {"prefix": f"{CONTROL_PLANE}-registry:5000/{repository.split('/', 1)[1]}"},
+        },
+    }
+    kubectl(CONTROL_PLANE_CONTEXT, "apply", "--filename=-", stdin=json.dumps(image_config))
+    log.info("Building and installing the %s provider on the control plane", project.name)
+    with tempfile.TemporaryDirectory() as docker_config:
+        pathlib.Path(docker_config, "config.json").write_text("{}")
+        run(
+            "crossplane", "project", "run", f"--project-file={local}",
+            f"--control-plane-name={CONTROL_PLANE}", "--cluster-admin", "--timeout=25m",
+            f"--crossplane-version={CROSSPLANE_VERSION}",
+            env={"DOCKER_CONFIG": docker_config},
+        )  # fmt: skip
+
+
+def park_unused_functions(cloud: clouds.Cloud) -> None:
+    """Scale Modelplane's composition functions the leg doesn't call to zero.
+
+    A leg composes a ServingStack, and on a provider's leg an InferenceCluster,
+    so parking the other functions gives the install the runner's memory. A Deployment with zero
     desired replicas still reports Available, so the package revisions stay
     healthy - the same mechanism that keeps the safe-start cloud providers
     dormant. runtimeConfigRef binds like the provider patches in
@@ -364,10 +448,14 @@ def park_unused_functions() -> None:
     functions = output(
         "kubectl", f"--context={CONTROL_PLANE_CONTEXT}", "get", "functions.pkg.crossplane.io", "--output=name"
     ).split()
+    keep = SERVING_STACK_FUNCTIONS if cloud.device_stack is None else SERVING_STACK_FUNCTIONS + PROVISIONING_FUNCTIONS
     for function in functions:
         # The installed names carry the project prefix
-        # (modelplane-modelplanecompose-serving-stack), so match on the suffix.
-        if function.endswith(SERVING_STACK_FUNCTIONS):
+        # (modelplane-modelplanecompose-serving-stack), so match on that and
+        # the suffix. A provider's carry its own prefix.
+        if not function.startswith("function.pkg.crossplane.io/modelplane-modelplanecompose-"):
+            continue
+        if function.endswith(keep):
             continue
         kubectl(CONTROL_PLANE_CONTEXT, "patch", function, "--type=merge", f"--patch={json.dumps(patch)}")
 

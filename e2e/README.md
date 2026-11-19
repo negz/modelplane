@@ -70,102 +70,101 @@ cluster, and that the engine's own `vllm:` names did *not* leave the cluster.
 ### Why cloud provisioning cannot be tested here
 
 `lean-control-plane.yaml` trims the control plane to what the BYO
-(`source: Existing`) scenario needs. That's all the e2e runs, and it carries no
-cloud credentials, so it never creates a cloud `InferenceCluster` and never
-provisions a cloud cluster. This is what that looks like, and what to expect if
-you point this control plane at a real cloud without adding one:
+(`source: Existing`) scenario needs. That's all the default e2e runs. It
+installs no cluster provider and carries no cloud credentials, so it never
+provisions a cloud cluster. Cloud mode, below, installs one provider and
+checks everything up to the cloud API call, but no cloud cluster comes up
+there either: the provider's managed resources compose, and fail to sync for
+want of credentials.
 
-- The lean MRAP activates only `*.kubernetes.m.crossplane.io` and
-  `*.helm.m.crossplane.io`, and nothing composes a cloud activation policy, so a
-  cloud provider's managed resources are never activated. They sit with **no
-  status conditions at all** — which reads as nothing happening rather than as
-  an error.
-- Because those providers declare the safe-start capability, Crossplane scales
-  their controllers to zero while their managed resources are inactive, so a
-  dormant cloud provider runs no pod at all.
+## Provider conformance on kind (`--cloud`)
 
-A cloud `InferenceCluster` would compose its own additive policy activating its
-cloud's kinds and wake that provider; the e2e just never creates one. Undoing
-these trims is possible but leaves a control plane that is no longer the one CI
-runs, so prefer a separate control plane for cloud work.
+`nix run .#e2e -- --cloud <provider>|existing|existing-filtered` is the
+cluster provider conformance suite. For a provider it installs Modelplane and
+the provider's package on the control plane, then applies a `ServingStack`
+with `spec.deviceStacks: External` and the provider's own device stack XR
+beside it, targeting the workload kind cluster. The `existing` legs apply a
+`ServingStack` with `spec.deviceStacks: Managed` instead, whose device stacks
+are core's. Neither needs cloud credentials.
 
-## Cloud serving stacks on kind (`--cloud`)
+The trick is [KWOK](https://kwok.sigs.k8s.io): bring-up applies its pinned
+`kwok.yaml` and `stage-fast.yaml` manifests and two fake Nodes per device pool,
+labelled and tainted exactly like that cloud's pools: an NVIDIA GPU pool and a
+CPU pool on every leg, plus an AMD GPU pool on Existing, the one leg that
+installs the AMD stack. The real kind node plays the untainted system pool, so
+system components install and run for real. Each device stack's DaemonSets fan
+out to their own pool's fake nodes, where KWOK marks their pods Running, which
+is all helm `--wait` and the compositions' readiness gates need.
 
-`nix run .#e2e -- --cloud eks|aks|gke|civo|coreweave|nebius|vultr|existing` installs that
-cloud's serving stack — the AICR-generated component lists for EKS/AKS/GKE, or
-the hand-written halves for Civo, CoreWeave, Nebius, Vultr and Existing — onto the same
-workload kind cluster, with no cloud credentials. The trick is
-[KWOK](https://kwok.sigs.k8s.io): bring-up applies its pinned `kwok.yaml` and
-`stage-fast.yaml` manifests and two fake Nodes per device pool, labelled and
-tainted exactly like that cloud's pools — an NVIDIA GPU pool and a CPU pool
-on every leg, plus an AMD GPU pool on Existing, the one cloud that installs
-the AMD stack. The real kind node plays the untainted system pool, so system
-components install and run for real; each device stack's DaemonSets fan out
-to their own pool's fake nodes, where KWOK marks their pods Running — which
-is all helm `--wait` and the composition's readiness gates need.
+The suite is generic. A provider's leg is its
+`providers/<name>/conformance.yaml`: its fake pools' labels and GPU taint
+value, its device stack kind, the `draDrivers` its classes would claim (which
+filters the stack to exactly those device stacks), the DaemonSets expected to
+fan out to the pools, a cluster config and node classes to provision with, and any
+objects its provisioning needs first, such as a cloud ProviderConfig.
+`clouds/__init__.py` loads every provider under `providers/`, plus any
+directory the `MODELPLANE_CONFORMANCE_PROVIDERS` environment variable lists
+(`:`-separated), so a provider in a repository of its own runs the same suite.
+The suite installs the provider from its `_output/functions` and Modelplane's
+package from a registry at `localhost:5000`, so build the provider first: `nix
+run .#build-<provider>` does both for a provider under `providers/`. The
+Existing legs live in `clouds/__init__.py`.
 
-The clouds are one data-driven matrix: each leg in `clouds/__init__.py` holds
-everything cloud-specific — each fake pool's labels, the GPU taint value, the
-stack's `spec.cloud`, the `spec.draDrivers` its classes would claim (which
-filters the stack to exactly those device stacks), and the DaemonSets
-expected to fan out to the pools. Adding fidelity for a cloud means editing
-its leg, not a copy of the test.
+A leg is itself a copy of what its provider's cluster composition applies, so
+it can drift from the composition as well as the stack from it.
+`e2e/test_legs.py` pins each provider leg's taint value to the `_GPU_TAINT*`
+constants of the composition it mirrors (BYO pools' taints come from outside
+Modelplane), and the shared CPU taint key to every composition's `_LABEL_CPU`.
+It reads the compositions' source and needs no cluster, so it runs as the
+`e2e-legs` check in `nix flake check` rather than here. The labels are a known
+limitation: compositions build them per pool at compose time, so the legs'
+copies have to be kept true in review.
 
-A leg is itself a copy of what its cloud's cluster composition applies, so it
-can drift from the composition as well as the stack from it. `e2e/test_legs.py`
-pins each leg's taint value to the `_GPU_TAINT*` constants of the composition
-it mirrors (BYO pools' taints come from outside Modelplane), and the shared CPU
-taint key to every composition's `_LABEL_CPU`. It reads the compositions'
-source and needs no cluster, so it runs as the `e2e-legs` check in `nix flake
-check` rather than here: a composition-only change triggers the flake checks
-but not this workflow. The labels are a known limitation: compositions build
-them per pool at compose time, so the legs' copies have to be kept true in
-review.
-
-The `ServingStack` XR is applied directly rather than through an
-`InferenceCluster`, because `source: Existing` hard-wires `cloud: Existing`;
-the XRD accepts exactly the shape the cluster compositions compose, so
-`compose-serving-stack` is exercised end to end through real
-provider-helm/provider-kubernetes. Bring-up also parks the composition
-functions the ServingStack pipeline doesn't call at zero replicas, giving the
-install the runner's memory.
+Bring-up also parks the composition functions the stacks' pipelines don't call
+at zero replicas, giving the install the runner's memory.
 
 Cloud mode always verifies: after bring-up, pytest runs `clouds/` against the
-clusters (`--no-apply` stops short of the fake nodes and the XR, `--test`
-reruns the tests alone). A session fixture waits for the `ServingStack` to go
-Ready, then the asserts are two-sided:
+clusters (`--no-apply` stops short of the fake nodes and the XRs, `--test`
+reruns the tests alone). A session fixture waits for the `ServingStack`, and
+the device stack if there is one, to go Ready. Then:
 
 - **DaemonSet fan-out**: the leg's expected DaemonSets (the NVIDIA DRA
   kubelet plugin, dra-driver-cpu, NFD worker; the AMD operands on
-  Existing; toolkit-hardening on AKS) reach their ready counts —
-  a toleration too *narrow* (e.g. the wrong `Equal` value on AKS), a
-  selector missing its pool, or a filter that wrongly dropped a claimed
-  stack shows up as a shortfall.
+  Existing; toolkit-hardening on AKS) reach their ready counts. A toleration
+  too *narrow* (e.g. the wrong `Equal` value on AKS), a selector missing its
+  pool, or a filter that wrongly dropped a claimed stack shows up as a
+  shortfall.
 - **Placement/toleration audit**: no pod outside a pool's allowlist carries
   a wildcard or that pool's taint toleration, everything on a fake node
   belongs to that node's pool, and pool-only pods (the DRA drivers, the GPU
-  operands) never sit anywhere else — a toleration too *broad* (the
+  operands) never sit anywhere else. A toleration too *broad* (the
   "tolerates every taint" class of bug) fails here even when the scheduler
   happened to keep the pod on the system node.
 - **Unclaimed-stack absence**: the legs above claim every stack their cloud
   carries, so a join that ignored `spec.draDrivers` would pass them all.
   The `existing-filtered` leg is the exclusion side: same pools as
-  `existing`, AMD fake nodes included, but `gpu.amd.com` left unclaimed —
-  the AMD DaemonSets must not exist at all, even though the pool is there
+  `existing`, AMD fake nodes included, but `gpu.amd.com` left unclaimed.
+  The AMD DaemonSets must not exist at all, even though the pool is there
   and Existing's list pins the stack.
+- **Provisioning**: on a provider's leg, an `InferenceCluster` with a GPU and
+  a CPU pool, built from the provider's cluster config and node classes.
+  Modelplane must select the provider's Composition by the config's kind, the
+  provider must accept the contract's `ProvisionedCluster` and compose managed
+  resources, and the `InferenceCluster` must report it's provisioning.
 
 What cloud mode does **not** test: AKS's admission rejection of wildcard
 tolerations (the audit approximates it client-side), real DRA allocation and
 driver/toolkit behaviour on GPU nodes (all faked by KWOK; the model e2e's
 dra-example-driver path covers DRA allocation), the EKS EFA driver and GKE's
 `nvidia-driver-installer` (installed by the cluster compositions/platform, not
-the serving stack), and the model/inference path (covered by the model e2e).
+the device stack), a provisioned cluster coming up, and the model/inference
+path (covered by the model e2e).
 
 ## Prerequisites
 
 - **Docker** with real headroom — **≥ 16 GB memory** and **plenty of disk**
-  (raise Docker Desktop's disk-image size). Two kind clusters, 13 provider
-  packages, the built function images, and the serving stack (cert-manager,
+  (raise Docker Desktop's disk-image size). Two kind clusters, the Crossplane
+  provider packages, the built function images, and the serving stack (cert-manager,
   the gateways et al.) add up fast; a full Docker disk surfaces as
   `no space left on device`. Reclaim between runs with `docker builder prune -af`
   and `docker image prune -af`.
@@ -184,7 +183,7 @@ against. The control-plane cluster needs no DRA.
 nix run .#e2e                  # bring up both clusters + deploy the mock model
 nix run .#e2e -- --verify      # same, then run the tests
 nix run .#e2e -- --test        # run the tests against clusters already up
-nix run .#e2e -- --cloud eks   # one cloud's serving stack on KWOK-faked device pools (see below)
+nix run .#e2e -- --cloud eks   # one provider's conformance suite on KWOK-faked device pools (see below)
 nix run .#e2e -- --clean       # tear both clusters down
 ```
 
@@ -268,10 +267,11 @@ e2e/
     test_metering.py         # it logs a usage record per request
     test_cluster_gateway.py  # the cluster gateway requires a client certificate
     test_telemetry.py        # the engine's series reach the collector's sink
-  clouds/                    # --cloud mode: cloud stacks on KWOK-faked device pools
-    __init__.py              # the matrix: per-cloud node shape, taint, expected DaemonSets
-    conftest.py              # fixtures: the clusters, the ServingStack Ready wait
+  clouds/                    # --cloud mode: provider conformance on KWOK-faked device pools
+    __init__.py              # the legs: Existing's, and each provider's conformance.yaml
+    conftest.py              # fixtures: the clusters, the stacks' Ready wait
     test_placement.py        # DaemonSet fan-out + placement/toleration audits
+    test_provisioning.py     # the provider implements the ProvisionedCluster contract
   dra-example-driver.yaml    # vendored fake DRA GPU driver (applied to workload)
   manifests/                 # applied to the control plane after setup
     00-namespaces.yaml

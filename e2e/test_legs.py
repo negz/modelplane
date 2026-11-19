@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The legs stay true to the cluster compositions they mirror.
+"""The providers' legs stay true to the cluster compositions they mirror.
 
-The placement tests catch the serving stack drifting from a leg, but a leg is
-itself a copy of what its cloud's cluster composition applies, and a copy can
-drift too: if compose-aks-cluster changed its taint value, the AKS stack's
+The placement tests catch a device stack drifting from a leg, but a leg is
+itself a copy of what its provider's cluster composition applies, and a copy
+can drift too: if compose-aks-cluster changed its taint value, the AKS stack's
 Equal/true tolerations would miss real GPU nodes while the leg's fake ones
 still matched. These tests need no cluster - they read the compositions'
 source - so they live outside e2e/clouds/ (whose fixtures need a live
@@ -33,27 +33,21 @@ from e2e import clouds
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# The cluster composition whose GPU and CPU pool taints each leg copies. No
-# Existing entry: Modelplane doesn't taint BYO pools.
-COMPOSITIONS = {
-    "eks": "compose-eks-cluster",
-    "gke": "compose-gke-cluster",
-    "aks": "compose-aks-cluster",
-    "civo": "compose-civo-cluster",
-    "coreweave": "compose-coreweave-cluster",
-    "nebius": "compose-nebius-cluster",
-    "vultr": "compose-vultr-cluster",
-}
+# The cluster composition whose GPU and CPU pool taints each provider's leg
+# copies. No Existing entry: Modelplane doesn't taint BYO pools.
+COMPOSITIONS = {leg: f"compose-{leg}-cluster" for leg in clouds.PROVIDERS}
 
 
-def constants(function: str) -> dict[str, str]:
-    """Return a composition module's top-level string constants.
+def constants(leg: str) -> dict[str, str]:
+    """Return the top-level string constants of a provider leg's cluster composition.
 
     Parsed from source rather than imported: every function package is
     named `function` and carries its own dependencies, so the modules
     can't be imported here side by side.
     """
-    tree = ast.parse((ROOT / "functions" / function / "function" / "fn.py").read_text())
+    directory = clouds.CLOUDS[leg].directory
+    assert directory is not None, f"the {leg} leg has no provider"
+    tree = ast.parse((directory / "functions" / COMPOSITIONS[leg] / "function" / "fn.py").read_text())
     return {
         node.targets[0].id: node.value.value
         for node in tree.body
@@ -68,7 +62,7 @@ def constants(function: str) -> dict[str, str]:
 @pytest.mark.parametrize("leg", sorted(COMPOSITIONS))
 def test_taint_matches_composition(leg: str) -> None:
     """Each leg's fake GPU taint is the one its cluster composition applies."""
-    consts = constants(COMPOSITIONS[leg])
+    consts = constants(leg)
     if "_GPU_TAINT_VALUE" in consts:
         key, value = consts["_GPU_TAINT_KEY"], consts["_GPU_TAINT_VALUE"]
     else:
@@ -91,7 +85,7 @@ def test_cpu_taint_matches(leg: str) -> None:
     rather than faking it per cloud - this pins that assumption. The label
     key is the one dra-driver-cpu's nodeSelector reads.
     """
-    consts = constants(COMPOSITIONS[leg])
+    consts = constants(leg)
     if "_CPU_TAINT_VALUE" in consts:
         key, value = consts["_CPU_TAINT_KEY"], consts["_CPU_TAINT_VALUE"]
     else:
