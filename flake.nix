@@ -50,20 +50,12 @@
 
       # The composition functions that make up Modelplane.
       functionNames = [
-        "compose-aks-cluster"
-        "compose-capacity-reservation"
-        "compose-civo-cluster"
-        "compose-coreweave-cluster"
-        "compose-eks-cluster"
-        "compose-gke-cluster"
         "compose-inference-class"
         "compose-inference-cluster"
         "compose-inference-gateway"
         "compose-metric-mapping"
         "compose-telemetry-destination"
-        "compose-nebius-cluster"
         "compose-serving-stack"
-        "compose-vultr-cluster"
         "compose-model-cache"
         "compose-model-deployment"
         "compose-model-endpoint"
@@ -72,6 +64,16 @@
         "compose-model-service"
         "compose-usages"
       ];
+
+      # The cluster providers, each a Crossplane project of its own under
+      # providers/<name>, with a uv workspace of its own, built into a package
+      # of its own. Each maps to its composition functions, the directories
+      # under its functions/.
+      directories =
+        dir: builtins.attrNames (nixpkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir));
+      providers = nixpkgs.lib.genAttrs (directories ./providers) (
+        name: directories ./providers/${name}/functions
+      );
 
       supportedSystems = [
         "x86_64-linux"
@@ -90,6 +92,28 @@
           "v0.1.0-dev.${builtins.toString self.lastModified}.g${self.dirtyShortRev}";
 
       forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system: forSystem system f);
+
+      # A uv workspace's package set: Modelplane's own, or a provider's.
+      pythonSetFor =
+        pkgs: workspaceRoot:
+        import ./nix/python.nix {
+          inherit
+            pkgs
+            self
+            pyproject-nix
+            uv2nix
+            pyproject-build-systems
+            workspaceRoot
+            ;
+        };
+
+      # Each provider's function names and package set.
+      providerProjects =
+        pkgs:
+        builtins.mapAttrs (name: functionNames: {
+          inherit functionNames;
+          pythonSet = pythonSetFor pkgs (self + "/providers/${name}");
+        }) providers;
       forSystem =
         system: f:
         f {
@@ -118,15 +142,8 @@
         { pkgs, ... }:
         import ./nix/checks.nix {
           inherit pkgs self functionNames;
-          pythonSet = import ./nix/python.nix {
-            inherit
-              pkgs
-              self
-              pyproject-nix
-              uv2nix
-              pyproject-build-systems
-              ;
-          };
+          pythonSet = pythonSetFor pkgs self;
+          providers = providerProjects pkgs;
         }
       );
 
@@ -134,25 +151,43 @@
       # from data (a cached interpreter, prebuilt wheels, and our source), so
       # they build on any host - including macOS - with no cross-compilation or
       # emulation. Build individual images with nix build .#<function>-<arch>,
-      # or all of them with nix build .#functions.
+      # or all of them with nix build .#functions. A provider's are named for
+      # it: nix build .#coreweave-<function>-<arch>, or .#functions-coreweave.
       packages = forAllSystems (
         { pkgs, ... }:
         let
-          functions = import ./nix/functions.nix {
-            inherit
-              pkgs
-              self
-              functionNames
-              pyproject-nix
-              uv2nix
-              pyproject-build-systems
-              ;
-          };
+          functionsFor =
+            args:
+            import ./nix/functions.nix (
+              {
+                inherit
+                  pkgs
+                  self
+                  pyproject-nix
+                  uv2nix
+                  pyproject-build-systems
+                  ;
+              }
+              // args
+            );
+          functions = functionsFor { inherit functionNames; };
+          providerFunctions = builtins.mapAttrs (
+            name: names:
+            functionsFor {
+              functionNames = names;
+              workspaceRoot = self + "/providers/${name}";
+              prefix = "${name}-";
+            }
+          ) providers;
         in
         functions.images
         // {
           functions = functions.all;
         }
+        // builtins.foldl' (acc: f: acc // f.images) { } (builtins.attrValues providerFunctions)
+        // nixpkgs.lib.mapAttrs' (
+          name: f: nixpkgs.lib.nameValuePair "functions-${name}" f.all
+        ) providerFunctions
       );
 
       apps = forAllSystems (
@@ -162,15 +197,8 @@
           apps = import ./nix/apps.nix { inherit pkgs; };
           crossplane = deps.crossplane { inherit system; };
           functionsPkg = self.packages.${system}.functions or null;
-          pythonSet = import ./nix/python.nix {
-            inherit
-              pkgs
-              self
-              pyproject-nix
-              uv2nix
-              pyproject-build-systems
-              ;
-          };
+          pythonSet = pythonSetFor pkgs self;
+          providerFunctionsPkg = name: self.packages.${system}."functions-${name}" or null;
         in
         {
           fix = apps.fix { };
@@ -187,10 +215,27 @@
             dockerCredentialUp = pkgs.upbound;
           };
           stop = apps.stop { inherit crossplane; };
-          e2e = apps.e2e { inherit crossplane functionsPkg pythonSet; };
-          test = apps.test { inherit pythonSet functionNames; };
+          e2e = apps.e2e {
+            inherit crossplane functionsPkg pythonSet;
+          };
+          test = apps.test {
+            inherit pythonSet functionNames;
+            providers = providerProjects pkgs;
+          };
           stacks = apps.stacks { inherit (pkgs) aicr; };
         }
+        # nix run .#build-<provider> builds a provider's package against
+        # Modelplane's, built from this tree. See apps.nix.
+        // nixpkgs.lib.mapAttrs' (
+          name: _:
+          nixpkgs.lib.nameValuePair "build-${name}" (
+            apps.buildProvider {
+              inherit crossplane functionsPkg name;
+              providerFunctionsPkg = providerFunctionsPkg name;
+              dockerCredentialUp = pkgs.upbound;
+            }
+          )
+        ) providers
       );
 
       devShells = forAllSystems (

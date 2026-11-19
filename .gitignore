@@ -1,6 +1,8 @@
 .venv
 .venv-*
 _output
+# The project file nix run .#build-<provider> writes beside a provider's.
+.crossplane-project.local.yaml
 .up
 result
 result-*

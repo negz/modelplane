@@ -22,6 +22,10 @@
 #
 # The resulting tarballs are consumed by `crossplane project build` via the
 # Tarball function source in crossplane-project.yaml.
+#
+# workspaceRoot names the uv workspace the functions are members of: the
+# repository root for Modelplane's own, or a provider's directory. A
+# provider's images are named for it, e.g. coreweave-compose-device-stack-amd64.
 {
   pkgs,
   self,
@@ -29,6 +33,8 @@
   pyproject-nix,
   uv2nix,
   pyproject-build-systems,
+  workspaceRoot ? self,
+  prefix ? "",
 }:
 let
   inherit (pkgs) lib;
@@ -72,7 +78,7 @@ let
   # uv runs on the build host, so take it from the host package set.
   inherit (pkgs.unstable) uv;
 
-  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = self; };
+  workspace = uv2nix.lib.workspace.loadWorkspace { inherit workspaceRoot; };
 
   # A uv2nix package set for the target arch's nixpkgs. We use it only as data:
   # to resolve each function's dependency closure and reference the target-arch
@@ -265,18 +271,20 @@ let
     builtins.concatMap (
       name:
       map (arch: {
-        name = "${name}-${arch}";
+        name = "${prefix}${name}-${arch}";
         value = mkFunctionImage { inherit name arch; };
       }) architectures
     ) functionNames
   );
 
-  all = pkgs.runCommand "modelplane-functions" { } ''
+  # Named without the prefix, the way the project's Tarball function sources
+  # expect them.
+  all = pkgs.runCommand "modelplane-${prefix}functions" { } ''
     mkdir -p $out
     ${builtins.concatStringsSep "\n" (
       builtins.attrValues (
         builtins.mapAttrs (key: img: ''
-          ln -s ${img} $out/${key}.tar.gz
+          ln -s ${img} $out/${pkgs.lib.removePrefix prefix key}.tar.gz
         '') images
       )
     )}

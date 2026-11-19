@@ -15,11 +15,11 @@
 
 """Check the function unit tests against the rules in CONTRIBUTING.md's Tests section.
 
-This checks every functions/*/tests/test_*.py, or the files it's given, against
-the rules an AST can decide without judgement: how a table and its test are
-laid out, a case's fields, name and reason, the assertion message, the calls
-that derive or mutate a value, the parameters a helper takes, and the names of
-tests. Whether a reason is true is for a reviewer.
+This checks every function's tests/test_*.py, Modelplane's and every
+provider's, and the Modelplane SDK's, or the files it's given, against the rules an AST can decide
+without judgement: how a table and its test are laid out, a case's fields,
+name and reason, the assertion message, the calls that derive or mutate a
+value, the parameters a helper takes, and the names of tests. Whether a reason is true is for a reviewer.
 
 Where a test has a real need to depart from a rule, an escape on the line the
 checker reports, with a stated reason, accepts the departure:
@@ -300,8 +300,14 @@ def check(source: str) -> list[Violation]:
 
 
 def main() -> int:
-    """Check the files named on the command line, or every function's tests."""
-    paths = [pathlib.Path(a).resolve() for a in sys.argv[1:]] or sorted(REPO.glob("functions/*/tests/test_*.py"))
+    """Check the files named on the command line, or every function's and the SDK's tests."""
+    paths = [pathlib.Path(a).resolve() for a in sys.argv[1:]] or sorted(
+        [
+            *REPO.glob("functions/*/tests/test_*.py"),
+            *REPO.glob("providers/*/functions/*/tests/test_*.py"),
+            *REPO.glob("sdk/python/tests/test_*.py"),
+        ]
+    )
     count = 0
     for path in paths:
         shown = path.relative_to(REPO) if path.is_relative_to(REPO) else path

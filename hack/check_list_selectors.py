@@ -147,7 +147,9 @@ def check(source: str) -> list[Violation]:
 
 def main() -> int:
     """Check the files named on the command line, or every function's sources."""
-    paths = [pathlib.Path(a).resolve() for a in sys.argv[1:]] or sorted(REPO.glob("functions/*/function/*.py"))
+    paths = [pathlib.Path(a).resolve() for a in sys.argv[1:]] or sorted(
+        [*REPO.glob("functions/*/function/*.py"), *REPO.glob("providers/*/functions/*/function/*.py")]
+    )
     count = 0
     for path in paths:
         shown = path.relative_to(REPO) if path.is_relative_to(REPO) else path

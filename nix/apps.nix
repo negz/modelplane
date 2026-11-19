@@ -31,7 +31,8 @@
             -ignore '**/*.toml' \
             -ignore '**/*.yaml' \
             -ignore '**/*.yml' \
-            functions/ docs/utils/validate/ hack/ e2e/ nix.sh
+            -ignore 'providers/*/schemas/**' \
+            functions/ providers/ sdk/ docs/utils/validate/ hack/ e2e/ nix.sh
 
           echo "Formatting and linting Nix..."
           statix fix .
@@ -46,11 +47,14 @@
           find . -name '*.sh' -type f -exec shellcheck {} +
 
           echo "Formatting and linting Python..."
-          ruff format functions/ docs/utils/validate/ hack/ e2e/
-          ruff check --fix functions/ docs/utils/validate/ hack/ e2e/
+          ruff format functions/ providers/ sdk/ docs/utils/validate/ hack/ e2e/
+          ruff check --fix functions/ providers/ sdk/ docs/utils/validate/ hack/ e2e/
 
-          echo "Refreshing uv.lock..."
+          echo "Refreshing uv.lock and each provider's..."
           uv lock
+          for provider in providers/*/; do
+            (cd "$provider" && uv lock)
+          done
         '';
       }
     );
@@ -101,6 +105,72 @@
 
             rm -rf schemas
             crossplane project build "$@"
+          '';
+        }
+      );
+    };
+
+  # Build a cluster provider's package against Modelplane's, built from this
+  # tree. A provider depends on Modelplane's package, and the Crossplane CLI
+  # fetches that from a registry to generate the provider's models from its
+  # XRDs, so this builds Modelplane's package, pushes it to a registry on
+  # localhost:5000 (started here if it isn't running), and builds the provider
+  # from a copy of its project file that points the dependency there:
+  # .crossplane-project.local.yaml, beside the real one, because the CLI reads
+  # paths relative to the project file. The copy also relaxes the provider's
+  # constraint on Modelplane's version, because Crossplane never matches a
+  # pre-release like a dev build against a release constraint.
+  #
+  # Like build, this regenerates the provider's models under schemas/. The
+  # packages land in providers/<name>/_output.
+  buildProvider =
+    {
+      crossplane,
+      dockerCredentialUp,
+      functionsPkg,
+      providerFunctionsPkg,
+      name,
+    }:
+    {
+      type = "app";
+      meta.description = "Build the ${name} cluster provider against Modelplane built from this tree";
+      program = pkgs.lib.getExe (
+        pkgs.writeShellApplication {
+          name = "modelplane-build-${name}";
+          runtimeInputs = [
+            crossplane
+            dockerCredentialUp
+            pkgs.coreutils
+            pkgs.docker-client
+            pkgs.yq-go
+          ];
+          inheritPath = false;
+          text = ''
+            registry=localhost:5000
+            core="$registry/modelplane/modelplane"
+            tag="v0.0.0-dev.$(date +%s)"
+
+            if ! docker inspect modelplane-registry >/dev/null 2>&1; then
+              docker run -d --restart=always -p 127.0.0.1:5000:5000 --name modelplane-registry registry:2
+            fi
+
+            mkdir -p _output
+            rm -f _output/functions
+            ln -s ${functionsPkg} _output/functions
+            rm -rf schemas
+            crossplane project build --repository "$core"
+            crossplane project push --repository "$core" --tag "$tag"
+
+            cd providers/${name}
+            mkdir -p _output
+            rm -f _output/functions
+            ln -s ${providerFunctionsPkg} _output/functions
+            CORE="$core" yq \
+              '.spec.imageConfigs = [{"metadata": {"name": "local-modelplane"}, "spec": {"matchImages": [{"type": "Prefix", "prefix": "xpkg.upbound.io/modelplane/modelplane"}], "rewriteImage": {"prefix": strenv(CORE)}}}]
+               | (.spec.dependencies[] | select(.xpkg.package == "xpkg.upbound.io/modelplane/modelplane") | .xpkg.version) = ">=v0.0.0-0"' \
+              crossplane-project.yaml > .crossplane-project.local.yaml
+            rm -rf schemas
+            crossplane project build -f .crossplane-project.local.yaml "$@"
           '';
         }
       );
@@ -300,22 +370,39 @@
   # same virtualenvs nix flake check uses. With no function named it runs every
   # function's tests, each in a pytest session of its own because every
   # function's package is named `function`. Arguments after the function name
-  # go to pytest, e.g. nix run .#test -- compose-usages -k namespace.
+  # go to pytest, e.g. nix run .#test -- compose-usages -k namespace. A
+  # provider's function is named for its provider, e.g. coreweave/compose-device-stack.
   test =
     {
       pythonSet,
       functionNames,
+      providers,
     }:
     let
-      venvs = map (name: {
-        inherit name;
-        venv = pythonSet.mkVirtualEnv "${name}-test-env" {
+      venv =
+        set: name:
+        set.mkVirtualEnv "${name}-test-env" {
           ${name} = [ ];
           pytest = [ ];
         };
-      }) functionNames;
+      venvs =
+        map (name: {
+          inherit name;
+          dir = "functions/${name}";
+          venv = venv pythonSet name;
+        }) functionNames
+        ++ pkgs.lib.concatLists (
+          pkgs.lib.mapAttrsToList (
+            provider: p:
+            map (name: {
+              name = "${provider}/${name}";
+              dir = "providers/${provider}/functions/${name}";
+              venv = venv p.pythonSet name;
+            }) p.functionNames
+          ) providers
+        );
       cases = pkgs.lib.concatMapStrings (v: ''
-        ${v.name}) python=${v.venv}/bin/python ;;
+        ${v.name}) python=${v.venv}/bin/python dir=${v.dir} ;;
       '') venvs;
     in
     {
@@ -328,7 +415,7 @@
           inheritPath = false;
           text = ''
             run() {
-              local fn="$1" python
+              local fn="$1" python dir
               shift
               case "$fn" in
                 ${cases}
@@ -337,7 +424,7 @@
                   return 2
                   ;;
               esac
-              "$python" -m pytest "functions/$fn/tests" "$@"
+              "$python" -m pytest "$dir/tests" "$@"
             }
 
             if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
@@ -349,7 +436,7 @@
             # a function's. That's a failure only if no function ran any.
             failed=()
             ran=false
-            for fn in ${pkgs.lib.concatStringsSep " " functionNames}; do
+            for fn in ${pkgs.lib.concatMapStringsSep " " (v: v.name) venvs}; do
               code=0
               run "$fn" "$@" || code=$?
               case "$code" in
@@ -385,8 +472,9 @@
   # KWOK-faked GPU pools and the cloud's ServingStack, no model - and runs the
   # tests in e2e/clouds/; it always verifies, with --no-apply to stop short of
   # the ServingStack and --test to rerun the tests alone. This app
-  # materialises the Nix-built function images (as `run` does) for crossplane
-  # project run to load.
+  # materialises Modelplane's Nix-built function images (as `run` does) for
+  # crossplane project run to load. A provider's leg needs its provider built
+  # first, with nix run .#build-<provider>.
   e2e =
     {
       crossplane,
@@ -394,15 +482,19 @@
       pythonSet,
     }:
     let
-      # What e2e/ imports: pytest, the Kubernetes client, and the generated
-      # models it reads Modelplane's status with. pydantic is declared here
+      # What e2e/ imports: pytest, the Kubernetes client, the generated
+      # models it reads Modelplane's status with, the SDK's names for the
+      # provider contract, and PyYAML for the providers' conformance.yaml.
+      # pydantic is declared here
       # rather than on crossplane-models, whose pyproject.toml the Crossplane
       # CLI generates.
       venv = pythonSet.mkVirtualEnv "modelplane-e2e-env" {
         pytest = [ ];
         kubernetes = [ ];
         crossplane-models = [ ];
+        modelplane-sdk = [ ];
         pydantic = [ ];
+        pyyaml = [ ];
       };
     in
     {
@@ -415,6 +507,7 @@
             crossplane
             venv
             pkgs.coreutils
+            pkgs.curl
             pkgs.kind
             pkgs.kubectl
             pkgs.docker-client
@@ -424,7 +517,6 @@
             mkdir -p _output
             rm -f _output/functions
             ln -s ${functionsPkg} _output/functions
-
             case "''${1:-}" in
               "") exec python -m e2e.environment up ;;
               --no-apply) exec python -m e2e.environment up --no-apply ;;
@@ -476,19 +568,20 @@
       );
     };
 
-  # Regenerate the AICR-derived serving stack component lists (see
-  # design/serving-stack-generation.md). Writes
-  # functions/compose-serving-stack/function/stacks/clouds/generated/aicr/,
-  # then formats and lints exactly what it wrote so `nix flake check`'s
-  # python check passes on the output. The generator asserts the aicr on
-  # PATH matches its pin, so bumping aicr means updating nix/aicr.nix and
-  # generate.py together. Extra args name the clouds to regenerate, e.g.:
-  # nix run .#stacks -- gke
+  # Regenerate the AICR-derived device stacks (see
+  # design/serving-stack-generation.md). Runs each AICR-based provider's
+  # functions/compose-device-stack/generate.py, which writes its
+  # function/generated/aicr/, then formats and lints exactly what it wrote
+  # so `nix flake check`'s python check passes on the output. The SDK's
+  # generator asserts the aicr on PATH matches its pin, so bumping aicr
+  # means updating nix/aicr.nix and the SDK together. It regenerates every
+  # provider whose device stack has a generate.py, or the providers its args
+  # name, e.g.: nix run .#stacks -- gke
   stacks =
     { aicr }:
     {
       type = "app";
-      meta.description = "Regenerate the AICR-derived serving stack lists";
+      meta.description = "Regenerate the AICR-derived device stacks";
       program = pkgs.lib.getExe (
         pkgs.writeShellApplication {
           name = "modelplane-stacks";
@@ -499,9 +592,18 @@
           ];
           inheritPath = false;
           text = ''
-            python3 functions/compose-serving-stack/generate.py "$@"
-            ruff format functions/compose-serving-stack/function/stacks/clouds/generated/
-            ruff check functions/compose-serving-stack/function/stacks/clouds/generated/
+            providers=("$@")
+            if [ ''${#providers[@]} -eq 0 ]; then
+              for generate in providers/*/functions/compose-device-stack/generate.py; do
+                providers+=("$(basename "$(dirname "$(dirname "$(dirname "$generate")")")")")
+              done
+            fi
+            for provider in "''${providers[@]}"; do
+              dir="providers/$provider/functions/compose-device-stack"
+              PYTHONPATH=sdk/python python3 "$dir/generate.py"
+              ruff format "$dir/function/generated/"
+              ruff check "$dir/function/generated/"
+            done
           '';
         }
       );
