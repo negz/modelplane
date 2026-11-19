@@ -1,0 +1,66 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The labels and taint mirror what compose-nebius-cluster stamps on node
+# groups. The device stack installs NFD, whose worker would set the GPU and
+# OS labels on real nodes; here they're set up front, because a worker pod on
+# a KWOK node never labels anything.
+deviceStack:
+  apiVersion: nebius.modelplane.ai/v1alpha1
+  kind: NebiusDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: gpu-h100-sxm
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: h100
+      nvidia.com/gpu.present: "true"
+      # NFD labels real Nebius GPU nodes pci-0302_10de, not pci-10de.
+      feature.node.kubernetes.io/pci-0302_10de.present: "true"
+      # Nebius GPU node groups run Ubuntu 22.04.
+      feature.node.kubernetes.io/system-os_release.ID: ubuntu
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "22.04"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: cpu-d3
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  node-feature-discovery/mp-node-feature-discovery-worker: 3
+  dcgm-exporter/mp-dcgm-exporter: 2
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no Nebius
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  config:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusClusterConfig
+    metadata:
+      name: conformance
+    spec: {}
+  nodeClasses:
+    accelerator:
+      apiVersion: nebius.modelplane.ai/v1alpha1
+      kind: NebiusNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        platform: gpu-h100-sxm
+        preset: 1gpu-16vcpu-200gb
+        accelerator:
+          type: h100
+    cpu:
+      apiVersion: nebius.modelplane.ai/v1alpha1
+      kind: NebiusNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        platform: cpu-d3
+        preset: 4vcpu-16gb

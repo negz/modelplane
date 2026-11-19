@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: nebiusclusters.infrastructure.modelplane.ai
+  name: nebiusclusters.nebius.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: nebius.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - nebius
     kind: NebiusCluster
     plural: nebiusclusters
     shortNames:

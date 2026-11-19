@@ -41,13 +41,13 @@ StorageClass pins ModelCache PVCs to that driver.
 """
 
 import dataclasses
-from typing import Literal
 
 import grpc
 from crossplane.function import logging, request, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.nebiuscluster import v1alpha1
+from modelplane_sdk import contract, devicestack, usages
+from models.ai.modelplane.nebius.nebiuscluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
@@ -64,26 +64,22 @@ from models.io.upbound.m.nebius.vpc.subnet import v1beta1 as subnetv1beta1
 
 # System pool injected into every mk8s cluster to host control-plane
 # components (Envoy Gateway, LeaderWorkerSet, cert-manager, etc.). Not part of
-# the user-facing API - compose-inference-cluster only passes GPU pools.
+# the user-facing API - compose-provisioned-cluster passes only the
+# ProvisionedCluster's pools.
 _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_PLATFORM = "cpu-d3"
 _SYSTEM_POOL_PRESET = "4vcpu-16gb"
 _SYSTEM_POOL_MIN_NODE_COUNT = 1
 _SYSTEM_POOL_MAX_NODE_COUNT = 2
 
-# Labels written on mk8s node groups' nodes. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of mk8s node groups. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
 
 # Label written on composed GPU clusters so node groups can select the GPU
 # cluster backing their InfiniBand fabric.
 _LABEL_FABRIC = "modelplane.ai/fabric"
 
-# Secret types written to XR status. compose-inference-cluster reads these to
-# wire the kubeconfig and service account credentials into ProviderConfigs.
-# The credentials' type is the provider identity it authenticates as.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 
 # Key within the connection secret the mk8s Cluster writes. The provider
 # renders a kubeconfig targeting the public endpoint when one exists.
@@ -113,18 +109,6 @@ _CPU_TAINT_EFFECT = "NO_SCHEDULE"
 
 # Annotation the provider sets on a managed resource with its external name.
 _ANNOTATION_EXTERNAL_NAME = "crossplane.io/external-name"
-
-# Management policies that exclude Delete, used for resources installed on the
-# workload cluster (the RWX StorageClass Object and the CSI driver Helm
-# Release). These exist only to configure the cluster and are only ever
-# deleted because the whole NebiusCluster - and the cluster itself - is being
-# torn down. Deleting them then means asking provider-helm /
-# provider-kubernetes to reach a cluster whose kubeconfig Secret has already
-# been deleted, which wedges their finalizers and hangs the composite.
-# Orphaning them sidesteps that: the in-cluster resources die with the
-# cluster.
-_ManagementPolicy = Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]
-_ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
 
 # The shared filesystem backing ModelCache RWX storage. Nebius shared
 # filesystems are fixed size - there is no elastic option like EFS - so the
@@ -231,6 +215,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -474,7 +460,7 @@ class Composer:
                     annotations={_ANNOTATION_EXTERNAL_NAME: _CSI_RELEASE_NAME},
                 ),
                 spec=helmv1beta1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=helmv1beta1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -533,7 +519,7 @@ class Composer:
             k8sobjv1alpha1.Object(
                 metadata=metav1.ObjectMeta(namespace=_namespace(self.xr.metadata)),
                 spec=k8sobjv1alpha1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -586,7 +572,7 @@ class Composer:
             return
         self._compose_system_group(subnet_id=subnet_id, filesystem_id=filesystem_id)
         for pool in self.xr.spec.nodePools:
-            labels = {_LABEL_POOL: pool.name}
+            labels = {contract.LABEL_POOL: pool.name}
             if pool.role == "GPU" and pool.gpu:
                 labels[_LABEL_GPU] = pool.gpu.acceleratorType
             elif pool.role == "CPU":
@@ -706,7 +692,7 @@ class Composer:
                             cloudInitUserDataSecretRef=self._cloud_init_ref(),
                             metadata=nodegroupv1beta1.Metadata(
                                 labels={
-                                    _LABEL_POOL: _SYSTEM_POOL_NAME,
+                                    contract.LABEL_POOL: _SYSTEM_POOL_NAME,
                                 },
                             ),
                         ),
@@ -836,7 +822,7 @@ class Composer:
     def write_status(self, creds: Credentials | None) -> None:
         secrets = [
             v1alpha1.Secret(
-                type=_SECRET_TYPE_KUBECONFIG,
+                type=contract.SECRET_TYPE_KUBECONFIG,
                 name=_kubeconfig_secret_name(self.xr),
                 key=_SECRET_KEY_KUBECONFIG,
             ),

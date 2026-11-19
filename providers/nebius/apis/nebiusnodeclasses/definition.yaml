@@ -1,0 +1,104 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: nebiusnodeclasses.nebius.modelplane.ai
+spec:
+  group: nebius.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, nebius]
+    kind: NebiusNodeClass
+    plural: nebiusnodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: PLATFORM
+      type: string
+      jsonPath: .spec.platform
+    - name: PRESET
+      type: string
+      jsonPath: .spec.preset
+    - name: FABRIC
+      type: string
+      jsonPath: .spec.fabric
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A NebiusNodeClass says how to provision an mk8s node group. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on a Nebius cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [platform, preset]
+            properties:
+              platform:
+                type: string
+                description: >-
+                  Nebius compute platform (e.g. gpu-h100-sxm, gpu-l40s-a,
+                  cpu-d3). Together with preset this determines the GPU model
+                  and count, if any.
+                minLength: 1
+                maxLength: 63
+              preset:
+                type: string
+                description: >-
+                  Resource preset within the platform (e.g.
+                  8gpu-128vcpu-1600gb, 4vcpu-16gb). Determines the GPU, vCPU,
+                  and memory shape of each node.
+                minLength: 1
+                maxLength: 63
+              diskSizeGb:
+                type: integer
+                default: 100
+                description: Boot disk size in GB.
+                minimum: 10
+                maximum: 65536
+              driversPreset:
+                type: string
+                default: cuda13.0
+                description: >-
+                  NVIDIA driver stack mk8s preinstalls on a GPU pool's nodes
+                  (e.g. cuda12.4, cuda13.0). Valid values depend on the
+                  platform and Kubernetes version, and mk8s validates them,
+                  so new presets work without a Modelplane update. Defaults
+                  to the only preset mk8s implements on the default
+                  Kubernetes version; older presets remain for older
+                  versions. Unused by a CPU pool.
+                minLength: 1
+                maxLength: 63
+              accelerator:
+                type: object
+                description: >-
+                  The platform's GPU. Required for a pool whose InferenceClass
+                  claims a DRA driver other than dra.cpu, and rejected for any
+                  other pool. The GPU's nodes carry its type in the
+                  modelplane.ai/gpu label.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: GPU accelerator type (e.g. nvidia-h100, nvidia-l40s).
+                    minLength: 1
+                    maxLength: 63
+              fabric:
+                type: string
+                default: None
+                description: >-
+                  High-performance node-to-node fabric for multi-node engines,
+                  so a gang's tensor-parallel traffic isn't capped by TCP.
+                  None uses standard VPC networking (TCP). InfiniBand places
+                  the pool's nodes in a GPU cluster on the physical InfiniBand
+                  fabric the NebiusClusterConfig's infinibandFabric names, for
+                  GPUDirect RDMA across nodes; only useful on
+                  InfiniBand-capable platforms (e.g. gpu-h100-sxm).
+                enum:
+                - None
+                - InfiniBand
+          status:
+            type: object

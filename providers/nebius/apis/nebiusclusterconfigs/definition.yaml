@@ -1,0 +1,81 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: nebiusclusterconfigs.nebius.modelplane.ai
+spec:
+  group: nebius.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, nebius]
+    kind: NebiusClusterConfig
+    plural: nebiusclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: FABRIC
+      type: string
+      jsonPath: .spec.infinibandFabric
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A NebiusClusterConfig says how to provision Nebius Managed Service
+          for Kubernetes (mk8s) clusters for InferenceClusters that reference
+          it from spec.cluster.provisioned.configRef. Several InferenceClusters
+          can share one, and each gets a cluster of its own. A cluster is
+          created in the project its credentials' ProviderConfig or
+          ClusterProviderConfig sets as its projectID. Nebius projects are
+          bound to a region, so the project also determines where the
+          cluster runs.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            properties:
+              kubernetesVersion:
+                type: string
+                description: >-
+                  mk8s cluster Kubernetes version. Must be a version mk8s
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how devices bind to pods) is generally
+                  available. A CPU pool needs 1.36 or newer: its cores are
+                  claimed as consumable capacity, which Kubernetes enables by
+                  default from 1.36 (DRAConsumableCapacity).
+                minLength: 1
+                maxLength: 16
+              credentials:
+                type: object
+                description: >-
+                  Nebius ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the Nebius API. Its credentials Secret also
+                  authenticates Modelplane to the cluster. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+              infinibandFabric:
+                type: string
+                description: >-
+                  Identifier of the physical InfiniBand fabric that node pools
+                  whose NebiusNodeClass sets fabric InfiniBand join (e.g.
+                  fabric-2). Required for a cluster with such a pool. This
+                  selects existing Nebius infrastructure, not a name for a new
+                  resource: fabrics are per-region - see
+                  https://docs.nebius.com/compute/clusters/gpu#fabrics - and
+                  multi-node GPU capacity is allocated on specific fabrics, so
+                  use the fabric your capacity lives on.
+                minLength: 1
+                maxLength: 63
+          status:
+            type: object

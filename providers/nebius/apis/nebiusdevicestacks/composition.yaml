@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: nebiusdevicestacks.nebius.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: nebius.modelplane.ai/v1alpha1
+    kind: NebiusDeviceStack
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-nebiuscompose-device-stack
+    step: compose-device-stack

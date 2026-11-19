@@ -1,0 +1,28 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  # Composition names are global, and every provider ships a Composition for
+  # a ProvisionedCluster, so this one is named for its provider.
+  name: nebius.provisionedclusters.infrastructure.modelplane.ai
+  labels:
+    # compose-inference-cluster selects this Composition for an
+    # InferenceCluster whose spec.cluster.provisioned.configRef is a
+    # NebiusClusterConfig.
+    infrastructure.modelplane.ai/config-group: nebius.modelplane.ai
+    infrastructure.modelplane.ai/config-kind: NebiusClusterConfig
+  annotations:
+    # The optional parts of the ProvisionedCluster contract this provider
+    # implements. A NebiusCluster can't restrict a node group to zones, and
+    # Modelplane supports no Nebius capacity reservations.
+    infrastructure.modelplane.ai/capabilities: ""
+    # The DRA drivers whose device stacks the NebiusDeviceStack installs.
+    infrastructure.modelplane.ai/dra-drivers: gpu.nvidia.com
+spec:
+  compositeTypeRef:
+    apiVersion: infrastructure.modelplane.ai/v1alpha1
+    kind: ProvisionedCluster
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-nebiuscompose-provisioned-cluster
+    step: compose-provisioned-cluster
