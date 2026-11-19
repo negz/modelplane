@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: gkeclusters.infrastructure.modelplane.ai
+  name: gkeclusters.gke.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: gke.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - gke
     kind: GKECluster
     plural: gkeclusters
     shortNames:

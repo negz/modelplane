@@ -1,0 +1,68 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: gkedevicestacks.gke.modelplane.ai
+spec:
+  group: gke.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, gke]
+    kind: GKEDeviceStack
+    plural: gkedevicestacks
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A GKEDeviceStack installs the device stacks for the DRA drivers
+          a GKE cluster's InferenceClasses claim. The cluster's
+          ProvisionedCluster composes it once the cluster is reachable.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [secrets]
+            properties:
+              secrets:
+                type: array
+                description: >-
+                  Secrets used to authenticate to the cluster. A Kubeconfig
+                  entry is required.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-validations:
+                - rule: "self.exists(s, s.type == 'Kubeconfig')"
+                  message: secrets must include a Kubeconfig entry.
+                items:
+                  type: object
+                  required: [type, name, key]
+                  properties:
+                    type:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                    name:
+                      type: string
+                      maxLength: 253
+                    key:
+                      type: string
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      maxLength: 63
+              draDrivers:
+                type: array
+                description: >-
+                  The DRA drivers the cluster's InferenceClasses claim. A
+                  device stack installs only for a driver listed here.
+                maxItems: 16
+                x-kubernetes-list-type: set
+                items:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+          status:
+            type: object

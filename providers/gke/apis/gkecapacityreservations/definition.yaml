@@ -1,0 +1,71 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: gkecapacityreservations.gke.modelplane.ai
+spec:
+  group: gke.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, gke]
+    kind: GKECapacityReservation
+    plural: gkecapacityreservations
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: ZONE
+      type: string
+      jsonPath: .spec.zone
+    - name: RESERVATION
+      type: string
+      jsonPath: .spec.name
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A GKECapacityReservation is an existing Compute Engine reservation
+          that InferenceCluster node pools on GKE can reference from
+          reservationRef. Modelplane doesn't create or modify the
+          reservation; it only directs node pools to consume it, as a
+          specific reservation. Any reservation type works, including future
+          reservations in calendar mode once their reservation period starts.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            description: >-
+              Immutable, because node pools that reference this
+              GKECapacityReservation can't move to another reservation in
+              place.
+            required: [zone, name]
+            x-kubernetes-validations:
+            - rule: "self == oldSelf"
+              message: spec is immutable. Create a new GKECapacityReservation instead.
+            properties:
+              zone:
+                type: string
+                description: >-
+                  Zone the reservation is in (e.g. us-central1-a). A node
+                  pool backed by the reservation must be restricted to
+                  exactly this zone.
+                minLength: 1
+                maxLength: 63
+              name:
+                type: string
+                description: Name of the reservation.
+                pattern: '^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'
+                maxLength: 63
+              project:
+                type: string
+                description: >-
+                  Project that owns the reservation, for a reservation shared
+                  from another project. The reservation must be shared with
+                  the cluster's project, and the cluster project's GKE
+                  service agent must be allowed to list reservations in this
+                  project. Omit for a reservation in the cluster's own
+                  project.
+                pattern: '^[a-z][-a-z0-9]{4,28}[a-z0-9]$'
+                maxLength: 30
+          status:
+            type: object

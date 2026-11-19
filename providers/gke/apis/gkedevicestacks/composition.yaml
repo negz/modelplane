@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: gkedevicestacks.gke.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKEDeviceStack
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-gkecompose-device-stack
+    step: compose-device-stack

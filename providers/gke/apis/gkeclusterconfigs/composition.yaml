@@ -1,0 +1,15 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: gkeclusterconfigs.gke.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKEClusterConfig
+  mode: Pipeline
+  # Nothing to compose: compose-provisioned-cluster reads it. The step exists
+  # because an XR needs a Composition, and with nothing composed it's Ready.
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-gkecompose-provisioned-cluster
+    step: compose-provisioned-cluster

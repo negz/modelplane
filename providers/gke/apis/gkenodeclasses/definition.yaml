@@ -1,0 +1,72 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: gkenodeclasses.gke.modelplane.ai
+spec:
+  group: gke.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, gke]
+    kind: GKENodeClass
+    plural: gkenodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: MACHINE-TYPE
+      type: string
+      jsonPath: .spec.machineType
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A GKENodeClass says how to provision a GKE node pool. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on a GKE cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [machineType]
+            properties:
+              machineType:
+                type: string
+                description: >-
+                  GCE machine type (e.g. g2-standard-8, a3-highgpu-8g,
+                  e2-standard-8).
+                minLength: 1
+                maxLength: 63
+              diskSizeGb:
+                type: integer
+                description: Boot disk size in GB.
+                default: 100
+                minimum: 10
+                maximum: 65536
+              accelerator:
+                type: object
+                description: >-
+                  GPU accelerator to attach to each node. Required for a pool
+                  whose InferenceClass claims a DRA driver other than dra.cpu,
+                  and rejected for any other pool. The scheduler matches
+                  against the InferenceClass's devices, not this block, so
+                  count here is the machine's GPU count and need not be
+                  restated in devices. The GPU's nodes carry its type in the
+                  modelplane.ai/gpu label.
+                required: [type, count]
+                properties:
+                  type:
+                    type: string
+                    description: >-
+                      GPU accelerator type passed to GCP (e.g. nvidia-l4,
+                      nvidia-h100-80gb).
+                    minLength: 1
+                    maxLength: 63
+                  count:
+                    type: integer
+                    description: Number of GPUs to attach to each node.
+                    minimum: 1
+                    maximum: 16
+          status:
+            type: object

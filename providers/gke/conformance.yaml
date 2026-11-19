@@ -1,0 +1,94 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The GPU pool carries the labels the device stack's dra gpuStack profile
+# requires: gke-no-default-nvidia-gpu-device-plugin disables GKE's managed
+# device plugin, and cloud.google.com/gke-nvidia-gpu-dra-driver is what the
+# autoscaler models DRA ResourceSlices from. The taint is the one
+# compose-gke-cluster applies, valued "present" like GKE's own GPU taint; the
+# device stack tolerates it with operator: Exists, so the value only matters
+# for fidelity. The stack enables the GPU Operator's container toolkit
+# (COS's driver installer ships none), so its DaemonSet belongs on the GPU
+# pool too.
+deviceStack:
+  apiVersion: gke.modelplane.ai/v1alpha1
+  kind: GKEDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: a3-highgpu-8g
+      cloud.google.com/gke-accelerator: nvidia-h100-80gb
+      cloud.google.com/gke-nvidia-gpu-dra-driver: "true"
+      gke-no-default-nvidia-gpu-device-plugin: "true"
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: h100
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # GKE GPU pools run Container-Optimized OS; VERSION_ID is the COS
+      # milestone.
+      feature.node.kubernetes.io/system-os_release.ID: cos
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "121"
+    taintValue: present
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: e2-standard-8
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  node-feature-discovery/mp-node-feature-discovery-worker: 3
+  gpu-operator/nvidia-container-toolkit-daemonset: 2
+gpuWorkloads:
+- ^nvidia-container-toolkit
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no GCP
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  # GKE GPU pools must name their zones.
+  zones: [us-central1-a]
+  # compose-gke-cluster reads the GCP project from the cluster config's
+  # credentials, and composes nothing until it can. The credentials Secret
+  # doesn't exist, so no managed resource ever reaches GCP.
+  prerequisites:
+  - apiVersion: gcp.m.upbound.io/v1beta1
+    kind: ClusterProviderConfig
+    metadata:
+      name: default
+    spec:
+      projectID: conformance
+      credentials:
+        source: Secret
+        secretRef:
+          namespace: crossplane-system
+          name: gcp-credentials
+          key: credentials
+  config:
+    apiVersion: gke.modelplane.ai/v1alpha1
+    kind: GKEClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      region: us-central1
+  nodeClasses:
+    accelerator:
+      apiVersion: gke.modelplane.ai/v1alpha1
+      kind: GKENodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        machineType: a3-highgpu-8g
+        accelerator:
+          type: nvidia-h100-80gb
+          count: 8
+    cpu:
+      apiVersion: gke.modelplane.ai/v1alpha1
+      kind: GKENodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        machineType: e2-standard-8

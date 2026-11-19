@@ -1,0 +1,71 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: gkeclusterconfigs.gke.modelplane.ai
+spec:
+  group: gke.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, gke]
+    kind: GKEClusterConfig
+    plural: gkeclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A GKEClusterConfig says how to provision Google Kubernetes Engine
+          (GKE) clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [region]
+            properties:
+              region:
+                type: string
+                description: >-
+                  GCP region for the cluster (e.g. us-central1,
+                  europe-west4).
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  GKE cluster Kubernetes version. Must be a version supported
+                  by the REGULAR release channel. Defaults to a version where
+                  Dynamic Resource Allocation (how devices bind to pods) is
+                  generally available. A CPU pool needs 1.36 or newer: its
+                  cores are claimed as consumable capacity, which Kubernetes
+                  enables by default from 1.36 (DRAConsumableCapacity).
+                minLength: 1
+                maxLength: 16
+              credentials:
+                type: object
+                description: >-
+                  GCP ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the GCP API. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object

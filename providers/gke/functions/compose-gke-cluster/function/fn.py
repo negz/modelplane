@@ -20,13 +20,12 @@ account with container.admin IAM, and ProviderConfigs for provider-kubernetes
 and provider-helm to reach the cluster.
 """
 
-from typing import Literal
-
 import grpc
 from crossplane.function import logging, request, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.gkecluster import v1alpha1
+from modelplane_sdk import contract, devicestack, usages
+from models.ai.modelplane.gke.gkecluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
@@ -53,17 +52,16 @@ _RANGE_SERVICES = "services"
 
 # System pool injected into every GKE cluster to host control-plane
 # components (Envoy Gateway, LeaderWorkerSet, cert-manager, etc.). Not part of
-# the user-facing API — compose-inference-cluster only passes GPU pools.
+# the user-facing API — compose-provisioned-cluster only passes inference pools.
 _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_MACHINE_TYPE = "e2-standard-4"
 _SYSTEM_POOL_NODE_COUNT = 1
 _SYSTEM_POOL_MIN_NODE_COUNT = 1
 _SYSTEM_POOL_MAX_NODE_COUNT = 2
 
-# Labels written on GKE node pools. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of GKE node pools. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
 
 # Taint on GPU pools, so only workloads that tolerate it schedule there and
 # the autoscaler doesn't add GPU nodes for pods that don't need one. GKE only
@@ -100,11 +98,6 @@ _LABEL_GPU_DRA_DRIVER = "cloud.google.com/gke-nvidia-gpu-dra-driver"
 _RESERVATION_AFFINITY_SPECIFIC = "SPECIFIC_RESERVATION"
 _RESERVATION_AFFINITY_KEY = "compute.googleapis.com/reservation-name"
 
-# Secret types written to XR status. compose-inference-cluster reads
-# these to wire the kubeconfig and SA key into ProviderConfigs. The SA key's
-# type is the provider identity it authenticates as (see _IDENTITY_TYPE_GCP).
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
-
 # Secret keys within the Kubernetes Secrets created by GCP providers.
 _SECRET_KEY_KUBECONFIG = "kubeconfig"
 _SECRET_KEY_GCP_SA = "private_key"
@@ -120,19 +113,6 @@ _ANNOTATION_EXTERNAL_NAME = "crossplane.io/external-name"
 # user doesn't bring their own. Backed by Filestore Enterprise, pinned to the
 # cluster's VPC (Filestore CSI defaults to the `default` VPC otherwise).
 _MANAGED_STORAGE_CLASS = "modelplane-rwx"
-
-# Management policies that exclude Delete, used for the RWX StorageClass Object
-# installed on the workload cluster. It exists only to configure the cluster and
-# is only ever deleted because the whole GKECluster - and the cluster itself - is
-# being torn down. Deleting it then means asking provider-kubernetes to reach a
-# cluster whose kubeconfig Secret has already been deleted, which wedges its
-# finalizer and hangs the composite. Orphaning it sidesteps that: the in-cluster
-# StorageClass dies with the cluster. Crossplane names composed resources
-# deterministically from the owner XR's UID and the composition resource name, so
-# if this MR is ever deleted out of band the recomposed MR takes the same name
-# and provider-kubernetes adopts the existing StorageClass rather than erroring.
-_ManagementPolicy = Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]
-_ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
 
 # GKE node configuration.
 _GKE_IMAGE_TYPE = "COS_CONTAINERD"
@@ -180,6 +160,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -413,7 +395,7 @@ class Composer:
                 ]
                 node_config.labels = {
                     _LABEL_GPU: pool.gpu.acceleratorType,
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                     _LABEL_GPU_DRA_DRIVER: "true",
                 }
                 node_config.taint = [
@@ -421,7 +403,7 @@ class Composer:
                 ]
             elif pool.role == "CPU":
                 node_config.labels = {
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                     _LABEL_CPU: "true",
                 }
                 node_config.taint = [
@@ -429,7 +411,7 @@ class Composer:
                 ]
             else:
                 node_config.labels = {
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                 }
 
             if pool.reservation:
@@ -496,7 +478,7 @@ class Composer:
                             imageType=_GKE_IMAGE_TYPE,
                             oauthScopes=[_GKE_OAUTH_SCOPE],
                             labels={
-                                _LABEL_POOL: _SYSTEM_POOL_NAME,
+                                contract.LABEL_POOL: _SYSTEM_POOL_NAME,
                             },
                         ),
                     ),
@@ -647,7 +629,7 @@ class Composer:
             k8sobjv1alpha1.Object(
                 metadata=metav1.ObjectMeta(namespace=_namespace(self.xr.metadata)),
                 spec=k8sobjv1alpha1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -663,7 +645,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),
