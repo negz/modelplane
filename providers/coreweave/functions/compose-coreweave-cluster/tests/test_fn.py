@@ -27,7 +27,7 @@ from function import fn
 from google.protobuf import duration_pb2 as durationpb
 from google.protobuf import json_format, message
 from google.protobuf import struct_pb2 as structpb
-from models.ai.modelplane.infrastructure.coreweavecluster import v1alpha1
+from models.ai.modelplane.coreweave.coreweavecluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 # The kubeconfig the function renders for the observed cluster's endpoint and
@@ -315,9 +315,15 @@ def _provider_config() -> fnv1.Resource:
 
 
 def _node_pool(
-    *, name: str, management_policies: list[str] | None, cel_query: str, spec: dict[str, Any], ready: fnv1.Ready
+    *,
+    consumer: str,
+    name: str,
+    management_policies: list[str] | None,
+    cel_query: str,
+    spec: dict[str, Any],
+    ready: fnv1.Ready,
 ) -> fnv1.Resource:
-    """A composed NodePool Object, with the given NodePool name, readiness query and spec, and management policies unless they're None."""
+    """A composed NodePool Object, labelled as the consumer its ProviderConfig's Usage selects, with the given NodePool name, readiness query and spec, and management policies unless they're None."""
     object_spec: dict[str, Any] = {
         "providerConfigRef": {
             "kind": "ProviderConfig",
@@ -343,7 +349,10 @@ def _node_pool(
             {
                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                 "kind": "Object",
-                "metadata": {"namespace": "modelplane-system"},
+                "metadata": {
+                    "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/usage-consumer": consumer},
+                },
                 "spec": object_spec,
             }
         ),
@@ -351,14 +360,17 @@ def _node_pool(
     )
 
 
-def _node_pool_settings(*, name: str, spec: dict[str, Any]) -> fnv1.Resource:
-    """The composed Object keeping an autoscaled pool's NodePool current, with the given NodePool name and spec."""
+def _node_pool_settings(*, consumer: str, name: str, spec: dict[str, Any]) -> fnv1.Resource:
+    """The composed Object keeping an autoscaled pool's NodePool current, labelled as the consumer its ProviderConfig's Usage selects, with the given NodePool name and spec."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                 "kind": "Object",
-                "metadata": {"namespace": "modelplane-system"},
+                "metadata": {
+                    "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/usage-consumer": consumer},
+                },
                 "spec": {
                     "managementPolicies": ["Observe", "Update"],
                     "providerConfigRef": {
@@ -424,6 +436,7 @@ def _observed_node_pool(*, name: str, cel_query: str, spec: dict[str, Any]) -> f
 def _system_node_pool(*, ready: fnv1.Ready) -> fnv1.Resource:
     """The composed NodePool Object for the system pool every cluster gets."""
     return _node_pool(
+        consumer="node-pool-system",
         name="system",
         management_policies=None,
         cel_query="has(object.status) && has(object.status.currentNodes) && object.status.currentNodes >= 1",
@@ -525,7 +538,10 @@ def _storage_class_observer() -> fnv1.Resource:
             {
                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                 "kind": "Object",
-                "metadata": {"namespace": "modelplane-system"},
+                "metadata": {
+                    "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/usage-consumer": "storage-class-cks"},
+                },
                 "spec": {
                     "managementPolicies": ["Observe"],
                     "providerConfigRef": {
@@ -539,6 +555,36 @@ def _storage_class_observer() -> fnv1.Resource:
                             "metadata": {"name": "shared-vast"},
                         },
                     },
+                },
+            }
+        ),
+        ready=fnv1.READY_TRUE,
+    )
+
+
+def _usage_provider_config(*, consumer: str) -> fnv1.Resource:
+    """The composed Usage holding the provider-kubernetes ProviderConfig until the consumer is gone."""
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {
+                "apiVersion": "protection.crossplane.io/v1beta1",
+                "kind": "Usage",
+                "metadata": {"namespace": "modelplane-system"},
+                "spec": {
+                    "of": {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "ProviderConfig",
+                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                    },
+                    "by": {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "Object",
+                        "resourceSelector": {
+                            "matchControllerRef": True,
+                            "matchLabels": {"modelplane.ai/usage-consumer": consumer},
+                        },
+                    },
+                    "replayDeletion": True,
                 },
             }
         ),
@@ -784,6 +830,7 @@ COMPOSE_CASES = [
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _system_node_pool(ready=fnv1.READY_UNSPECIFIED),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=None,
                         cel_query=(
@@ -806,6 +853,9 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),
@@ -883,6 +933,7 @@ COMPOSE_CASES = [
                     "kubeconfig": _kubeconfig_secret(),
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _node_pool(
+                        consumer="node-pool-system",
                         name="system",
                         management_policies=None,
                         cel_query=(
@@ -898,6 +949,7 @@ COMPOSE_CASES = [
                         ready=fnv1.READY_TRUE,
                     ),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=None,
                         cel_query=(
@@ -920,6 +972,9 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),
@@ -992,6 +1047,7 @@ COMPOSE_CASES = [
                     "kubeconfig": _kubeconfig_secret(),
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _node_pool(
+                        consumer="node-pool-system",
                         name="system",
                         management_policies=None,
                         cel_query=(
@@ -1007,6 +1063,7 @@ COMPOSE_CASES = [
                         ready=fnv1.READY_TRUE,
                     ),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=None,
                         cel_query=(
@@ -1029,6 +1086,9 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),
@@ -1136,6 +1196,7 @@ COMPOSE_CASES = [
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _system_node_pool(ready=fnv1.READY_UNSPECIFIED),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=None,
                         cel_query=(
@@ -1163,7 +1224,10 @@ COMPOSE_CASES = [
                             {
                                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                                 "kind": "Object",
-                                "metadata": {"namespace": "modelplane-system"},
+                                "metadata": {
+                                    "namespace": "modelplane-system",
+                                    "labels": {"modelplane.ai/usage-consumer": "storage-class-rwx-fs"},
+                                },
                                 "spec": {
                                     "providerConfigRef": {
                                         "kind": "ProviderConfig",
@@ -1191,6 +1255,10 @@ COMPOSE_CASES = [
                         ),
                         ready=fnv1.READY_TRUE,
                     ),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
+                    "usage-pc-storage-class-rwx-fs": _usage_provider_config(consumer="storage-class-rwx-fs"),
                 },
             ),
             context=structpb.Struct(),
@@ -1255,6 +1323,7 @@ COMPOSE_CASES = [
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _system_node_pool(ready=fnv1.READY_UNSPECIFIED),
                     "node-pool-cpu-pool": _node_pool(
+                        consumer="node-pool-cpu-pool",
                         name="cpu-pool",
                         management_policies=None,
                         cel_query=(
@@ -1273,6 +1342,9 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-cpu-pool": _usage_provider_config(consumer="node-pool-cpu-pool"),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),
@@ -1414,6 +1486,7 @@ COMPOSE_CASES = [
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _system_node_pool(ready=fnv1.READY_TRUE),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=["Observe", "Create", "Delete"],
                         cel_query=(
@@ -1436,6 +1509,7 @@ COMPOSE_CASES = [
                         ready=fnv1.READY_TRUE,
                     ),
                     "node-pool-gpu-h100.settings": _node_pool_settings(
+                        consumer="node-pool-gpu-h100.settings",
                         name="gpu-h100",
                         spec={
                             "instanceType": "gd-8xh100ib-i128",
@@ -1453,6 +1527,12 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-node-pool-gpu-h100.settings": _usage_provider_config(
+                        consumer="node-pool-gpu-h100.settings"
+                    ),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),
@@ -1535,6 +1615,7 @@ COMPOSE_CASES = [
                     "provider-config-kubernetes": _provider_config(),
                     "node-pool-system": _system_node_pool(ready=fnv1.READY_UNSPECIFIED),
                     "node-pool-gpu-h100": _node_pool(
+                        consumer="node-pool-gpu-h100",
                         name="gpu-h100",
                         management_policies=["Observe", "Create", "Delete"],
                         cel_query=(
@@ -1557,6 +1638,7 @@ COMPOSE_CASES = [
                         ready=fnv1.READY_UNSPECIFIED,
                     ),
                     "node-pool-gpu-h100.settings": _node_pool_settings(
+                        consumer="node-pool-gpu-h100.settings",
                         name="gpu-h100",
                         spec={
                             "instanceType": "gd-8xh100ib-i128",
@@ -1574,6 +1656,12 @@ COMPOSE_CASES = [
                     "usage-kubeconfig-by-provider-config": _usage_kubeconfig(),
                     "usage-cluster-by-provider-config": _usage_cluster(),
                     "storage-class-cks": _storage_class_observer(),
+                    "usage-pc-node-pool-system": _usage_provider_config(consumer="node-pool-system"),
+                    "usage-pc-node-pool-gpu-h100": _usage_provider_config(consumer="node-pool-gpu-h100"),
+                    "usage-pc-node-pool-gpu-h100.settings": _usage_provider_config(
+                        consumer="node-pool-gpu-h100.settings"
+                    ),
+                    "usage-pc-storage-class-cks": _usage_provider_config(consumer="storage-class-cks"),
                 },
             ),
             context=structpb.Struct(),

@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: coreweaveclusters.infrastructure.modelplane.ai
+  name: coreweaveclusters.coreweave.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: coreweave.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - coreweave
     kind: CoreWeaveCluster
     plural: coreweaveclusters
   scope: Namespaced

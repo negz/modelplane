@@ -35,7 +35,8 @@ import grpc
 from crossplane.function import logging, request, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.coreweavecluster import v1alpha1
+from modelplane_sdk import contract, usages
+from models.ai.modelplane.coreweave.coreweavecluster import v1alpha1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
 from models.io.crossplane.protection.usage import v1beta1 as usagev1beta1
@@ -46,9 +47,9 @@ from models.io.upbound.m.coreweave.networking.vpc import v1beta1 as vpcv1beta1
 from models.io.upbound.m.coreweave.providerconfig import v1beta1 as cwpcv1beta1
 
 # The system pool runs controllers such as Envoy Gateway and cert-manager.
-# compose-inference-cluster passes only inference pools, and this function
-# adds the system pool. CKS nodes are bare metal, which makes one CPU node
-# enough.
+# compose-provisioned-cluster passes only the ProvisionedCluster's pools, and
+# this function adds the system pool. CKS nodes are bare metal, which makes
+# one CPU node enough.
 _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_INSTANCE_TYPE = "turin-gp"
 _SYSTEM_POOL_NODES = 1
@@ -65,10 +66,9 @@ _SERVICE_CIDR = "10.16.0.0/22"
 _INTERNAL_LB_CIDR_NAME = "internal-lb-cidr"
 _INTERNAL_LB_CIDR = "10.32.4.0/22"
 
-# Labels written on CKS node pools' nodes. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of CKS node pools. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
 
 # CoreWeave's managed GPU Operator doesn't run its device plugin on a node
 # with this label set to false. That leaves the DRA driver as the only GPU
@@ -123,9 +123,6 @@ _AUTOSCALED_POOL_SETTINGS_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Upd
 # can't contain a dot, which rules out a collision with another pool's.
 _SETTINGS_SUFFIX = ".settings"
 
-# Secret type written to XR status. compose-inference-cluster reads this to
-# wire the kubeconfig into a ClusterProviderConfig.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 
 # Key within the composed kubeconfig Secret.
 _SECRET_KEY_KUBECONFIG = "kubeconfig"
@@ -219,6 +216,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -485,7 +484,7 @@ class Composer:
                 "instanceType": _SYSTEM_POOL_INSTANCE_TYPE,
                 "targetNodes": _SYSTEM_POOL_NODES,
                 "autoscaling": False,
-                "nodeLabels": {_LABEL_POOL: _SYSTEM_POOL_NAME},
+                "nodeLabels": {contract.LABEL_POOL: _SYSTEM_POOL_NAME},
             },
         )
         for pool in self.xr.spec.nodePools:
@@ -510,7 +509,7 @@ class Composer:
 
     def _node_pool_spec(self, pool: v1alpha1.NodePool) -> dict[str, Any]:
         """Map an XR node pool to a CKS NodePool's spec."""
-        labels = {_LABEL_POOL: pool.name}
+        labels = {contract.LABEL_POOL: pool.name}
         if pool.role == "GPU" and pool.gpu:
             labels[_LABEL_GPU] = pool.gpu.acceleratorType
             labels[_LABEL_DEVICE_PLUGIN_KEY] = _LABEL_DEVICE_PLUGIN_VALUE
@@ -673,7 +672,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),

@@ -1,0 +1,69 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: coreweaveclusterconfigs.coreweave.modelplane.ai
+spec:
+  group: coreweave.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, coreweave]
+    kind: CoreWeaveClusterConfig
+    plural: coreweaveclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: ZONE
+      type: string
+      jsonPath: .spec.zone
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A CoreWeaveClusterConfig says how to provision CoreWeave Kubernetes
+          Service (CKS) clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [zone]
+            properties:
+              zone:
+                type: string
+                description: >-
+                  CoreWeave Availability Zone for the cluster (e.g.
+                  US-EAST-04A). Instance types vary by zone.
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  CKS Kubernetes minor version, in the form X.Y. CKS applies
+                  patch versions itself. Defaults to a version where Dynamic
+                  Resource Allocation (how devices bind to pods) is generally
+                  available.
+                pattern: '^[0-9]+\.[0-9]+$'
+              credentials:
+                type: object
+                description: >-
+                  CoreWeave ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the CoreWeave API. Its API access token also
+                  authenticates Modelplane to the cluster. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object

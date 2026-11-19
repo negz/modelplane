@@ -1,0 +1,15 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: coreweaveclusterconfigs.coreweave.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: coreweave.modelplane.ai/v1alpha1
+    kind: CoreWeaveClusterConfig
+  mode: Pipeline
+  # Nothing to compose: compose-provisioned-cluster reads it. The step exists
+  # because an XR needs a Composition, and with nothing composed it's Ready.
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-coreweavecompose-provisioned-cluster
+    step: compose-provisioned-cluster

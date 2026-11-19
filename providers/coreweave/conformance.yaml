@@ -1,0 +1,65 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The device stack doesn't install NFD, because CoreWeave runs its own on
+# every CKS cluster. Its NFD would set the GPU labels on real nodes, and here
+# they're set up front. The device-plugin label is the one
+# compose-coreweave-cluster sets to keep CoreWeave's device plugin off GPU
+# nodes.
+deviceStack:
+  apiVersion: coreweave.modelplane.ai/v1alpha1
+  kind: CoreWeaveDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: rtxp6000-8x
+      nvidia.com/gpu.deploy.device-plugin: "false"
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: nvidia-rtx-pro-6000
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # CKS GPU nodes run Ubuntu 24.04, and CoreWeave's NFD sets these.
+      feature.node.kubernetes.io/system-os_release.ID: ubuntu
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "24.04"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: turin-gp
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  dcgm-exporter/mp-dcgm-exporter: 2
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no CoreWeave
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  config:
+    apiVersion: coreweave.modelplane.ai/v1alpha1
+    kind: CoreWeaveClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      zone: US-EAST-04A
+  nodeClasses:
+    accelerator:
+      apiVersion: coreweave.modelplane.ai/v1alpha1
+      kind: CoreWeaveNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        instanceType: rtxp6000-8x
+        accelerator:
+          type: nvidia-rtx-pro-6000
+    cpu:
+      apiVersion: coreweave.modelplane.ai/v1alpha1
+      kind: CoreWeaveNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        instanceType: turin-gp

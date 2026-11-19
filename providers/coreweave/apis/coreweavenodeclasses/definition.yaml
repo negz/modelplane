@@ -1,0 +1,57 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: coreweavenodeclasses.coreweave.modelplane.ai
+spec:
+  group: coreweave.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, coreweave]
+    kind: CoreWeaveNodeClass
+    plural: coreweavenodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: INSTANCE-TYPE
+      type: string
+      jsonPath: .spec.instanceType
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A CoreWeaveNodeClass says how to provision a CKS node pool. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on a CoreWeave cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [instanceType]
+            properties:
+              instanceType:
+                type: string
+                description: >-
+                  CKS instance type (e.g. rtxp6000-8x, turin-gp). The instance
+                  type determines the GPU model and count, if any, and whether
+                  it has InfiniBand.
+                minLength: 1
+                maxLength: 63
+              accelerator:
+                type: object
+                description: >-
+                  The instance type's GPU. Required for a pool whose
+                  InferenceClass claims a DRA driver other than dra.cpu, and
+                  rejected for any other pool. The GPU's nodes carry its type
+                  in the modelplane.ai/gpu label.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: GPU accelerator type (e.g. nvidia-h100, nvidia-l40s).
+                    minLength: 1
+                    maxLength: 63
+          status:
+            type: object

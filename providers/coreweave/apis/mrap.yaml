@@ -1,0 +1,15 @@
+# Activates the managed resource kinds every CoreWeave cluster's device stack
+# composes, so the provider works with Crossplane installed with an empty
+# default activation (provider.defaultActivations=[]).
+# compose-provisioned-cluster composes a second policy activating the CoreWeave
+# kinds, so the CoreWeave provider runs only once a control plane has a
+# CoreWeave cluster. Policies are additive, and their names global, so this one
+# is named for its provider.
+apiVersion: apiextensions.crossplane.io/v1alpha1
+kind: ManagedResourceActivationPolicy
+metadata:
+  name: modelplane-coreweave
+spec:
+  activate:
+  - releases.helm.m.crossplane.io
+  - objects.kubernetes.m.crossplane.io
