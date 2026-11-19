@@ -34,7 +34,8 @@ import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.ekscluster import v1alpha1
+from modelplane_sdk import contract, devicestack, usages
+from models.ai.modelplane.eks.ekscluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
@@ -87,33 +88,19 @@ def _namespace(meta: metav1.ObjectMeta | None) -> str:
 _ManagementPolicy = Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]
 _NODE_GROUP_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update", "Delete"]
 
-# Management policies that exclude Delete, used for resources installed on the
-# workload cluster (the RWX StorageClass Object, the autoscaler and EFA DRA
-# Helm Releases). These exist only to configure the cluster and are only ever
-# deleted because the whole EKSCluster - and the cluster itself - is being torn
-# down. Deleting them then means asking provider-helm / provider-kubernetes to
-# reach a cluster whose kubeconfig Secret has already been deleted, which wedges
-# their finalizers and hangs the composite. Orphaning them sidesteps that: the
-# in-cluster resources die with the cluster. Crossplane names composed resources
-# deterministically from the owner XR's UID and the composition resource name,
-# so if one of these MRs is ever deleted out of band the recomposed MR takes the
-# same name and provider-helm / provider-kubernetes adopt the existing release
-# or object rather than erroring.
-_ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
-
 # System node group injected into every EKS cluster to host control-plane
 # components (Envoy Gateway, KEDA, KServe controller, etc.). Not part of
-# the user-facing API — compose-inference-cluster only passes GPU groups.
+# the user-facing API — compose-provisioned-cluster passes only the
+# ProvisionedCluster's pools.
 _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_INSTANCE_TYPE = "m6i.xlarge"
 _SYSTEM_POOL_NODE_COUNT = 1
 _SYSTEM_POOL_MIN_NODE_COUNT = 1
 _SYSTEM_POOL_MAX_NODE_COUNT = 2
 
-# Labels written on EKS node groups. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of EKS node groups. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
 # Tags the EFA security group so its self-referencing ingress/egress rules and
 # the launch template's EFA interfaces can select it - distinct from the EFS
 # security group, which also matches the controller ref.
@@ -149,9 +136,6 @@ _TAG_ELB_ROLE = "kubernetes.io/role/elb"
 _ROLE_CLUSTER = "cluster"
 _ROLE_NODE = "node"
 
-# Secret type written to XR status. compose-inference-cluster reads
-# this to wire the kubeconfig into a ClusterProviderConfig.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 _SECRET_KEY_KUBECONFIG = "kubeconfig"
 
 # AMI types for EKS-optimised AMIs. AL2023 NVIDIA includes the NVIDIA
@@ -405,6 +389,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -884,7 +870,7 @@ class Composer:
                     minSize=pool.minNodeCount,
                     maxSize=pool.maxNodeCount,
                 ),
-                labels={_LABEL_POOL: pool.name},
+                labels={contract.LABEL_POOL: pool.name},
             )
 
             if uses_launch_template:
@@ -916,7 +902,7 @@ class Composer:
             if pool.role == "GPU" and pool.gpu:
                 fp.labels = {
                     _LABEL_GPU: pool.gpu.acceleratorType,
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                 }
                 fp.taint = [
                     ngv1beta1.TaintItem(
@@ -927,7 +913,7 @@ class Composer:
                 ]
             elif pool.role == "CPU":
                 fp.labels = {
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                     _LABEL_CPU: "true",
                 }
                 fp.taint = [
@@ -1215,7 +1201,7 @@ class Composer:
                             minSize=_SYSTEM_POOL_MIN_NODE_COUNT,
                             maxSize=_SYSTEM_POOL_MAX_NODE_COUNT,
                         ),
-                        labels={_LABEL_POOL: _SYSTEM_POOL_NAME},
+                        labels={contract.LABEL_POOL: _SYSTEM_POOL_NAME},
                     ),
                 ),
             ),
@@ -1469,7 +1455,7 @@ class Composer:
             k8sobjv1alpha1.Object(
                 metadata=metav1.ObjectMeta(namespace=_namespace(self.xr.metadata)),
                 spec=k8sobjv1alpha1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -1585,7 +1571,7 @@ class Composer:
                     annotations={_ANNOTATION_EXTERNAL_NAME: _AUTOSCALER_RELEASE_NAME},
                 ),
                 spec=helmv1beta1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=helmv1beta1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -1634,7 +1620,7 @@ class Composer:
                     annotations={_ANNOTATION_EXTERNAL_NAME: _EFA_DRA_DRIVER_RELEASE_NAME},
                 ),
                 spec=helmv1beta1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=helmv1beta1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -1704,7 +1690,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),

@@ -1,0 +1,73 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: ekscapacityreservations.eks.modelplane.ai
+spec:
+  group: eks.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, eks]
+    kind: EKSCapacityReservation
+    plural: ekscapacityreservations
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    - name: TYPE
+      type: string
+      jsonPath: .spec.type
+    - name: ID
+      type: string
+      jsonPath: .spec.id
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An EKSCapacityReservation is an existing EC2 Capacity Reservation
+          that an InferenceCluster node pool on an EKS cluster can reference
+          from reservationRef. Modelplane doesn't create or modify the
+          reservation; it only launches the pool's nodes into it, and never
+          falls back to on-demand capacity, so the pool's nodeCount must not
+          exceed the reserved instance count.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            description: >-
+              Immutable, because node groups backed by this reservation
+              can't move to another reservation in place.
+            required: [region, type, id]
+            x-kubernetes-validations:
+            - rule: "self == oldSelf"
+              message: spec is immutable. Create a new EKSCapacityReservation instead.
+            properties:
+              region:
+                type: string
+                description: >-
+                  AWS region the reservation is in (e.g. us-east-2). It must
+                  be the region of the EKSClusterConfig of every cluster
+                  whose pools reference it.
+                minLength: 1
+                maxLength: 32
+              type:
+                type: string
+                description: >-
+                  The kind of Capacity Reservation. CapacityBlock is a
+                  Capacity Block for ML. OnDemand is an On-Demand Capacity
+                  Reservation.
+                enum: [CapacityBlock, OnDemand]
+              id:
+                type: string
+                description: >-
+                  ID of the Capacity Reservation (e.g.
+                  cr-0123456789abcdef0). Purchasing a Capacity Block yields
+                  this ID.
+                pattern: '^cr-[0-9a-f]+$'
+                minLength: 4
+                maxLength: 64
+          status:
+            type: object

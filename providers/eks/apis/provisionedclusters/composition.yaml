@@ -1,0 +1,30 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  # Composition names are global, and every provider ships a Composition for
+  # a ProvisionedCluster, so this one is named for its provider.
+  name: eks.provisionedclusters.infrastructure.modelplane.ai
+  labels:
+    # compose-inference-cluster selects this Composition for an
+    # InferenceCluster whose spec.cluster.provisioned.configRef is an
+    # EKSClusterConfig.
+    infrastructure.modelplane.ai/config-group: eks.modelplane.ai
+    infrastructure.modelplane.ai/config-kind: EKSClusterConfig
+  annotations:
+    # The optional parts of the ProvisionedCluster contract this provider
+    # implements. An EKS node group can be restricted to Availability Zones,
+    # and backed by an EKSCapacityReservation.
+    infrastructure.modelplane.ai/capabilities: Zones,CapacityReservations
+    # The DRA drivers whose device stacks the EKSDeviceStack installs, plus
+    # dra.net, the EFA DRA driver compose-eks-cluster installs when a pool's
+    # node class asks for the EFA fabric.
+    infrastructure.modelplane.ai/dra-drivers: gpu.nvidia.com,dra.net
+spec:
+  compositeTypeRef:
+    apiVersion: infrastructure.modelplane.ai/v1alpha1
+    kind: ProvisionedCluster
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-ekscompose-provisioned-cluster
+    step: compose-provisioned-cluster

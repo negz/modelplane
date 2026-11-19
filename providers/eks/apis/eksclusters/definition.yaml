@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: eksclusters.infrastructure.modelplane.ai
+  name: eksclusters.eks.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: eks.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - eks
     kind: EKSCluster
     plural: eksclusters
     shortNames:

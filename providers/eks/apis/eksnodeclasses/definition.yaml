@@ -1,0 +1,84 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: eksnodeclasses.eks.modelplane.ai
+spec:
+  group: eks.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, eks]
+    kind: EKSNodeClass
+    plural: eksnodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: INSTANCE-TYPE
+      type: string
+      jsonPath: .spec.instanceType
+    - name: FABRIC
+      type: string
+      jsonPath: .spec.fabric
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An EKSNodeClass says how to provision an EKS managed node group. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on an EKS cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [instanceType]
+            properties:
+              instanceType:
+                type: string
+                description: >-
+                  EC2 instance type (e.g. g6.xlarge, p5.48xlarge,
+                  m6i.4xlarge). The instance type determines the GPU model
+                  and count, if any.
+                minLength: 1
+                maxLength: 63
+              diskSizeGb:
+                type: integer
+                default: 100
+                description: Root volume size in GB.
+                minimum: 10
+                maximum: 65536
+              accelerator:
+                type: object
+                description: >-
+                  The instance type's GPU. Required for a pool whose
+                  InferenceClass claims a DRA driver other than dra.cpu, and
+                  rejected for any other pool. A pool with an accelerator
+                  runs the EKS-optimized NVIDIA AMI, and its nodes carry the
+                  GPU's type in the modelplane.ai/gpu label. A pool without
+                  one runs the standard AMI, with the modelplane.ai/cpu label
+                  and taint.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: GPU accelerator type (e.g. nvidia-l4, nvidia-h100).
+                    minLength: 1
+                    maxLength: 63
+              fabric:
+                type: string
+                default: None
+                description: >-
+                  High-performance node-to-node fabric for multi-node
+                  engines, so a gang's tensor-parallel traffic isn't capped
+                  by TCP. None uses standard VPC networking. EFA attaches
+                  Elastic Fabric Adapter interfaces to each node for
+                  GPUDirect RDMA across nodes, and is only useful on
+                  EFA-capable instance types (e.g. p5en.48xlarge). When any
+                  of a cluster's pools uses EFA, Modelplane installs the EFA
+                  DRA driver (dra.net) on the cluster.
+                enum:
+                - None
+                - EFA
+          status:
+            type: object

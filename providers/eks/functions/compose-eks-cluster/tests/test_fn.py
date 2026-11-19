@@ -25,7 +25,7 @@ from function import fn
 from google.protobuf import duration_pb2 as durationpb
 from google.protobuf import json_format, message
 from google.protobuf import struct_pb2 as structpb
-from models.ai.modelplane.infrastructure.ekscluster import v1alpha1
+from models.ai.modelplane.eks.ekscluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 
@@ -1064,7 +1064,7 @@ def _autoscaler_pod_identity(*, cred_kind: str, cred_name: str) -> fnv1.Resource
 
 
 def _autoscaler_release() -> fnv1.Resource:
-    """The cluster autoscaler's Helm release."""
+    """The cluster autoscaler's Helm release, labelled as the consumer its ProviderConfig's Usage selects."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
@@ -1073,6 +1073,7 @@ def _autoscaler_release() -> fnv1.Resource:
                 "metadata": {
                     "namespace": "modelplane-system",
                     "annotations": {"crossplane.io/external-name": "mp-cluster-autoscaler"},
+                    "labels": {"modelplane.ai/usage-consumer": "release-cluster-autoscaler"},
                 },
                 "spec": {
                     "managementPolicies": ["Observe", "Create", "Update"],
@@ -1115,6 +1116,36 @@ def _provider_config(*, api_version: str) -> fnv1.Resource:
                             "key": "kubeconfig",
                         },
                     },
+                },
+            }
+        ),
+        ready=fnv1.READY_TRUE,
+    )
+
+
+def _usage_provider_config(*, api_version: str, kind: str, consumer: str) -> fnv1.Resource:
+    """The composed Usage holding the ProviderConfig of the given apiVersion until the consumer, of the given kind, is gone."""
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {
+                "apiVersion": "protection.crossplane.io/v1beta1",
+                "kind": "Usage",
+                "metadata": {"namespace": "modelplane-system"},
+                "spec": {
+                    "of": {
+                        "apiVersion": api_version,
+                        "kind": "ProviderConfig",
+                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                    },
+                    "by": {
+                        "apiVersion": api_version,
+                        "kind": kind,
+                        "resourceSelector": {
+                            "matchControllerRef": True,
+                            "matchLabels": {"modelplane.ai/usage-consumer": consumer},
+                        },
+                    },
+                    "replayDeletion": True,
                 },
             }
         ),
@@ -1770,7 +1801,10 @@ COMPOSE_CASES = [
                             {
                                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                                 "kind": "Object",
-                                "metadata": {"namespace": "modelplane-system"},
+                                "metadata": {
+                                    "namespace": "modelplane-system",
+                                    "labels": {"modelplane.ai/usage-consumer": "storage-class-rwx-efs"},
+                                },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
                                     "providerConfigRef": {
@@ -1800,6 +1834,16 @@ COMPOSE_CASES = [
                     "release-cluster-autoscaler": _autoscaler_release(),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-storage-class-rwx-efs": _usage_provider_config(
+                        api_version="kubernetes.m.crossplane.io/v1alpha1",
+                        kind="Object",
+                        consumer="storage-class-rwx-efs",
+                    ),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-cluster-autoscaler",
+                    ),
                 },
             ),
             context=structpb.Struct(),
@@ -2775,6 +2819,7 @@ COMPOSE_CASES = [
                                 "metadata": {
                                     "namespace": "modelplane-system",
                                     "annotations": {"crossplane.io/external-name": "mp-aws-dranet"},
+                                    "labels": {"modelplane.ai/usage-consumer": "release-efa-dra-driver"},
                                 },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
@@ -2801,6 +2846,16 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-cluster-autoscaler",
+                    ),
+                    "usage-pc-release-efa-dra-driver": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-efa-dra-driver",
+                    ),
                 },
             ),
             context=structpb.Struct(),
@@ -3014,6 +3069,7 @@ COMPOSE_CASES = [
                                 "metadata": {
                                     "namespace": "modelplane-system",
                                     "annotations": {"crossplane.io/external-name": "mp-aws-dranet"},
+                                    "labels": {"modelplane.ai/usage-consumer": "release-efa-dra-driver"},
                                 },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
@@ -3040,6 +3096,16 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-cluster-autoscaler",
+                    ),
+                    "usage-pc-release-efa-dra-driver": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-efa-dra-driver",
+                    ),
                 },
             ),
             context=structpb.Struct(),
@@ -3239,6 +3305,11 @@ COMPOSE_CASES = [
                     "release-cluster-autoscaler": _autoscaler_release(),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(
+                        api_version="helm.m.crossplane.io/v1beta1",
+                        kind="Release",
+                        consumer="release-cluster-autoscaler",
+                    ),
                 },
             ),
             context=structpb.Struct(),

@@ -1,0 +1,72 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: eksclusterconfigs.eks.modelplane.ai
+spec:
+  group: eks.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, eks]
+    kind: EKSClusterConfig
+    plural: eksclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An EKSClusterConfig says how to provision Amazon Elastic Kubernetes
+          Service (EKS) clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [region]
+            properties:
+              region:
+                type: string
+                description: >-
+                  AWS region for the cluster (e.g. us-west-2). An
+                  EKSCapacityReservation backing one of the cluster's pools
+                  must be in this region.
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  EKS cluster Kubernetes version. Must be a version EKS
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how devices bind to pods) is generally
+                  available.
+                minLength: 1
+                maxLength: 16
+              credentials:
+                type: object
+                description: >-
+                  AWS ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the AWS API. The principal it authenticates
+                  as is granted cluster-admin on the cluster, and also
+                  authenticates Modelplane to the cluster. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object

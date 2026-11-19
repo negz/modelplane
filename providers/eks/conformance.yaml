@@ -1,0 +1,64 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The labels and taint mirror what compose-eks-cluster stamps on node groups.
+# The device stack installs NFD, whose worker would set the GPU and OS labels
+# on real nodes; here they're set up front, because a worker pod on a KWOK
+# node never labels anything.
+deviceStack:
+  apiVersion: eks.modelplane.ai/v1alpha1
+  kind: EKSDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: p5.48xlarge
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: h100
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # EKS GPU node groups run AL2023.
+      feature.node.kubernetes.io/system-os_release.ID: amzn
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "2023"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: m6i.4xlarge
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  node-feature-discovery/mp-node-feature-discovery-worker: 3
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no AWS
+# credentials, and checks the provider composes the cluster's managed
+# resources. EKS GPU pools must name their zones.
+provisioning:
+  zones: [us-west-2a]
+  config:
+    apiVersion: eks.modelplane.ai/v1alpha1
+    kind: EKSClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      region: us-west-2
+  nodeClasses:
+    accelerator:
+      apiVersion: eks.modelplane.ai/v1alpha1
+      kind: EKSNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        instanceType: p5.48xlarge
+        accelerator:
+          type: h100
+    cpu:
+      apiVersion: eks.modelplane.ai/v1alpha1
+      kind: EKSNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        instanceType: m6i.4xlarge
