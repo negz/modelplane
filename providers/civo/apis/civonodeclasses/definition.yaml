@@ -1,0 +1,64 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: civonodeclasses.civo.modelplane.ai
+spec:
+  group: civo.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, civo]
+    kind: CivoNodeClass
+    plural: civonodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: SIZE
+      type: string
+      jsonPath: .spec.size
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A CivoNodeClass says how to provision a Civo node pool. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on a Civo cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [size]
+            properties:
+              size:
+                type: string
+                description: >-
+                  Civo Kubernetes size ID (e.g. an.g1.l40s.kube.x1,
+                  g4p.kube.small). The size determines the GPU model and
+                  count, if any. List sizes with civo kubernetes size.
+                minLength: 1
+                maxLength: 63
+              accelerator:
+                type: object
+                description: >-
+                  The size's GPUs. Required for a pool whose InferenceClass
+                  claims a DRA driver other than dra.cpu, and rejected for any
+                  other pool. The GPU's nodes carry its type in the
+                  modelplane.ai/gpu label. A pool of single NVIDIA H100 nodes
+                  has its GPU driver loaded with NVLink disabled, because a
+                  lone H100 SXM module's NVLink links have no peer.
+                required: [type, count]
+                properties:
+                  type:
+                    type: string
+                    description: GPU accelerator type (e.g. nvidia-l40s, nvidia-h100).
+                    minLength: 1
+                    maxLength: 63
+                  count:
+                    type: integer
+                    description: Number of GPUs on each node of the size.
+                    minimum: 1
+                    maximum: 16
+          status:
+            type: object

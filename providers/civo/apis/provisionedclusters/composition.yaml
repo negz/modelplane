@@ -1,0 +1,28 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  # Composition names are global, and every provider ships a Composition for
+  # a ProvisionedCluster, so this one is named for its provider.
+  name: civo.provisionedclusters.infrastructure.modelplane.ai
+  labels:
+    # compose-inference-cluster selects this Composition for an
+    # InferenceCluster whose spec.cluster.provisioned.configRef is a
+    # CivoClusterConfig.
+    infrastructure.modelplane.ai/config-group: civo.modelplane.ai
+    infrastructure.modelplane.ai/config-kind: CivoClusterConfig
+  annotations:
+    # The optional parts of the ProvisionedCluster contract this provider
+    # implements. Civo regions have no zones to restrict a pool to, and Civo
+    # has no capacity reservations.
+    infrastructure.modelplane.ai/capabilities: ""
+    # The DRA drivers whose device stacks the CivoDeviceStack installs.
+    infrastructure.modelplane.ai/dra-drivers: gpu.nvidia.com
+spec:
+  compositeTypeRef:
+    apiVersion: infrastructure.modelplane.ai/v1alpha1
+    kind: ProvisionedCluster
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-civocompose-provisioned-cluster
+    step: compose-provisioned-cluster

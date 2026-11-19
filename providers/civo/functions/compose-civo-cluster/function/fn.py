@@ -35,11 +35,11 @@ cluster, so no credentials are composed here.
 
 Unlike Vultr - whose managed GPU Operator add-on this function's Vultr
 counterpart gates cluster readiness on - Civo pre-installs no GPU
-operator. Modelplane's serving stack installs it (driver included), and
+operator. The provider's device stack installs it (driver included), and
 that stack only starts composing after this XR is Ready, so no GPU
-observer is composed here: gating readiness on a component the serving
+observer is composed here: gating readiness on a component the device
 stack installs would deadlock. GPU stack health is enforced downstream by
-the serving stack's gpu-operator chart (wait=True) and the DRA driver
+the device stack's gpu-operator chart (wait=True) and the DRA driver
 that depends on it.
 
 No ModelCache RWX StorageClass is composed: Civo's civo-volume class is
@@ -53,7 +53,8 @@ import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.civocluster import v1alpha1
+from modelplane_sdk import contract, devicestack, usages
+from models.ai.modelplane.civo.civocluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
@@ -64,7 +65,8 @@ from models.io.upbound.m.civo.vpc.network import v1beta1 as networkv1beta1
 
 # System pool injected into every Civo cluster to host control-plane
 # components (Envoy Gateway, LeaderWorkerSet, cert-manager, etc.). Not part
-# of the user-facing API - compose-inference-cluster only passes GPU pools.
+# of the user-facing API - compose-provisioned-cluster passes only the
+# ProvisionedCluster's pools.
 # The size matches the Nebius and Vultr system pools' shape (16 GB memory);
 # g4p.kube.small is the Performance tier's 4 vCPU / 16 GB Kubernetes size
 # (verified against /v2/sizes - the Standard g4s tier tops out at 8 GB).
@@ -75,14 +77,9 @@ _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_SIZE = "g4p.kube.small"
 _SYSTEM_POOL_NODES = 2
 
-# Labels written on Civo node pools' nodes. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of Civo node pools. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
-
-# Secret type written to XR status. compose-inference-cluster reads this to
-# wire the kubeconfig into a ClusterProviderConfig.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 
 # Key within the connection secret the Kubernetes cluster resource writes.
 # The provider publishes the decoded kubeconfig under this key once the
@@ -138,14 +135,6 @@ _API_ACCESS_SECRET_NAME = "civo-api-access"
 # by pool ID, so the Helm release is templated from these.
 _ANNOTATION_EXTERNAL_NAME = "crossplane.io/external-name"
 
-# Compose the autoscaler Helm release with Observe, Create and Update but
-# not Delete. Deleting it with the XR would mean asking provider-helm to
-# reach a cluster whose kubeconfig Secret has already been deleted,
-# wedging its finalizer; orphaning it sidesteps that - the in-cluster
-# resources die with the cluster.
-_ManagementPolicy = Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]
-_ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
-
 # Node pool management policies that exclude LateInitialize, used for
 # autoscaled pools: nodeCount is seeded via initProvider so it is applied
 # only at creation and then left alone. The cluster autoscaler drives the
@@ -153,6 +142,7 @@ _ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
 # nodeCount and fight the autoscaler. (initProvider is gated on
 # enumerating management policies - the default "*" still late-initializes
 # nodeCount into forProvider, defeating the purpose.)
+_ManagementPolicy = Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]
 _AUTOSCALED_POOL_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update", "Delete"]
 
 
@@ -192,6 +182,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -375,7 +367,7 @@ class Composer:
 
         The release is composed whenever the Ready-gated block is, even
         with no autoscaled pools: its management policies exclude Delete
-        (see _ORPHAN_MANAGEMENT), so dropping it from desired state when
+        (see devicestack.ORPHAN), so dropping it from desired state when
         the last pool goes fixed-size would orphan a running autoscaler
         that keeps scaling with its old node groups. Updating it to an
         empty group list instead makes the chart render no Deployment,
@@ -404,7 +396,7 @@ class Composer:
                     annotations={_ANNOTATION_EXTERNAL_NAME: _AUTOSCALER_RELEASE_NAME},
                 ),
                 spec=helmv1beta1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=helmv1beta1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -438,12 +430,12 @@ class Composer:
             label=_SYSTEM_POOL_NAME,
             size=_SYSTEM_POOL_SIZE,
             nodeCount=_SYSTEM_POOL_NODES,
-            labels={_LABEL_POOL: _SYSTEM_POOL_NAME},
+            labels={contract.LABEL_POOL: _SYSTEM_POOL_NAME},
         )
 
     def _node_pool(self, pool: v1alpha1.NodePool) -> nodepoolv1beta1.NodePool:
         """Map an XR node pool to a NodePool managed resource."""
-        labels = {_LABEL_POOL: pool.name}
+        labels = {contract.LABEL_POOL: pool.name}
         if pool.role == "GPU" and pool.gpu:
             labels[_LABEL_GPU] = pool.gpu.acceleratorType
         elif pool.role == "CPU":
@@ -501,7 +493,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),

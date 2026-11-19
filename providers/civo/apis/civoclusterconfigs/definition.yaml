@@ -1,0 +1,74 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: civoclusterconfigs.civo.modelplane.ai
+spec:
+  group: civo.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, civo]
+    kind: CivoClusterConfig
+    plural: civoclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A CivoClusterConfig says how to provision Civo Kubernetes (k3s)
+          clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [region]
+            properties:
+              region:
+                type: string
+                description: >-
+                  Civo region for the cluster (e.g. LON1, NYC1, FRA1). GPU
+                  sizes vary by region.
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  Civo Kubernetes (k3s) version. Civo requires an exact
+                  version string including the k3s build suffix; list current
+                  versions with civo kubernetes versions. Choose 1.34 or newer
+                  so Dynamic Resource Allocation (how devices bind to pods) is
+                  generally available, and 1.36 or newer for a CPU pool: its
+                  cores are claimed as consumable capacity, which Kubernetes
+                  enables by default from 1.36 (DRAConsumableCapacity).
+                  Defaults to Civo's current default version, which may be
+                  older than a CPU pool needs.
+                minLength: 1
+                maxLength: 32
+              credentials:
+                type: object
+                description: >-
+                  Civo ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the Civo API. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object

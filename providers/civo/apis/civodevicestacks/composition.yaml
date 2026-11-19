@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: civodevicestacks.civo.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: civo.modelplane.ai/v1alpha1
+    kind: CivoDeviceStack
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-civocompose-device-stack
+    step: compose-device-stack

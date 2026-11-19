@@ -1,0 +1,15 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: civoclusterconfigs.civo.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: civo.modelplane.ai/v1alpha1
+    kind: CivoClusterConfig
+  mode: Pipeline
+  # Nothing to compose: compose-provisioned-cluster reads it. The step exists
+  # because an XR needs a Composition, and with nothing composed it's Ready.
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-civocompose-provisioned-cluster
+    step: compose-provisioned-cluster

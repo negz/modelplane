@@ -1,0 +1,67 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The labels and taint are the ones compose-civo-cluster stamps on its pools,
+# plus the NFD labels the device stack's NFD would set on real nodes. Civo's
+# GPU node images ship no driver, so the device stack's GPU operator runs its
+# containerized driver on the GPU pool. No pool here needs NVLink disabled,
+# so the NVLink transform stays out of the way.
+deviceStack:
+  apiVersion: civo.modelplane.ai/v1alpha1
+  kind: CivoDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: an.g1.l40s.kube.x1
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: nvidia-l40s
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # Civo GPU node images are Ubuntu 22.04.
+      feature.node.kubernetes.io/system-os_release.ID: ubuntu
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "22.04"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: g4s.kube.large
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  node-feature-discovery/mp-node-feature-discovery-worker: 3
+gpuWorkloads:
+- ^nvidia-driver-daemonset
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no Civo
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  config:
+    apiVersion: civo.modelplane.ai/v1alpha1
+    kind: CivoClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      region: LON1
+  nodeClasses:
+    accelerator:
+      apiVersion: civo.modelplane.ai/v1alpha1
+      kind: CivoNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        size: an.g1.l40s.kube.x1
+        accelerator:
+          type: nvidia-l40s
+          count: 1
+    cpu:
+      apiVersion: civo.modelplane.ai/v1alpha1
+      kind: CivoNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        size: g4s.kube.large

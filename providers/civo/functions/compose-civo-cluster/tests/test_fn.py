@@ -26,7 +26,7 @@ from function import fn
 from google.protobuf import duration_pb2 as durationpb
 from google.protobuf import json_format, message
 from google.protobuf import struct_pb2 as structpb
-from models.ai.modelplane.infrastructure.civocluster import v1alpha1
+from models.ai.modelplane.civo.civocluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 
@@ -307,7 +307,7 @@ def _provider_config() -> fnv1.Resource:
 
 
 def _autoscaler_release(*, autoscaling_groups: list[dict]) -> fnv1.Resource:
-    """The composed cluster autoscaler Release, scaling the given node groups."""
+    """The composed cluster autoscaler Release, labelled as the consumer its ProviderConfig's Usage selects, scaling the given node groups."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
@@ -315,6 +315,7 @@ def _autoscaler_release(*, autoscaling_groups: list[dict]) -> fnv1.Resource:
                 "kind": "Release",
                 "metadata": {
                     "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/usage-consumer": "release-cluster-autoscaler"},
                     "annotations": {"crossplane.io/external-name": "mp-cluster-autoscaler"},
                 },
                 "spec": {
@@ -339,6 +340,36 @@ def _autoscaler_release(*, autoscaling_groups: list[dict]) -> fnv1.Resource:
                 },
             }
         ),
+    )
+
+
+def _usage_provider_config() -> fnv1.Resource:
+    """The composed Usage holding the provider-helm ProviderConfig until the cluster autoscaler Release is gone."""
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {
+                "apiVersion": "protection.crossplane.io/v1beta1",
+                "kind": "Usage",
+                "metadata": {"namespace": "modelplane-system"},
+                "spec": {
+                    "of": {
+                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                        "kind": "ProviderConfig",
+                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                    },
+                    "by": {
+                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                        "kind": "Release",
+                        "resourceSelector": {
+                            "matchControllerRef": True,
+                            "matchLabels": {"modelplane.ai/usage-consumer": "release-cluster-autoscaler"},
+                        },
+                    },
+                    "replayDeletion": True,
+                },
+            }
+        ),
+        ready=fnv1.READY_TRUE,
     )
 
 
@@ -420,6 +451,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-helm": _provider_config(),
                     "release-cluster-autoscaler": _autoscaler_release(autoscaling_groups=[]),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -462,6 +494,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-helm": _provider_config(),
                     "release-cluster-autoscaler": _autoscaler_release(autoscaling_groups=[]),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -552,6 +585,7 @@ COMPOSE_CASES = [
                             {"name": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "minSize": 1, "maxSize": 4}
                         ],
                     ),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -631,6 +665,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-helm": _provider_config(),
                     "release-cluster-autoscaler": _autoscaler_release(autoscaling_groups=[]),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -674,6 +709,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-helm": _provider_config(),
                     "release-cluster-autoscaler": _autoscaler_release(autoscaling_groups=[]),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -731,6 +767,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-helm": _provider_config(),
                     "release-cluster-autoscaler": _autoscaler_release(autoscaling_groups=[]),
+                    "usage-pc-release-cluster-autoscaler": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),

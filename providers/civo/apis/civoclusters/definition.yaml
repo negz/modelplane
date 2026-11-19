@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: civoclusters.infrastructure.modelplane.ai
+  name: civoclusters.civo.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: civo.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - civo
     kind: CivoCluster
     plural: civoclusters
   scope: Namespaced

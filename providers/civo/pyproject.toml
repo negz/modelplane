@@ -1,0 +1,26 @@
+[project]
+name = "modelplane-civo"
+version = "0.0.0"
+description = "A Modelplane cluster provider for Civo Kubernetes."
+requires-python = ">=3.11,<3.14"
+license = "Apache-2.0"
+
+[tool.uv]
+# This is a workspace root; it's not installable itself.
+package = false
+
+[tool.uv.workspace]
+members = ["functions/*", "schemas/python"]
+
+[tool.uv.sources]
+# The provider SDK, from this repository until it's published.
+modelplane-sdk = { path = "../../sdk/python" }
+
+[dependency-groups]
+dev = [
+  "crossplane-function-sdk-python>=0.14.0",
+  "types-protobuf>=4.24",
+  "pyyaml>=6.0",
+  "pydantic>=2.0",
+  "pytest>=9.0",
+]
