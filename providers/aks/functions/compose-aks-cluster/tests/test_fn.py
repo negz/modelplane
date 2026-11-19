@@ -25,7 +25,7 @@ from function import fn
 from google.protobuf import duration_pb2 as durationpb
 from google.protobuf import json_format, message
 from google.protobuf import struct_pb2 as structpb
-from models.ai.modelplane.infrastructure.akscluster import v1alpha1
+from models.ai.modelplane.aks.akscluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 
@@ -577,6 +577,7 @@ COMPOSE_CASES = [
                                 "metadata": {
                                     "namespace": "modelplane-system",
                                     "annotations": {"crossplane.io/external-name": "mp-network-operator"},
+                                    "labels": {"modelplane.ai/usage-consumer": "release-network-operator"},
                                 },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
@@ -618,7 +619,10 @@ COMPOSE_CASES = [
                             {
                                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                                 "kind": "Object",
-                                "metadata": {"namespace": "modelplane-system"},
+                                "metadata": {
+                                    "namespace": "modelplane-system",
+                                    "labels": {"modelplane.ai/usage-consumer": "storage-class-rwx-fs"},
+                                },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
                                     "providerConfigRef": {
@@ -655,6 +659,58 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-release-network-operator": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "protection.crossplane.io/v1beta1",
+                                "kind": "Usage",
+                                "metadata": {"namespace": "modelplane-system"},
+                                "spec": {
+                                    "of": {
+                                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                        "kind": "ProviderConfig",
+                                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                                    },
+                                    "by": {
+                                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                        "kind": "Release",
+                                        "resourceSelector": {
+                                            "matchControllerRef": True,
+                                            "matchLabels": {"modelplane.ai/usage-consumer": "release-network-operator"},
+                                        },
+                                    },
+                                    "replayDeletion": True,
+                                },
+                            }
+                        ),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "usage-pc-storage-class-rwx-fs": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "protection.crossplane.io/v1beta1",
+                                "kind": "Usage",
+                                "metadata": {"namespace": "modelplane-system"},
+                                "spec": {
+                                    "of": {
+                                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                        "kind": "ProviderConfig",
+                                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                                    },
+                                    "by": {
+                                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                        "kind": "Object",
+                                        "resourceSelector": {
+                                            "matchControllerRef": True,
+                                            "matchLabels": {"modelplane.ai/usage-consumer": "storage-class-rwx-fs"},
+                                        },
+                                    },
+                                    "replayDeletion": True,
+                                },
+                            }
+                        ),
+                        ready=fnv1.READY_TRUE,
+                    ),
                 },
             ),
             context=structpb.Struct(),
@@ -923,7 +979,10 @@ COMPOSE_CASES = [
                             {
                                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                                 "kind": "Object",
-                                "metadata": {"namespace": "modelplane-system"},
+                                "metadata": {
+                                    "namespace": "modelplane-system",
+                                    "labels": {"modelplane.ai/usage-consumer": "storage-class-rwx-fs"},
+                                },
                                 "spec": {
                                     "managementPolicies": ["Observe", "Create", "Update"],
                                     "providerConfigRef": {
@@ -963,6 +1022,32 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(api_version="kubernetes.m.crossplane.io/v1alpha1"),
                     "provider-config-helm": _provider_config(api_version="helm.m.crossplane.io/v1beta1"),
+                    "usage-pc-storage-class-rwx-fs": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "protection.crossplane.io/v1beta1",
+                                "kind": "Usage",
+                                "metadata": {"namespace": "modelplane-system"},
+                                "spec": {
+                                    "of": {
+                                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                        "kind": "ProviderConfig",
+                                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                                    },
+                                    "by": {
+                                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                        "kind": "Object",
+                                        "resourceSelector": {
+                                            "matchControllerRef": True,
+                                            "matchLabels": {"modelplane.ai/usage-consumer": "storage-class-rwx-fs"},
+                                        },
+                                    },
+                                    "replayDeletion": True,
+                                },
+                            }
+                        ),
+                        ready=fnv1.READY_TRUE,
+                    ),
                 },
             ),
             context=structpb.Struct(),

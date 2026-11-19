@@ -50,7 +50,8 @@ import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.akscluster import v1alpha1
+from modelplane_sdk import contract, devicestack, usages
+from models.ai.modelplane.aks.akscluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
@@ -68,7 +69,7 @@ from models.io.upbound.m.azure.resourcegroup import v1beta1 as rgv1beta1
 
 # System pool injected into every AKS cluster to host control-plane
 # components (Envoy Gateway, LeaderWorkerSet, cert-manager, etc.). Not part of
-# the user-facing API - compose-inference-cluster only passes GPU pools. AKS
+# the user-facing API - compose-provisioned-cluster only passes inference pools. AKS
 # requires every cluster to carry a default node pool, so the system pool is
 # it; user pools are composed as separate User-mode pools whose lifecycle
 # doesn't touch the cluster resource.
@@ -82,14 +83,9 @@ _SYSTEM_POOL_DISK_SIZE_GB = 100
 # requires recreating it. The name only has to differ from the pool's own.
 _SYSTEM_POOL_ROTATION_NAME = "systemtmp"
 
-# Labels written on node pools' nodes. compose-model-deployment reads these
-# labels for GPU scheduling.
+# Label written on the GPU nodes of node pools. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
-
-# Secret types written to XR status. compose-inference-cluster reads these to
-# wire the kubeconfig into ProviderConfigs.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 
 # Key within the connection secret the KubernetesCluster writes. The provider
 # copies the cluster's raw kubeconfig (kube_config_raw) under this key.
@@ -137,17 +133,6 @@ _NODE_POOL_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update",
 # while AKS puts it back: an endless agent pool update loop. Declaring AKS's
 # own default ends the loop without changing how pools upgrade.
 _MAX_SURGE = "10%"
-
-# Management policies that exclude Delete, used for resources installed on
-# the workload cluster (the RWX StorageClass Object and the network operator
-# Helm Release). These exist only to configure the cluster and are only ever
-# deleted because the whole AKSCluster - and the cluster itself - is being
-# torn down. Deleting them then means asking provider-helm /
-# provider-kubernetes to reach a cluster whose kubeconfig Secret has already
-# been deleted, which wedges their finalizers and hangs the composite.
-# Orphaning them sidesteps that: the in-cluster resources die with the
-# cluster.
-_ORPHAN_MANAGEMENT: list[_ManagementPolicy] = ["Observe", "Create", "Update"]
 
 # The NVIDIA network operator, which loads the DOCA-OFED host drivers and
 # exposes the InfiniBand devices of ND-series nodes to pods through the RDMA
@@ -247,6 +232,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -380,7 +367,7 @@ class Composer:
                         maxCount=_SYSTEM_POOL_MAX_NODE_COUNT,
                         osDiskSizeGb=_SYSTEM_POOL_DISK_SIZE_GB,
                         temporaryNameForRotation=_SYSTEM_POOL_ROTATION_NAME,
-                        nodeLabels={_LABEL_POOL: _SYSTEM_POOL_NAME},
+                        nodeLabels={contract.LABEL_POOL: _SYSTEM_POOL_NAME},
                         upgradeSettings=clusterv1beta1.UpgradeSettings(maxSurge=_MAX_SURGE),
                         vnetSubnetIdSelector=clusterv1beta1.VnetSubnetIdSelector(
                             matchControllerRef=True,
@@ -425,7 +412,7 @@ class Composer:
                 autoScalingEnabled=True,
                 minCount=pool.minNodeCount,
                 maxCount=pool.maxNodeCount,
-                nodeLabels={_LABEL_POOL: pool.name},
+                nodeLabels={contract.LABEL_POOL: pool.name},
                 upgradeSettings=nodepoolv1beta1.UpgradeSettings(maxSurge=_MAX_SURGE),
             )
 
@@ -436,12 +423,12 @@ class Composer:
                 fp.gpuDriver = _GPU_DRIVER_INSTALL
                 fp.nodeLabels = {
                     _LABEL_GPU: pool.gpu.acceleratorType,
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                 }
                 fp.nodeTaints = [_GPU_TAINT]
             elif pool.role == "CPU":
                 fp.nodeLabels = {
-                    _LABEL_POOL: pool.name,
+                    contract.LABEL_POOL: pool.name,
                     _LABEL_CPU: "true",
                 }
                 fp.nodeTaints = [_CPU_TAINT]
@@ -486,7 +473,7 @@ class Composer:
                     annotations={_ANNOTATION_EXTERNAL_NAME: _NETWORK_OPERATOR_RELEASE_NAME},
                 ),
                 spec=helmv1beta1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=helmv1beta1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -549,7 +536,7 @@ class Composer:
             k8sobjv1alpha1.Object(
                 metadata=metav1.ObjectMeta(namespace=_namespace(self.xr.metadata)),
                 spec=k8sobjv1alpha1.Spec(
-                    managementPolicies=_ORPHAN_MANAGEMENT,
+                    managementPolicies=devicestack.ORPHAN,
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ProviderConfig",
                         name=_kubeconfig_secret_name(self.xr),
@@ -605,7 +592,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),

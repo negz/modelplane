@@ -1,0 +1,71 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The taint value is load-bearing: the device stack's accelerated
+# tolerations are operator: Equal, value: "true" (AKS admission rejects
+# wildcards), so any other value would wrongly exclude them.
+# kubernetes.azure.com/accelerator is AKS's own GPU pool label; the device
+# stack's nvidia-toolkit-hardening DaemonSet node-affines to it. The stack
+# enables nvsentinel's NIC health monitor, so its pods belong on the GPU pool
+# too.
+deviceStack:
+  apiVersion: aks.modelplane.ai/v1alpha1
+  kind: AKSDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: Standard_ND96isr_H100_v5
+      kubernetes.azure.com/accelerator: nvidia
+      modelplane.ai/pool: gpufake
+      modelplane.ai/gpu: h100
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # AKS GPU pools run Ubuntu 22.04.
+      feature.node.kubernetes.io/system-os_release.ID: ubuntu
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "22.04"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: Standard_D8s_v5
+      modelplane.ai/pool: cpufake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/nvidia-dra-driver-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+  node-feature-discovery/mp-node-feature-discovery-worker: 3
+  gpu-operator/nvidia-toolkit-hardening: 2
+gpuWorkloads:
+- ^nvidia-toolkit-hardening
+- ^nic-health-monitor
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no Azure
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  config:
+    apiVersion: aks.modelplane.ai/v1alpha1
+    kind: AKSClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      location: westeurope
+  nodeClasses:
+    accelerator:
+      apiVersion: aks.modelplane.ai/v1alpha1
+      kind: AKSNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        vmSize: Standard_ND96isr_H100_v5
+        accelerator:
+          type: nvidia-h100
+    cpu:
+      apiVersion: aks.modelplane.ai/v1alpha1
+      kind: AKSNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        vmSize: Standard_D8s_v5

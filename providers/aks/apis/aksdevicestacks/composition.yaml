@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: aksdevicestacks.aks.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: aks.modelplane.ai/v1alpha1
+    kind: AKSDeviceStack
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-akscompose-device-stack
+    step: compose-device-stack

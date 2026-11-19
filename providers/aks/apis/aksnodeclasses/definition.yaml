@@ -1,0 +1,83 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: aksnodeclasses.aks.modelplane.ai
+spec:
+  group: aks.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, aks]
+    kind: AKSNodeClass
+    plural: aksnodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: VM-SIZE
+      type: string
+      jsonPath: .spec.vmSize
+    - name: FABRIC
+      type: string
+      jsonPath: .spec.fabric
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An AKSNodeClass says how to provision an AKS node pool. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on an AKS cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [vmSize]
+            properties:
+              vmSize:
+                type: string
+                description: >-
+                  Azure VM size (e.g. Standard_D4s_v5,
+                  Standard_NC24ads_A100_v4, Standard_ND96isr_H100_v5). The VM
+                  size determines the GPU model and count, if any.
+                minLength: 1
+                maxLength: 63
+              diskSizeGb:
+                type: integer
+                default: 100
+                description: OS disk size in GB.
+                minimum: 10
+                maximum: 65536
+              accelerator:
+                type: object
+                description: >-
+                  The VM size's GPU. Required for a pool whose InferenceClass
+                  claims a DRA driver other than dra.cpu, and rejected for any
+                  other pool. AKS installs the NVIDIA driver on the GPU's
+                  nodes, which carry its type in the modelplane.ai/gpu label.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: >-
+                      GPU accelerator type (e.g. nvidia-a100, nvidia-h100).
+                    minLength: 1
+                    maxLength: 63
+              fabric:
+                type: string
+                default: None
+                description: >-
+                  High-performance node-to-node fabric for multi-node engines.
+                  None uses standard VNet networking (TCP). InfiniBand relies
+                  on the pool's VM Scale Set placement group landing all its
+                  nodes on one physical InfiniBand fabric. It requires the
+                  AKSInfinibandSupport feature flag on the subscription and an
+                  InfiniBand-capable VM size (e.g. Standard_ND96isr_H100_v5),
+                  and needs the NVIDIA network operator on the cluster to
+                  expose RDMA devices to pods, which Modelplane installs when
+                  any pool's class sets InfiniBand.
+                enum:
+                - None
+                - InfiniBand
+          status:
+            type: object

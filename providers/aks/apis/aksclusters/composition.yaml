@@ -1,13 +1,13 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: aksclusters.infrastructure.modelplane.ai
+  name: aksclusters.aks.modelplane.ai
 spec:
   compositeTypeRef:
-    apiVersion: infrastructure.modelplane.ai/v1alpha1
+    apiVersion: aks.modelplane.ai/v1alpha1
     kind: AKSCluster
   mode: Pipeline
   pipeline:
   - functionRef:
-      name: modelplane-modelplanecompose-aks-cluster
+      name: modelplane-modelplane-akscompose-aks-cluster
     step: compose-aks-cluster

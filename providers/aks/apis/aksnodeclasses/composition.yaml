@@ -1,0 +1,15 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: aksnodeclasses.aks.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: aks.modelplane.ai/v1alpha1
+    kind: AKSNodeClass
+  mode: Pipeline
+  # Nothing to compose: compose-provisioned-cluster reads it. The step exists
+  # because an XR needs a Composition, and with nothing composed it's Ready.
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-akscompose-provisioned-cluster
+    step: compose-provisioned-cluster

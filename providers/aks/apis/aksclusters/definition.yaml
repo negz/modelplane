@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: aksclusters.infrastructure.modelplane.ai
+  name: aksclusters.aks.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: aks.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - aks
     kind: AKSCluster
     plural: aksclusters
     shortNames:
@@ -217,7 +217,8 @@ spec:
                       - InfiniBand
             type: object
           status:
-            description: AKSClusterStatus defines the observed state of AKSCluster.
+            description: >-
+              AKSClusterStatus defines the observed state of AKSCluster.
             properties:
               secrets:
                 type: array

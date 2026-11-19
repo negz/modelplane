@@ -1,0 +1,70 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: aksclusterconfigs.aks.modelplane.ai
+spec:
+  group: aks.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, aks]
+    kind: AKSClusterConfig
+    plural: aksclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: LOCATION
+      type: string
+      jsonPath: .spec.location
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An AKSClusterConfig says how to provision Azure Kubernetes Service
+          (AKS) clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [location]
+            properties:
+              location:
+                type: string
+                description: >-
+                  Azure region for the cluster (e.g. westeurope, eastus2).
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  AKS cluster Kubernetes version. Must be a version AKS
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how devices bind to pods) is generally
+                  available. A CPU pool needs 1.36 or newer: its cores are
+                  claimed as consumable capacity, which Kubernetes enables by
+                  default from 1.36 (DRAConsumableCapacity).
+                minLength: 1
+                maxLength: 16
+              credentials:
+                type: object
+                description: >-
+                  Azure ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the Azure API. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object
