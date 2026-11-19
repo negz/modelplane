@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: vultrclusters.infrastructure.modelplane.ai
+  name: vultrclusters.vultr.modelplane.ai
 spec:
-  group: infrastructure.modelplane.ai
+  group: vultr.modelplane.ai
   names:
     categories:
     - crossplane
     - modelplane
-    - infrastructure
+    - vultr
     kind: VultrCluster
     plural: vultrclusters
     shortNames:

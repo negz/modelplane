@@ -1,0 +1,70 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: vultrclusterconfigs.vultr.modelplane.ai
+spec:
+  group: vultr.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, vultr]
+    kind: VultrClusterConfig
+    plural: vultrclusterconfigs
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A VultrClusterConfig says how to provision Vultr Kubernetes Engine
+          (VKE) clusters for InferenceClusters that reference it from
+          spec.cluster.provisioned.configRef. Several InferenceClusters can
+          share one, and each gets a cluster of its own.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [region, kubernetesVersion]
+            properties:
+              region:
+                type: string
+                description: >-
+                  Vultr region for the cluster (e.g. ewr, fra). GPU plans and
+                  Vultr File System availability vary by region.
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                description: >-
+                  VKE cluster Kubernetes version. VKE requires an exact version
+                  string including the build suffix and accepts only the
+                  versions it currently offers; list them with vultr-cli
+                  kubernetes versions. Use a version where Dynamic Resource
+                  Allocation (how GPUs bind to pods) is generally available.
+                minLength: 1
+                maxLength: 16
+              credentials:
+                type: object
+                description: >-
+                  Vultr ProviderConfig or ClusterProviderConfig used to
+                  authenticate to the Vultr API. Defaults to the
+                  ClusterProviderConfig named default.
+                properties:
+                  type:
+                    type: string
+                    default: ClusterProviderConfig
+                    enum:
+                    - ProviderConfig
+                    - ClusterProviderConfig
+                  name:
+                    type: string
+                    default: default
+                    minLength: 1
+                    maxLength: 253
+          status:
+            type: object

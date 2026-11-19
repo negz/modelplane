@@ -1,0 +1,65 @@
+# What Modelplane's provider conformance suite needs to know about this
+# provider: how its device stack's pools look on a real cluster, so the suite
+# can fake them with KWOK, and what must land on them. See e2e/README.md.
+#
+# The device stack doesn't install NFD, because VKE's managed GPU Operator
+# runs its own on every GPU cluster. Its NFD would set the GPU labels on real
+# nodes, and here they're set up front. The device-plugin label is the one
+# compose-vultr-cluster sets to keep the GPU Operator's device plugin off GPU
+# nodes.
+deviceStack:
+  apiVersion: vultr.modelplane.ai/v1alpha1
+  kind: VultrDeviceStack
+pools:
+  gpu:
+    labels:
+      node.kubernetes.io/instance-type: vcg-a16-3c-32g-8vram
+      nvidia.com/gpu.deploy.device-plugin: "false"
+      modelplane.ai/pool: gpu-fake
+      modelplane.ai/gpu: a16
+      nvidia.com/gpu.present: "true"
+      feature.node.kubernetes.io/pci-10de.present: "true"
+      # VKE GPU nodes run Ubuntu 22.04, and the GPU Operator's NFD sets these.
+      feature.node.kubernetes.io/system-os_release.ID: ubuntu
+      feature.node.kubernetes.io/system-os_release.VERSION_ID: "22.04"
+    taintValue: "true"
+  cpu:
+    labels:
+      node.kubernetes.io/instance-type: vc2-6c-16gb
+      modelplane.ai/pool: cpu-fake
+      modelplane.ai/cpu: "true"
+draDrivers: [dra.cpu, gpu.nvidia.com]
+daemonSets:
+  nvidia-dra-driver/dra-driver-nvidia-gpu-kubelet-plugin: 2
+  dra-driver-cpu/mp-dra-driver-cpu: 2
+# An InferenceCluster provisioned by this provider: its cluster config, and a
+# node class for each pool role. The suite applies them, with InferenceClasses
+# and an InferenceCluster of its own, to a control plane with no Vultr
+# credentials, and checks the provider composes the cluster's managed
+# resources.
+provisioning:
+  config:
+    apiVersion: vultr.modelplane.ai/v1alpha1
+    kind: VultrClusterConfig
+    metadata:
+      name: conformance
+    spec:
+      region: ewr
+      kubernetesVersion: v1.36.6+1
+  nodeClasses:
+    accelerator:
+      apiVersion: vultr.modelplane.ai/v1alpha1
+      kind: VultrNodeClass
+      metadata:
+        name: conformance-gpu
+      spec:
+        plan: vcg-a16-3c-32g-8vram
+        accelerator:
+          type: a16
+    cpu:
+      apiVersion: vultr.modelplane.ai/v1alpha1
+      kind: VultrNodeClass
+      metadata:
+        name: conformance-cpu
+      spec:
+        plan: vc2-6c-16gb

@@ -1,0 +1,57 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: vultrnodeclasses.vultr.modelplane.ai
+spec:
+  group: vultr.modelplane.ai
+  names:
+    categories: [crossplane, modelplane, vultr]
+    kind: VultrNodeClass
+    plural: vultrnodeclasses
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: PLAN
+      type: string
+      jsonPath: .spec.plan
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A VultrNodeClass says how to provision a VKE node pool. An
+          InferenceClass references it from spec.nodeClassRef, and every
+          InferenceCluster node pool of that class on a Vultr cluster is
+          provisioned from it.
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [plan]
+            properties:
+              plan:
+                type: string
+                description: >-
+                  Vultr plan ID (e.g. vcg-l40s-16c-180g-48vram, vc2-6c-16gb).
+                  The plan determines the GPU model and count, if any. List
+                  plans with vultr-cli plans list.
+                minLength: 1
+                maxLength: 63
+              accelerator:
+                type: object
+                description: >-
+                  The plan's GPU. Required for a pool whose InferenceClass
+                  claims a DRA driver other than dra.cpu, and rejected for any
+                  other pool. The GPU's nodes carry its type in the
+                  modelplane.ai/gpu label.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: GPU accelerator type (e.g. nvidia-l40s, nvidia-a100).
+                    minLength: 1
+                    maxLength: 63
+          status:
+            type: object

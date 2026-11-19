@@ -1,0 +1,61 @@
+apiVersion: dev.crossplane.io/v1alpha1
+kind: Project
+metadata:
+  name: modelplane-vultr
+spec:
+  repository: xpkg.upbound.io/modelplane/modelplane-vultr
+  source: github.com/modelplaneai/modelplane
+  license: Apache-2.0
+  description: A Modelplane cluster provider for Vultr Kubernetes Engine (VKE).
+  architectures: [amd64, arm64]
+  crossplane:
+    version: '>=v2.3.0'
+  schemas:
+    languages: [python]
+  functions:
+  - source: Tarball
+    tarball:
+      name: compose-device-stack
+      pathPrefix: _output/functions/compose-device-stack
+  - source: Tarball
+    tarball:
+      name: compose-provisioned-cluster
+      pathPrefix: _output/functions/compose-provisioned-cluster
+  - source: Tarball
+    tarball:
+      name: compose-vultr-cluster
+      pathPrefix: _output/functions/compose-vultr-cluster
+  dependencies:
+  # Modelplane owns the ProvisionedCluster this provider implements. The floor
+  # is the first Modelplane release with the version of the contract this
+  # provider's Composition targets; capabilities on the Composition cover
+  # additions to it since.
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Configuration
+      package: xpkg.upbound.io/modelplane/modelplane
+      version: '>=v0.8.0-0'
+  - type: crd
+    git:
+      repository: https://github.com/crossplane/crossplane
+      ref: v2.3.7
+      path: cluster/crds
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-vultr
+      version: v1.0.1
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-helm
+      version: v1.5.1
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-kubernetes
+      version: v1.4.4

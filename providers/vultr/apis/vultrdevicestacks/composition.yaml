@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: vultrdevicestacks.vultr.modelplane.ai
+spec:
+  compositeTypeRef:
+    apiVersion: vultr.modelplane.ai/v1alpha1
+    kind: VultrDeviceStack
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: modelplane-modelplane-vultrcompose-device-stack
+    step: compose-device-stack

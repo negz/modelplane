@@ -26,7 +26,7 @@ from function import fn
 from google.protobuf import duration_pb2 as durationpb
 from google.protobuf import json_format, message
 from google.protobuf import struct_pb2 as structpb
-from models.ai.modelplane.infrastructure.vultrcluster import v1alpha1
+from models.ai.modelplane.vultr.vultrcluster import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
 
@@ -238,13 +238,16 @@ def _provider_config() -> fnv1.Resource:
 
 
 def _gpu_observer(*, ready: fnv1.Ready) -> fnv1.Resource:
-    """The composed Object observing the GPU validator DaemonSet."""
+    """The composed Object observing the GPU validator DaemonSet, labelled as the consumer its ProviderConfig's Usage selects."""
     return fnv1.Resource(
         resource=resource.dict_to_struct(
             {
                 "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
                 "kind": "Object",
-                "metadata": {"namespace": "modelplane-system"},
+                "metadata": {
+                    "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/usage-consumer": "gpu-observer"},
+                },
                 "spec": {
                     "managementPolicies": ["Observe"],
                     "providerConfigRef": {
@@ -273,6 +276,36 @@ def _gpu_observer(*, ready: fnv1.Ready) -> fnv1.Resource:
             }
         ),
         ready=ready,
+    )
+
+
+def _usage_provider_config() -> fnv1.Resource:
+    """The composed Usage holding the provider-kubernetes ProviderConfig until the GPU observer is gone."""
+    return fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {
+                "apiVersion": "protection.crossplane.io/v1beta1",
+                "kind": "Usage",
+                "metadata": {"namespace": "modelplane-system"},
+                "spec": {
+                    "of": {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "ProviderConfig",
+                        "resourceRef": {"name": "test-cluster-kubeconfig-55b57"},
+                    },
+                    "by": {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "Object",
+                        "resourceSelector": {
+                            "matchControllerRef": True,
+                            "matchLabels": {"modelplane.ai/usage-consumer": "gpu-observer"},
+                        },
+                    },
+                    "replayDeletion": True,
+                },
+            }
+        ),
+        ready=fnv1.READY_TRUE,
     )
 
 
@@ -345,6 +378,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(),
                     "gpu-observer": _gpu_observer(ready=fnv1.READY_UNSPECIFIED),
+                    "usage-pc-gpu-observer": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -457,6 +491,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(),
                     "gpu-observer": _gpu_observer(ready=fnv1.READY_UNSPECIFIED),
+                    "usage-pc-gpu-observer": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -532,6 +567,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(),
                     "gpu-observer": _gpu_observer(ready=fnv1.READY_UNSPECIFIED),
+                    "usage-pc-gpu-observer": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -571,6 +607,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(),
                     "gpu-observer": _gpu_observer(ready=fnv1.READY_UNSPECIFIED),
+                    "usage-pc-gpu-observer": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),
@@ -750,6 +787,7 @@ COMPOSE_CASES = [
                     ),
                     "provider-config-kubernetes": _provider_config(),
                     "gpu-observer": _gpu_observer(ready=fnv1.READY_TRUE),
+                    "usage-pc-gpu-observer": _usage_provider_config(),
                 },
             ),
             context=structpb.Struct(),

@@ -39,7 +39,8 @@ import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
-from models.ai.modelplane.infrastructure.vultrcluster import v1alpha1
+from modelplane_sdk import contract, usages
+from models.ai.modelplane.vultr.vultrcluster import v1alpha1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
@@ -48,17 +49,17 @@ from models.io.upbound.m.vultr.vke.kubernetesnodepool import v1beta1 as vkenodep
 
 # System pool injected into every VKE cluster to host control-plane
 # components (Envoy Gateway, LeaderWorkerSet, cert-manager, etc.). Not part of
-# the user-facing API - compose-inference-cluster only passes GPU pools.
+# the user-facing API - compose-provisioned-cluster passes only the
+# ProvisionedCluster's pools.
 # Vultr plans are region-gated.
 _SYSTEM_POOL_NAME = "system"
 _SYSTEM_POOL_PLAN = "vhp-8c-16gb-intel"
 _SYSTEM_POOL_MIN_NODES = 1
 _SYSTEM_POOL_MAX_NODES = 2
 
-# Labels written on VKE node pools' nodes. compose-model-deployment reads
-# these labels for GPU scheduling.
+# Label written on the GPU nodes of VKE node pools. compose-model-deployment
+# reads it for GPU scheduling.
 _LABEL_GPU = "modelplane.ai/gpu"
-_LABEL_POOL = "modelplane.ai/pool"
 
 # Silences the device plugin of VKE's managed GPU Operator add-on on
 # Modelplane's GPU nodes: the operator respects a pre-set false label
@@ -70,9 +71,6 @@ _LABEL_POOL = "modelplane.ai/pool"
 _LABEL_DEVICE_PLUGIN_KEY = "nvidia.com/gpu.deploy.device-plugin"
 _LABEL_DEVICE_PLUGIN_VALUE = "false"
 
-# Secret type written to XR status. compose-inference-cluster reads this to
-# wire the kubeconfig into a ClusterProviderConfig.
-_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
 
 # Key within the connection secret the Kubernetes cluster resource writes.
 # The provider publishes the decoded kubeconfig under this key once the
@@ -147,6 +145,8 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
         rsp = response.to(req)
         c = Composer(req, rsp)
         c.compose()
+        # Hold each ProviderConfig until everything composed through it is gone.
+        usages.protect_provider_configs(req, rsp)
         return rsp
 
 
@@ -295,12 +295,12 @@ class Composer:
             autoScaler=True,
             minNodes=_SYSTEM_POOL_MIN_NODES,
             maxNodes=_SYSTEM_POOL_MAX_NODES,
-            labels=[vkev1beta1.Label(key=_LABEL_POOL, value=_SYSTEM_POOL_NAME)],
+            labels=[vkev1beta1.Label(key=contract.LABEL_POOL, value=_SYSTEM_POOL_NAME)],
         )
 
     def _node_pool(self, pool: v1alpha1.NodePool) -> vkenodepoolv1beta1.KubernetesNodePool:
         """Map an XR node pool to a KubernetesNodePool managed resource."""
-        labels = [vkenodepoolv1beta1.Label(key=_LABEL_POOL, value=pool.name)]
+        labels = [vkenodepoolv1beta1.Label(key=contract.LABEL_POOL, value=pool.name)]
         if pool.role == "GPU" and pool.gpu:
             labels.append(vkenodepoolv1beta1.Label(key=_LABEL_GPU, value=pool.gpu.acceleratorType))
             labels.append(vkenodepoolv1beta1.Label(key=_LABEL_DEVICE_PLUGIN_KEY, value=_LABEL_DEVICE_PLUGIN_VALUE))
@@ -354,7 +354,7 @@ class Composer:
         status = v1alpha1.Status(
             secrets=[
                 v1alpha1.Secret(
-                    type=_SECRET_TYPE_KUBECONFIG,
+                    type=contract.SECRET_TYPE_KUBECONFIG,
                     name=_kubeconfig_secret_name(self.xr),
                     key=_SECRET_KEY_KUBECONFIG,
                 ),

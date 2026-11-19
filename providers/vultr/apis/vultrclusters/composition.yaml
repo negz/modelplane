@@ -1,13 +1,13 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: vultrclusters.infrastructure.modelplane.ai
+  name: vultrclusters.vultr.modelplane.ai
 spec:
   compositeTypeRef:
-    apiVersion: infrastructure.modelplane.ai/v1alpha1
+    apiVersion: vultr.modelplane.ai/v1alpha1
     kind: VultrCluster
   mode: Pipeline
   pipeline:
   - functionRef:
-      name: modelplane-modelplanecompose-vultr-cluster
+      name: modelplane-modelplane-vultrcompose-vultr-cluster
     step: compose-vultr-cluster
